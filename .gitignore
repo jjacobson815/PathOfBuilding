@@ -37,3 +37,46 @@ src/Data/TimelessJewelData/*.bin
 # Simplegraphic Debugging
 runtime/imgui.ini
 runtime/SimpleGraphic/SimpleGraphic.log
+.aider*
+# Added by code-review-graph
+.code-review-graph/
+
+# === Qt port (phase 0) ===
+# Build & deploy output
+build-win/
+dist/
+captures/
+
+# Scratch logs & analysis at repo root
+/build_*.log
+/capture_*.log
+/capture_*.txt
+/install_*.log
+/selftest_*.log
+/windeploy*.log
+/docker_build.log
+/cmake_diag.log
+/headless_test.log
+/smoke.log
+/main_status.log
+/pob_launch_test.log
+/verify_final.log
+/qmllint_out.txt
+/hist_tree.txt
+/objgrep.txt
+/pobp.txt
+/app_run.log
+/app_err.log
+/live_*.txt
+/live_log.txt
+
+# Scratch scripts at repo root
+/_*.py
+/_*.ps1
+
+# Local editor/agent settings
+.claude/settings.local.json
+
+# Leaked credentials / junk — DO NOT COMMIT (delete + rotate the key)
+/AQ.*.txt
+/$null
