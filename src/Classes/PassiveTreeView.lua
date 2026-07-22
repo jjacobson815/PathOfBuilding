@@ -953,6 +953,23 @@ function PassiveTreeViewClass:Draw(build, viewPort, inputEvents)
 			self:DrawAsset(tree.assets[overlay], scrX, scrY, scale)
 			SetDrawColor(1, 1, 1)
 		end
+		-- Show the allocation order number on nodes Suggest Path picked
+		local order = spec.suggestOrderMap and spec.suggestOrderMap[nodeId]
+		if order then
+			-- Draw at a high layer so the number sits on top of the node artwork
+			-- (SimpleGraphic renders text and sprites per-layer; the node art is at layer 25).
+			SetDrawLayer(nil, 90)
+			local txt = tostring(order)
+			-- 'scale' is ~0.5 at default zoom, so use a readable minimum and let the
+			-- number grow with zoom so it stays legible on every node.
+			local fs = m_max(22, 24 * scale)
+			DrawString(scrX - 1, scrY, "CENTER_X", fs, "VAR", "^x000000" .. txt)
+			DrawString(scrX + 1, scrY, "CENTER_X", fs, "VAR", "^x000000" .. txt)
+			DrawString(scrX, scrY - 1, "CENTER_X", fs, "VAR", "^x000000" .. txt)
+			DrawString(scrX, scrY + 1, "CENTER_X", fs, "VAR", "^x000000" .. txt)
+			DrawString(scrX, scrY, "CENTER_X", fs, "VAR", "^xFFFF00" .. txt)
+			SetDrawLayer(nil, 25)
+		end
 		if self.searchStrResults[nodeId] then
 			-- Node matches the search string, show the highlight circle
 			SetDrawLayer(nil, 30)

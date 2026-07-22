@@ -270,6 +270,16 @@ local TreeTabClass = newClass("TreeTab", "ControlHost", function(self, build)
 		self.controls.powerReportList.shown = not self.controls.powerReportList.shown
 	end)
 
+	-- Suggest Path: greedily allocate the best passive nodes for the selected power stat
+	self.controls.suggestPathPoints = new("EditControl", { "LEFT", self.controls.powerReport, "RIGHT" }, { 8, 0, 70, 20 },
+		"", "pts", "%D", nil)
+	self.controls.suggestPathPoints.tooltipText = "Total passive points for the from-scratch suggested path (blank = your character's level-based available points)"
+	self.controls.suggestPath = new("ButtonControl", { "LEFT", self.controls.suggestPathPoints, "RIGHT" }, { 8, 0, 120, 20 },
+		"Suggest Path", function()
+		self:SuggestPath()
+	end)
+	self.controls.suggestPath.tooltipText = "Replace your tree with an alternate path built from scratch for the selected stat (DPS / Life / EHP / etc.). Ctrl+Z reverts to your original tree."
+
 	-- Power Report List
 	local yPos = self.controls.treeHeatMap.y == 0 and self.controls.specSelect.height + 4 or self.controls.specSelect.height * 2 + 8
 	self.controls.powerReportList = new("PowerReportListControl", { "TOPLEFT", self.controls.specSelect, "BOTTOMLEFT" }, { 0, yPos, 700, 170 }, function(selectedNode)
@@ -291,7 +301,12 @@ local TreeTabClass = newClass("TreeTab", "ControlHost", function(self, build)
 			return
 		end
 
-		local message = percent and string.format("Building Power Report... (%d%%)", percent) or "Building Power Report..."
+		local message
+		if self.suggestPowerBuild then
+			message = percent and string.format("Building alternate path... (%d%%)", percent) or "Building alternate path..."
+		else
+			message = percent and string.format("Building Power Report... (%d%%)", percent) or "Building Power Report..."
+		end
 
 		self.controls.powerReportList.label = message
 
@@ -311,11 +326,23 @@ local TreeTabClass = newClass("TreeTab", "ControlHost", function(self, build)
 		local powerStat = self.build.calcsTab.powerStat or data.powerStatList[1]
 		local report = self:BuildPowerReportList(powerStat)
 		self.controls.powerReportList:SetReport(powerStat, report)
+		-- Record which stat the node.power estimates were built for, so SuggestPath can
+		-- detect when the cached data is stale (built for a different stat).
+		self.build.calcsTab.powerStatLastBuilt = powerStat
 
 		if self.powerBuilderToastId then
 			ToastNotification:ClearDismissed(self.powerBuilderToastId)
 			ToastNotification:Remove(self.powerBuilderToastId)
 			self.powerBuilderToastId = nil
+		end
+
+		-- If a path suggestion was requested before the power data finished building, run it now
+		if self.runSuggestAfterPower then
+			self.runSuggestAfterPower = false
+			self:SuggestPath()
+			-- The alternate-path rebuild is done; clear the flag so any later heat-map
+			-- rebuild shows the normal "Building Power Report" toast again.
+			self.suggestPowerBuild = false
 		end
 	end
 
@@ -1046,6 +1073,187 @@ function TreeTabClass:SetPowerCalc(powerStat)
 		ToastNotification:ClearDismissed(self.powerBuilderToastId)
 		ToastNotification:Remove(self.powerBuilderToastId, true)
 		self.powerBuilderToastId = nil
+	end
+end
+
+-- Greedily assemble a connected passive path that maximises the selected power stat
+-- (DPS / Defence / EHP / etc.) within a point budget, then allocate it on the tree.
+-- Reuses the per-node power estimates produced by CalcsTabClass:PowerBuilder().
+function TreeTabClass:SuggestPath()
+	local spec = self.build.spec
+	local calcs = self.build.calcsTab
+
+	-- The cached node.power estimates are only valid for the stat they were last built
+	-- with. If the selected stat changed (or the data isn't built yet), rebuild first,
+	-- then re-run this once it completes (see powerBuilderCallback).
+	if not calcs.powerBuilderInitialized or not calcs.powerStat or calcs.powerStatLastBuilt ~= calcs.powerStat then
+		self.runSuggestAfterPower = true
+		calcs.powerBuilderInitialized = false
+		self:SetPowerCalc(calcs.powerStat or data.powerStatList[3])
+		return
+	end
+
+	local stat = calcs.powerStat
+	local maxDepth = calcs.nodePowerMaxDepth
+
+	-- Some stats (e.g. Full DPS) are only meaningful when the build has a configured main
+	-- skill. If the build's base value for the stat is zero, every node's gain is also zero,
+	-- so there is nothing to suggest -- say so instead of a confusing "no beneficial nodes".
+	if stat.stat and calcs.mainOutput and not (calcs.mainOutput[stat.stat] and calcs.mainOutput[stat.stat] ~= 0) then
+		ToastNotification:Add(string.format(
+			"Suggested Path: %s is 0 for this build. Configure a main skill (Skills tab, enable 'Include in Full DPS') or pick Life / Effective Hit Pool in the heat-map dropdown.",
+			stat.label or stat.stat))
+		return
+	end
+
+	-- Stage 1: build an ALTERNATE path from scratch. Save the current tree (Ctrl+Z restores
+	-- it), wipe all allocations, then rebuild the power estimates for the empty tree and
+	-- re-enter to run the greedy allocator grown out from the class start.
+	if not self.suggestFromScratch then
+		spec:AddUndoState()
+		spec:ResetNodes()
+		self.suggestFromScratch = true
+		self.runSuggestAfterPower = true
+		-- Mark this rebuild so the progress toast reads "Building alternate path..." instead
+		-- of the normal heat-map "Building Power Report..." message.
+		self.suggestPowerBuild = true
+		-- Start a fresh order map for this Suggest Path run (read by the tree renderer).
+		-- Kept on the spec (not on node objects) so it survives any node-field resets.
+		spec.suggestOrderMap = { }
+		self:SetPowerCalc(stat)
+		return
+	end
+
+	-- Stage 2: power has been rebuilt for the empty tree. Greedily allocate the best
+	-- *reachable* node (one with a connected path from the current allocation) so the
+	-- result is always a single connected tree grown out from the class start.
+	self.suggestFromScratch = false
+
+	local usedMax = self.build:GetAvailableSkillPoints()
+	local remaining = tonumber(self.controls.suggestPathPoints.buf)
+	if not remaining or remaining <= 0 then
+		remaining = usedMax
+	end
+	if remaining <= 0 then
+		ToastNotification:Add("Suggested Path: no points to allocate.")
+		return
+	end
+
+	-- Remember the starting budget so we can report points used vs available at the end.
+	local budget = remaining
+
+	spec:BuildAllDependsAndPaths()
+
+	-- For "lower is better" stats (e.g. Taken Damage) we want to minimise the stat,
+	-- so a beneficial node produces a negative gain.
+	local lowerIsBetter = stat.lowerIsBetter
+	-- Deterministic selection: when two nodes give the same gain we must not rely on the
+	-- (unstable) pairs() iteration order to break the tie, otherwise Suggest Path produces a
+	-- different tree on every run. We define a total order: highest gain first, then the
+	-- shorter path (keeps the tree compact / localised to the start), then the lower node id
+	-- as a final, fully deterministic tie-break.
+	local function better(cand, cur)
+		if cand.gain == nil then
+			return false
+		elseif cur.node == nil then
+			return true
+		elseif lowerIsBetter then
+			if cand.gain ~= cur.gain then return cand.gain < cur.gain end
+		else
+			if cand.gain ~= cur.gain then return cand.gain > cur.gain end
+		end
+		-- Equal gain: prefer the shorter path (more localised), then the lower node id
+		if cand.pathLen ~= cur.pathLen then return cand.pathLen < cur.pathLen end
+		return cand.node.id < cur.node.id
+	end
+
+	ConPrintf("SuggestPath(fromScratch): stat=%s base=%s maxDepth=%s budget=%d",
+		stat.label, tostring(stat.stat and calcs.mainOutput and calcs.mainOutput[stat.stat]),
+		tostring(maxDepth), remaining)
+
+	local suggested = { }
+	local allocOrder = 0  -- running counter for numbering every allocated node in build order
+	local guard = 0
+	local candCount, maxGainSeen, maxGainNode = 0, nil, nil
+	while remaining > 0 and guard < 2000 do
+		guard = guard + 1
+		local best = { node = nil, gain = nil, cost = nil, pathLen = nil }
+		for nodeId, node in pairs(spec.nodes) do
+			if (node.type == "Normal" or node.type == "Notable" or node.type == "Keystone")
+				and not node.alloc and not node.ascendancyName and node.modKey ~= ""
+				and not calcs.mainEnv.grantedPassives[nodeId] then
+				-- Only consider nodes that are actually reachable from the current allocation;
+				-- this keeps the result a single connected tree grown from the class start.
+				if node.path then
+					local pathLen = #node.path
+					if not maxDepth or maxDepth >= pathLen then
+						-- pathPower already includes the cost of pathing to the node; fall back to
+						-- singleStat for adjacent nodes where pathPower isn't set.
+						local gain = stat.stat and (node.power.pathPower or node.power.singleStat) or node.power.offence
+						if gain ~= nil then
+							candCount = candCount + 1
+							if maxGainSeen == nil or gain > maxGainSeen then
+								maxGainSeen, maxGainNode = gain, node.name
+							end
+						end
+						-- Actual point cost is the number of still-unallocated nodes along the path.
+						local cost = 0
+						for _, pNode in ipairs(node.path) do
+							if not pNode.alloc then
+								cost = cost + 1
+							end
+						end
+						local cand = { node = node, gain = gain, cost = cost, pathLen = pathLen }
+						if better(cand, best) then
+							best = cand
+						end
+					end
+				end
+			end
+		end
+		-- Stop when there is no beneficial node left, or the best one no longer fits the budget
+		if not best.node or best.gain == nil or (lowerIsBetter and best.gain >= 0) or (not lowerIsBetter and best.gain <= 0) then
+			break
+		end
+		if best.cost > remaining then
+			break
+		end
+		-- AllocNode allocates the node and its whole connected path; node.path is recomputed
+		-- from the current allocation each time, so the result stays a single connected tree.
+		-- IMPORTANT: capture node.path BEFORE AllocNode -- AllocNode calls
+		-- BuildAllDependsAndPaths() which resets best.node.path to empty (it becomes a
+		-- root), so reading it afterwards would yield nothing to number.
+		local path = best.node.path or { }
+		spec:AllocNode(best.node)
+		remaining = remaining - best.cost
+		t_insert(suggested, best.node)
+		-- Number EVERY node this step allocated, in true allocation order. node.path is
+		-- [chosenNode, ..., connectionNode(already allocated)], so walking it forwards
+		-- matches the order AllocNode allocates them. This makes the overlay show the
+		-- build order across all allocated nodes, not just the greedy "decision" nodes.
+		for i = 1, #path do
+			local pNode = path[i]
+			if pNode.alloc and not spec.suggestOrderMap[pNode.id] then
+				allocOrder = allocOrder + 1
+				spec.suggestOrderMap[pNode.id] = allocOrder
+			end
+		end
+	end
+
+	-- The authoritative node count is what's actually allocated on the tree, not the number
+	-- of greedy steps (#suggested) -- AllocNode also allocates the whole path to each chosen
+	-- node. CountAllocNodes() is the same number PoB shows in the "Points Used" readout.
+	local allocatedCount = spec:CountAllocNodes()
+	local usedPoints = budget - remaining
+	ConPrintf("SuggestPath(fromScratch): candidates=%d maxGain=%s node=%s greedySteps=%d actualAllocated=%d pointsUsed=%d/%d",
+		candCount, tostring(maxGainSeen), tostring(maxGainNode), #suggested, allocatedCount, usedPoints, budget)
+
+	if allocatedCount > 0 then
+		self.build.buildFlag = true
+		local statLabel = stat.label or "Offence"
+		ToastNotification:Add(string.format("Suggested Path: allocated %d nodes (%d/%d points) for %s (from scratch). Ctrl+Z to revert to your original tree.", allocatedCount, usedPoints, budget, statLabel))
+	else
+		ToastNotification:Add("Suggested Path: no beneficial nodes found for the selected stat.")
 	end
 end
 

@@ -1552,12 +1552,22 @@ function PassiveSpecClass:BuildAllDependsAndPaths()
 			node.distanceToClassStart = 0
 		end
 	end
+	-- Process roots in a deterministic (id-sorted) order. The path BFS only overwrites a
+	-- node's path when a strictly shorter one is found, so for nodes equidistant from two
+	-- allocated roots the LAST root processed wins. pairs() order is unstable across runs,
+	-- which made node.path (and therefore Suggest Path's cost/pathLen) non-deterministic and
+	-- produced a different tree every run. Sorting by id makes the result stable.
+	local roots = { }
 	for id, node in pairs(self.allocNodes) do
 		if #node.intuitiveLeapLikesAffecting == 0 or node.connectedToStart then
-			self:BuildPathFromNode(node)
-			if node.isJewelSocket or node.expansionJewel then
-				self:SetNodeDistanceToClassStart(node)
-			end
+			t_insert(roots, node)
+		end
+	end
+	table.sort(roots, function(a, b) return a.id < b.id end)
+	for _, node in ipairs(roots) do
+		self:BuildPathFromNode(node)
+		if node.isJewelSocket or node.expansionJewel then
+			self:SetNodeDistanceToClassStart(node)
 		end
 	end
 
