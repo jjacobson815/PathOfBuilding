@@ -237,7 +237,14 @@ int LuaEngine::l_pob_removeDir(lua_State* L) {
 int LuaEngine::l_pob_isKeyDown(lua_State* L) {
     bool down = false;
 #ifndef POB_NO_GUI
-    if (qGuiApp && lua_gettop(L) >= 1 && lua_isstring(L, 1)) {
+    // Must confirm a real QGuiApplication: the `qGuiApp` macro is a static_cast
+    // that stays non-null under a plain QCoreApplication (e.g. `pob-qt --headless`),
+    // so calling QGuiApplication::queryKeyboardModifiers() there crashes in
+    // Qt6Gui. qobject_cast returns null unless the instance really is GUI. The
+    // engine calls IsKeyDown during boot (devMode CTRL/ALT check), so this path
+    // IS hit headlessly.
+    auto* gui = qobject_cast<QGuiApplication*>(QCoreApplication::instance());
+    if (gui && lua_gettop(L) >= 1 && lua_isstring(L, 1)) {
         QString k = QString::fromUtf8(lua_tostring(L, 1)).toUpper();
         Qt::KeyboardModifiers m = QGuiApplication::queryKeyboardModifiers();
         if (k == "CTRL")       down = m.testFlag(Qt::ControlModifier);
