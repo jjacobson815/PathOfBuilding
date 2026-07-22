@@ -117,17 +117,31 @@ See [[host-api-contract]] priority list. All small, all real bugs.
   call (`importTab:TryFetchCharacterList`) the Qt host never invokes** (QML nav
   switches views via `setActiveView`), so Build.lua keeps the viewList seam
   unchanged — re-homed to the QML import view (Phase 11). CRLF preserved;
-  `.gitattributes` untouched. Verified: self-test exit 0, `--capture` all 10.
+  `.gitattributes` untouched.
+  → **CORRECTION (found during 0.5 verification): the coupled unit is bigger than
+  Modules/+Data/.** The initial 0.4 resync left `Classes/` on the old snapshot,
+  which crashed build-mode init (`ItemDBControl` iterated `data.powerStatList`
+  with `pairs()` while the resynced `Data.lua` added a function-valued entry that
+  legacy handles with `ipairs`) → no `calcsTab`. Completed in a follow-up: 18 pure
+  `Classes/` copies, +GemTooltip/PoEAPI/TradeHelpers, −CompareTradeHelpers, 3-way
+  merge of the Suggest Path trio, **+`runtime/lua/sha2.lua`+`socket.lua`** (needed
+  transitively by the new PoEAPI/ImportTab). The resync unit is **Modules/ + Data/
+  + Classes/ + coupled runtime/lua deps** — `HOST_CONTRACT.md` updated. Verified:
+  pob-selftest 0, pob-qt --headless 0, `--capture` all 10.
 
 ## Part 0.5 — Remove demo/scaffold code from the production path
 
-- [ ] Delete the 800 ms "Test Build" rename `QTimer` in `main.cpp`. (S)
-- [ ] Remove hardcoded stale paths: `main.cpp` `mainLog` (`c:/Users/User/source/
-  repos/PathOfBuilding/...` — wrong repo root), `/workdir/*_result.txt` Docker
-  outputs, `deploy_deps.ps1` (delete — superseded by `deploy-win-standalone.sh`).
-  Parameterize `C:\msys64` in `run_pob_fusion.bat`. (S)
-- [ ] Sweep repo-root litter (`build_*.log`, `_patch.py`, `_verify_*.py`,
-  `_img_analyze*.ps1`) into a scratch dir or delete. (S)
+- [x] Delete the 800 ms "Test Build" rename `QTimer` in `main.cpp`. (S)
+  → also removed the dead `POB_TEST_LIST_FLOW` block + `testListFlow` context
+  property, and the `POB_TEST_FRAMELOOP` `/workdir` sidecar write (exit code
+  carries the result).
+- [x] Remove hardcoded stale paths. (S) → `mainLog` → OS temp dir (was a
+  wrong-repo absolute path writing nowhere); `/workdir/*_result.txt` writes gone;
+  `deploy_deps.ps1` deleted (no refs). `C:\msys64` in `run_pob_fusion.bat`
+  parameterized via an overridable `MSYS64` var.
+- [x] Sweep repo-root litter into a scratch dir or delete. (S)
+  → 101 files (build logs + one-off `_*.py`/`_*.ps1`) moved to a gitignored
+  `_scratch/`; tracked upstream files (`changelog.txt`, `help.txt`) left in place.
 
 ## Part 0.6 — Stand up the gates + baseline
 

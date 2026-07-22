@@ -88,13 +88,26 @@ during the July 2026 analysis; trust code over any older plan doc.
   deferred to Phase 3). Packaging guard: `pack-manifest.cmake` stamps the dist
   manifest so installed builds don't trip devMode (deploy-verify in Phase 14).
   Capture harness hardened to wait for the final grab (was dropping LIST's PNG).
-- **0.4 done** — resynced `Modules/`+`Data/` to the legacy snapshot (calc parity):
-  16 pure copies, +ModScalability/TradeSiteStats/ItemSlotHelper, −ModImplicit;
-  seam files 3-way merged in LF space (Build.lua unchanged — its only drift was a
-  legacy-UI call the Qt host never invokes). Procedure + the 4 sanctioned seams
-  documented in `app/lua/HOST_CONTRACT.md`. Self-test exit 0, `--capture` all 10.
-- **Remaining:** 0.5 (remove scaffold/litter), 0.6 (gates + baseline). Do NOT
-  start Phase 1 until Phase 0's gate passes and the user approves.
+- **0.4 done** — resynced `src/` to the legacy snapshot for calc parity. **The
+  coupled unit is `Modules/`+`Data/`+`Classes/`+ runtime/lua deps** — NOT just
+  Modules/+Data/ (the plan under-scoped it). The initial Modules/+Data/ pass
+  crashed build-mode init (`ItemDBControl` `pairs` vs a function-valued
+  `powerStatList` entry legacy handles with `ipairs`) → no `calcsTab`. Completed:
+  ~34 pure copies across Modules/Data/Classes, seam + Suggest-Path files 3-way
+  merged in LF space, +sha2.lua/socket.lua runtime deps. `HOST_CONTRACT.md` has the
+  corrected procedure. **Gotcha:** `pob-qt --headless | tail` reads *tail's* exit
+  code — always check the binary's exit directly.
+- **0.3 follow-up fix** — `IsKeyDown` crashed `pob-qt --headless` (queried GUI
+  keyboard modifiers under a QCoreApplication; `qGuiApp` static_cast stays non-null).
+  Now guarded with `qobject_cast<QGuiApplication*>`. Was latent since 0.3.
+- **0.5 done** — removed production-path scaffold (800 ms Test-Build timer, dead
+  LIST_FLOW/FRAMELOOP `/workdir` hooks, wrong-repo `mainLog` path), parameterized
+  `C:\msys64`, deleted `deploy_deps.ps1`, swept 101 root litter files → gitignored
+  `_scratch/`.
+- **Gate now GREEN:** pob-selftest 0, pob-qt --headless 0, `--capture` all 10.
+- **Remaining:** 0.6 (gates + baseline: capture baseline, Linux CI, calc-parity
+  harness — OPEN DECISION: 18 Qt vs 26 legacy System specs as the parity baseline).
+  Do NOT start Phase 1 until Phase 0's gate passes and the user approves.
 
 1. **The C++/Lua bridge is solid and selftest-verified.** `pob-selftest.exe` exits
    0 across 15 headless checks (engine boot, calc output, zlib/HTTP-shim requires,

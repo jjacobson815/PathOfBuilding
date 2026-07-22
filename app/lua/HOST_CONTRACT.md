@@ -34,17 +34,26 @@ fetch → Phase 11), not in the viewList seam.
 
 ## Resync procedure (upstream league updates — `Modules/` + `Data/` atomically)
 
-`src/` drifts from the maintained legacy checkout each league. `Modules/*.lua` and
-`Data/*.lua` are **coupled — always move them as a unit**. Procedure (Phase 0.4,
-repeat per upstream sync; Phase 15 owns the recurring cadence):
+`src/` drifts from the maintained legacy checkout each league. The coupled unit is
+**`Modules/` + `Data/` + `Classes/` + the runtime Lua deps they pull in**
+(`runtime/lua/*.lua`) — **always move them together**. (Phase 0.4 first tried
+Modules/+Data/ alone; that crashed build-mode init because `Classes/ItemDBControl`
+iterated `data.powerStatList` with `pairs()` while the resynced `Data.lua` added a
+function-valued entry legacy handles with `ipairs` — and the new `Classes/PoEAPI`
+needs `runtime/lua/sha2.lua`+`socket.lua`.) Procedure (repeat per upstream sync;
+Phase 15 owns the recurring cadence):
 
-1. **Classify** every `Modules/`+`Data/` file CR-normalized: `changed` / `qt-only`
-   / `legacy-only` (`diff -q <(tr -d '\r' <qt) <(tr -d '\r' <legacy)`). Most of the
-   "N files differ" is CRLF-only noise — normalize before diffing.
+1. **Classify** every `Modules/`+`Data/`+`Classes/` file CR-normalized: `changed` /
+   `qt-only` / `legacy-only` (`diff -q <(tr -d '\r' <qt) <(tr -d '\r' <legacy)`).
+   Most of the "N files differ" is CRLF-only noise — normalize before diffing. Then
+   diff `runtime/lua/` too and copy any legacy modules the new code `require`s.
 2. **Copy** pure (never-Qt-edited) changed files legacy→qt; **add** legacy-only
    files; **remove** qt-only files superseded upstream (e.g. `Data/ModImplicit.lua`
    was merged into `Data/ModItemExclusive.lua`).
-3. **3-way merge the four seam files** so upstream drift and the seam combine:
+3. **3-way merge every Qt-edited file** so upstream drift and the local change
+   combine: the four Modules seams (Build/Main/Data/UITheme) **and** the Suggest
+   Path `Classes/` trio (TreeTab/PassiveSpec/PassiveTreeView). Find them with
+   `git diff --name-only <port-commit> HEAD -- src/`. Merge:
    `git merge-file -p <qt-current> <pristine-base> <legacy>` **in LF space**
    (git blobs are LF; the worktree is CRLF — merging mismatched EOLs conflicts the
    whole file). Write the result back as CRLF (`sed 's/$/\r/'`).
