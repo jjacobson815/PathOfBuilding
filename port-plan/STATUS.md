@@ -9,11 +9,12 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**Phase 0 — Foundation, Provenance & Correctness** → `phases/PHASE-0-foundation.md`
-
-Nothing in the plan is implemented yet; the plan itself is new. Start at Phase 0.
-When a phase completes, change this pointer and add a one-paragraph summary to the
-**Done log** below.
+**Phase 0 — COMPLETE (implementation).** Local gate GREEN (pob-selftest 0,
+pob-qt --headless 0, `--capture` all 10). **Next: Phase 1 — QML Component Library
+& Shell** (`phases/PHASE-1-component-library.md`) — but per the stop-at-phase-
+boundaries rule, **do NOT start Phase 1 until the user approves**. Before Phase 1,
+a `dev` push should confirm CI green (`test.yml` busted + `qt-selftest.yml`), which
+can't be run on the Windows workstation.
 
 ---
 
@@ -104,10 +105,17 @@ during the July 2026 analysis; trust code over any older plan doc.
   LIST_FLOW/FRAMELOOP `/workdir` hooks, wrong-repo `mainLog` path), parameterized
   `C:\msys64`, deleted `deploy_deps.ps1`, swept 101 root litter files → gitignored
   `_scratch/`.
-- **Gate now GREEN:** pob-selftest 0, pob-qt --headless 0, `--capture` all 10.
-- **Remaining:** 0.6 (gates + baseline: capture baseline, Linux CI, calc-parity
-  harness — OPEN DECISION: 18 Qt vs 26 legacy System specs as the parity baseline).
-  Do NOT start Phase 1 until Phase 0's gate passes and the user approves.
+- **0.6 done** — capture baseline (`app/tests/capture-baseline/`, 10 PNGs); Linux
+  CI `qt-selftest.yml` (build `Dockerfile.dev` + run `run-selftest.sh`; **needs a
+  push to confirm green**); calc-parity baseline = **legacy** (spec/System → 25
+  specs, asserted by busted in `test.yml`); `tools/qt_calc_parity.lua` loads all 5
+  TestBuilds through the Qt bridge (exit 0) — the 3.13 snapshots are stale vs 3.28
+  (~59% match, expected; `#builds` excluded from default busted). Stale plans
+  bannered; `.clinerules` fixed.
+- **Gate now GREEN locally:** pob-selftest 0, pob-qt --headless 0, `--capture` all 10.
+- **Phase 0 implementation COMPLETE.** Verification pending only on CI (a `dev`
+  push) and packaged-app/OneDrive behavior (Phase 14/Phase 1). **STOP: await user
+  approval before starting Phase 1.**
 
 1. **The C++/Lua bridge is solid and selftest-verified.** `pob-selftest.exe` exits
    0 across 15 headless checks (engine boot, calc output, zlib/HTTP-shim requires,
