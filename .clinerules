@@ -1,0 +1,14 @@
+# Path of Building — Agent Rules
+
+For architectural context and the current status, read `port-plan/STATUS.md`
+first, then the active phase file it names. (The `.obsidian-vault/01_Wiki/` notes
+referenced here previously do not exist — removed.)
+
+Prefer the code-review-graph MCP tools for codebase exploration before Grep/Glob
+(see `CLAUDE.md`).
+
+When the user refers to "launching the app" (or similar phrasing like "run the
+app", "start the GUI", "open the program"), they mean the Qt/QML port (entry
+`app/src/main.cpp` + host `app/lua/pob_host.lua`, binary `build-win/pob-qt.exe`)
+unless they explicitly say "legacy". Do NOT assume the legacy SimpleGraphic GUI
+(`src/Launch.lua`) unless the word "legacy" is specified.

@@ -1,3 +1,5 @@
+> **SUPERSEDED** — historical tree-render notes. Current status: `port-plan/STATUS.md`; tree fixes landed (see the Done log). Kept only for the hard-verification methodology.
+
 # Tree Node & Asset Visibility — Rendering Plan
 
 > Goal: rework the passive-tree renderer in the Qt/QML port so loaded node

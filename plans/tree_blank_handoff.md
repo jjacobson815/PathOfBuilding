@@ -1,3 +1,5 @@
+> **SUPERSEDED** — historical tree-render notes. Current status: `port-plan/STATUS.md`; tree fixes landed (see the Done log). Kept only for the hard-verification methodology.
+
 # Hand-off: pob-qt passive tree renders blank (canvas width = 0)
 
 ## Definitive root cause (confirmed via diagnostics)
