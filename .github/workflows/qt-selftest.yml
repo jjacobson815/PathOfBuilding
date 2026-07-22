@@ -1,0 +1,29 @@
+name: Qt Self-Test
+# Phase 0.6 gate: build the Qt6/QML + LuaJIT frontend in the dev image and run
+# the headless bridge self-test + offscreen GUI smoke test (docker/run-selftest.sh).
+# Complements test.yml (which runs the host-agnostic busted calc-parity specs).
+on:
+  push:
+    branches: [ dev ]
+  pull_request:
+    branches: [ dev ]
+  workflow_dispatch:
+jobs:
+  qt-selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.dev
+          tags: pob-qt-dev:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Headless self-test + offscreen GUI smoke test
+        run: docker run --rm -v "${{ github.workspace }}:/workdir" -w /workdir pob-qt-dev:ci sh docker/run-selftest.sh
