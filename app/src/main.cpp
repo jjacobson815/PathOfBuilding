@@ -83,8 +83,10 @@ static void capLog(const QString& path, const QString& msg) {
 }
 
 // File-based milestone log for main() (GUI-subsystem binary: qDebug is invisible).
+// Writes to the OS temp dir; the old path hardcoded a wrong absolute repo root
+// (a different checkout), so the log silently went nowhere.
 static void mainLog(const QString& msg) {
-    QFile f("c:/Users/User/source/repos/PathOfBuilding/main_status.log");
+    QFile f(QDir::tempPath() + "/pob-qt-main.log");
     if (f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
         QTextStream ts(&f);
         ts << QDateTime::currentDateTime().toString("hh:mm:ss.zzz") << " " << msg << "\n";
@@ -293,16 +295,10 @@ int main(int argc, char** argv) {
 
             qDebug().noquote() << "[FRAMELOOP TEST] idleOk =" << idleOk
                      << " mutOk =" << mutOk;
-            bool ok = idleOk && mutOk;
-            QFile rf("/workdir/frameloop_result.txt");
-            if (rf.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                QTextStream ts(&rf);
-                ts << "idleOk=" << idleOk << "\n";
-                ts << "mutOk=" << mutOk << "\n";
-                ts << "ok=" << (ok ? "1" : "0") << "\n";
-                rf.close();
-            }
-            return ok ? 0 : 1;
+            // Result is carried by the process exit code (0 pass / 1 fail); the
+            // former /workdir/frameloop_result.txt sidecar file was Docker-path-
+            // hardcoded and read by nothing.
+            return (idleOk && mutOk) ? 0 : 1;
         }
 
         return engine.runSelfTest() ? 0 : 1;
@@ -442,13 +438,6 @@ int main(int argc, char** argv) {
     qml.rootContext()->setContextProperty("compareModel", compareModel);
     qml.rootContext()->setContextProperty("partyModel", partyModel);
 
-    // Phase 3 verification hook (opt-in). When POB_TEST_LIST_FLOW is set, main.cpp
-    // drives the LIST -> BUILD flow headlessly (via the same LuaEngine slots the
-    // QML buttons call) and logs the resulting mode + buildName, so the offscreen
-    // GUI test can prove the bridge without clicking.
-    bool testListFlow = !qEnvironmentVariableIsEmpty("POB_TEST_LIST_FLOW");
-    qml.rootContext()->setContextProperty("testListFlow", testListFlow);
-
     // Phase 2b: build save/load bridge. The model delegates to the LuaEngine
     // save/load slots (which call the pob_* Lua globals). On a successful load
     // it emits buildLoaded(); we refresh the typed models immediately so the UI
@@ -539,43 +528,6 @@ int main(int argc, char** argv) {
     // The Lua backend's OnFrame/rebuild is already driven synchronously inside
     // each bridge method (the pob_* helpers set buildFlag and pump OnFrame), so
     // no polling timer is required. The signal->refresh wiring lives just below.
-
-    // Phase 2a verification: prove a Lua state change propagates to the typed
-    // model's NOTIFY signal. We rename the build via the bridge, then refresh
-    // directly (the frame loop would also catch it on the next tick). The model
-    // logs the change in BuildModel::refresh(). We revert afterwards so the
-    // default build name is restored for normal use.
-    QTimer::singleShot(800, &app, [&]() {
-        engine.setBuildName("Test Build");
-        buildModel->refresh(&engine); // detects buildName change -> emits dataChanged
-        QTimer::singleShot(800, &app, [&]() {
-            engine.setBuildName("Unnamed build");
-            buildModel->refresh(&engine);
-        });
-    });
-
-    // Phase 3 verification (opt-in, POB_TEST_LIST_FLOW=1): drive the LIST -> BUILD
-    // flow synchronously (no event loop needed) using the same LuaEngine slots the
-    // QML buttons call (setListMode / createBuild), then log + persist the resulting
-    // mode + buildModel.buildName to prove the bridge switches mode and updates the
-    // typed model live. Runs before app.exec() so it is deterministic and flushes.
-    if (testListFlow) {
-        engine.setListMode();
-        engine.runCallback("OnFrame"); // initialise LIST mode
-        engine.createBuild();          // SetMode BUILD + OnFrame (initialises BUILD)
-        buildModel->refresh(&engine);  // sync typed model with the new build
-        const QString mode = engine.currentMode();
-        const QString bn = buildModel->buildName();
-        qDebug().noquote() << "[TEST] list-flow: currentMode=" << mode
-                 << " buildName=" << bn;
-        QFile rf("/workdir/guitest_result.txt");
-        if (rf.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            QTextStream ts(&rf);
-            ts << "currentMode=" << mode << "\n";
-            ts << "buildName=" << bn << "\n";
-            rf.close();
-        }
-    }
 
     // Phase 8: offscreen capture harness. Iterate every BUILD view (plus LIST
     // mode) and grab the window to <captureDir>/<id>.png so the style-regression
