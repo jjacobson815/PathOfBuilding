@@ -14,6 +14,8 @@ local m_floor = math.floor
 local m_abs = math.abs
 local s_format = string.format
 
+local uiTheme = LoadModule("Modules/UITheme")
+
 local buildMode = new("ControlHost")
 
 local function InsertIfNew(t, val)
@@ -75,6 +77,7 @@ function buildMode:Init(dbFileName, buildName, buildXML, convertBuild, importLin
 	self.spectreList = { }
 	self.timelessData = { jewelType = { }, conquerorType = { }, devotionVariant1 = 1, devotionVariant2 = 1, jewelSocket = { }, fallbackWeightMode = { }, searchList = "", searchListFallback = "", searchResults = { }, sharedResults = { } }
 	self.viewMode = "TREE"
+	self.sideBarCollapsed = main.sideBarCollapsed
 	self.characterLevel = m_min(m_max(main.defaultCharLevel or 1, 1), 100)
 	self.targetVersion = liveTargetVersion
 	self.bandit = "None"
@@ -131,6 +134,10 @@ function buildMode:Init(dbFileName, buildName, buildXML, convertBuild, importLin
 	self.controls.saveAs = new("ButtonControl", {"LEFT",self.controls.save,"RIGHT"}, {8, 0, 70, 20}, "Save As", function()
 		self:OpenSaveAsPopup()
 	end)
+	self.controls.toggleSideBar = new("ButtonControl", {"LEFT",self.controls.saveAs,"RIGHT"}, {8, 0, 24, 20}, "<<", function()
+		self.sideBarCollapsed = not self.sideBarCollapsed
+	end)
+	self.controls.toggleSideBar.label = function() return self.sideBarCollapsed and ">>" or "<<" end
 	self.controls.saveAs.enabled = function()
 		return self.dbFileName
 	end
@@ -432,44 +439,52 @@ function buildMode:Init(dbFileName, buildName, buildXML, convertBuild, importLin
 		return buildNameConditional() and 60 or 36
 	end
 
-	self.controls.modeImport = new("ButtonControl", {"TOPLEFT",self.anchorSideBar,"TOPLEFT"}, {0, 0, 134, 20}, "Import/Export Build", function()
-		self.viewMode = "IMPORT"
-	end)
-	self.controls.modeImport.locked = function() return self.viewMode == "IMPORT" end
-	self.controls.modeNotes = new("ButtonControl", {"LEFT",self.controls.modeImport,"RIGHT"}, {4, 0, 58, 20}, "Notes", function()
-		self.viewMode = "NOTES"
-	end)
-	self.controls.modeNotes.locked = function() return self.viewMode == "NOTES" end
-	self.controls.modeConfig = new("ButtonControl", {"TOPRIGHT",self.anchorSideBar,"TOPLEFT"}, {300, 0, 100, 20}, "Configuration", function()
-		self.viewMode = "CONFIG"
-	end)
-	self.controls.modeConfig.locked = function() return self.viewMode == "CONFIG" end
-	self.controls.modeTree = new("ButtonControl", {"TOPLEFT",self.anchorSideBar,"TOPLEFT"}, {0, 26, 72, 20}, "Tree", function()
-		self.viewMode = "TREE"
-	end)
-	self.controls.modeTree.locked = function() return self.viewMode == "TREE" end
-	self.controls.modeSkills = new("ButtonControl", {"LEFT",self.controls.modeTree,"RIGHT"}, {4, 0, 72, 20}, "Skills", function()
-		self.viewMode = "SKILLS"
-	end)
-	self.controls.modeSkills.locked = function() return self.viewMode == "SKILLS" end
-	self.controls.modeItems = new("ButtonControl", {"LEFT",self.controls.modeSkills,"RIGHT"}, {4, 0, 72, 20}, "Items", function()
-		self.viewMode = "ITEMS"
-	end)
-	self.controls.modeItems.locked = function() return self.viewMode == "ITEMS" end
-	self.controls.modeCalcs = new("ButtonControl", {"LEFT",self.controls.modeItems,"RIGHT"}, {4, 0, 72, 20}, "Calcs", function()
-		self.viewMode = "CALCS"
-	end)
-	self.controls.modeCalcs.locked = function() return self.viewMode == "CALCS" end
-	self.controls.modeParty = new("ButtonControl", {"TOPLEFT",self.anchorSideBar,"TOPLEFT"}, {0, 52, 72, 20}, "Party", function()
-		self.viewMode = "PARTY"
-	end)
-	self.controls.modeParty.locked = function() return self.viewMode == "PARTY" end
-	self.controls.modeCompare = new("ButtonControl", {"LEFT",self.controls.modeParty,"RIGHT"}, {4, 0, 72, 20}, "Compare", function()
-		self.viewMode = "COMPARE"
-	end)
-	self.controls.modeCompare.locked = function() return self.viewMode == "COMPARE" end
+	-- View registry: drives the sidebar tab strip, keyboard shortcuts and Draw dispatch
+	self.viewList = {
+		{ id = "TREE",    label = "Tree",    key = "1", group = "primary", tab = "treeTab" },
+		{ id = "SKILLS",  label = "Skills",  key = "2", group = "primary", tab = "skillsTab" },
+		{ id = "ITEMS",   label = "Items",   key = "3", group = "primary", tab = "itemsTab" },
+		{ id = "CALCS",   label = "Calcs",   key = "4", group = "primary", tab = "calcsTab" },
+		{ id = "CONFIG",  label = "Config",  key = "5", group = "utility", tab = "configTab" },
+		{ id = "NOTES",   label = "Notes",   key = "6", group = "utility", tab = "notesTab" },
+		{ id = "IMPORT",  label = "Import",  key = "7", group = "utility", tab = "importTab" },
+		{ id = "PARTY",   label = "Party",   key = "8", group = "utility", tab = "partyTab" },
+		{ id = "COMPARE", label = "Compare", key = "9", group = "utility", tab = "compareTab" },
+	}
+
+	-- Build the data-driven tab strip from the registry
+	local navRowY = { primary = 0, utility = 26 }
+	local navPrev = { primary = nil, utility = nil }
+	for _, view in ipairs(self.viewList) do
+		local viewId = view.id
+		local w = uiTheme.navWidth[view.group]
+		local anchor
+		if navPrev[view.group] then
+			anchor = { "LEFT", navPrev[view.group], "RIGHT" }
+		else
+			anchor = { "TOPLEFT", self.anchorSideBar, "TOPLEFT" }
+		end
+		local rect = { navPrev[view.group] and uiTheme.navButtonGap or 0, navPrev[view.group] and 0 or navRowY[view.group], w, uiTheme.navButtonHeight }
+		self.controls["mode"..viewId] = new("ButtonControl", anchor, rect, view.label, function()
+			self.viewMode = viewId
+		end)
+		self.controls["mode"..viewId].locked = function() return self.viewMode == viewId end
+		navPrev[view.group] = self.controls["mode"..viewId]
+	end
+
+	-- Divider between the primary and utility tab groups
+	self.controls.navDivider = new("Control", {"TOPLEFT", self.anchorSideBar, "TOPLEFT"}, {0, 22, uiTheme.sideBarWidth - 8, 2})
+	self.controls.navDivider.shown = function() return not self.sideBarCollapsed end
+	self.controls.navDivider.Draw = function(control)
+		local x, y = control:GetPos()
+		SetDrawColor(unpack(uiTheme.colour.sideBarLine))
+		DrawImage(nil, x, y, uiTheme.sideBarWidth - 8, 1)
+	end
+
+	-- Hide all sidebar content (nav + stat overview) when the sidebar is collapsed
+	self.anchorSideBar.shown = function() return not self.sideBarCollapsed end
 	-- Skills
-	self.controls.mainSkillLabel = new("LabelControl", {"TOPLEFT",self.anchorSideBar,"TOPLEFT"}, {0, 80, 300, 16}, "^7Main Skill:")
+	self.controls.mainSkillLabel = new("LabelControl", {"TOPLEFT",self.anchorSideBar,"TOPLEFT"}, {0, 52, 300, 16}, "^7Main Skill:")
 	self.controls.mainSocketGroup = new("DropDownControl", {"TOPLEFT",self.controls.mainSkillLabel,"BOTTOMLEFT"}, {0, 2, 300, 18}, nil, function(index, value)
 		self.mainSocketGroup = index
 		self.modFlag = true
@@ -558,7 +573,8 @@ function buildMode:Init(dbFileName, buildName, buildXML, convertBuild, importLin
 		self.modFlag = true
 		self.buildFlag = true
 	end)
-	self.controls.statBoxAnchor = new("Control", {"TOPLEFT",self.controls.mainSkillMinionSkill,"BOTTOMLEFT",true}, {0, 2, 0, 0})
+	self.controls.statHeader = new("LabelControl", {"TOPLEFT",self.controls.mainSkillMinionSkill,"BOTTOMLEFT",true}, {0, 6, 0, 16}, "^7Stat Overview")
+	self.controls.statBoxAnchor = new("Control", {"TOPLEFT",self.controls.statHeader,"BOTTOMLEFT"}, {0, 2, 0, 0})
 	self.controls.statBox = new("TextListControl", {"TOPLEFT",self.controls.statBoxAnchor,"BOTTOMLEFT"}, {0, 2, 300, 0}, {{x=170,align="RIGHT_X"},{x=174,align="LEFT"}})
 	self.controls.statBox.height = function(control)
 		local x, y = control:GetPos()
@@ -906,6 +922,28 @@ function buildMode:EstimatePlayerProgress()
 		"Required Level: "..level.."\nEstimated Progress:\nAct: "..self.Act.."\nQuestpoints: "..acts[act].questPoints.."\nExtra Skillpoints: "..actExtra(act, extra)..labSuggest
 end
 
+-- Returns the number of normal passive skill points a character of the current
+-- level would actually have available (base points from levelling + quest points
+-- for the act reached + any extra points from bandits/items). This is used by the
+-- "Suggest Path" feature so it doesn't allocate more nodes than the character could
+-- realistically have at their level.
+function buildMode:GetAvailableSkillPoints()
+local extra = self.calcsTab.mainOutput and self.calcsTab.mainOutput.ExtraPoints or 0
+local level = self.characterLevel or 1
+-- Find the highest act whose level threshold the character has reached
+local questPoints = 0
+for act = 1, #acts do
+	if level >= acts[act].level then
+		questPoints = acts[act].questPoints
+	else
+		break
+	end
+end
+-- Base points: 1 per level from level 1 (level 1 = 0 points), capped at 99 (level 100)
+local basePoints = m_min(level, 100) - 1
+return basePoints + questPoints + extra
+end
+
 function buildMode:CanExit(mode)
 	if not self.unsaved then
 		return true
@@ -1153,20 +1191,13 @@ function buildMode:OnFrame(inputEvents)
 					else
 						self:CloseBuild()
 					end
-				elseif event.key == "1" then
-					self.viewMode = "TREE"
-				elseif event.key == "2" then
-					self.viewMode = "SKILLS"
-				elseif event.key == "3" then
-					self.viewMode = "ITEMS"
-				elseif event.key == "4" then
-					self.viewMode = "CALCS"
-				elseif event.key == "5" then
-					self.viewMode = "CONFIG"
-				elseif event.key == "6" then
-					self.viewMode = "NOTES"
-				elseif event.key == "7" then
-					self.viewMode = "PARTY"
+				elseif event.key:match("^%d$") then
+					for _, view in ipairs(self.viewList) do
+						if view.key == event.key then
+							self.viewMode = view.id
+							break
+						end
+					end
 				end
 			end
 		end
@@ -1206,31 +1237,18 @@ function buildMode:OnFrame(inputEvents)
 	self:RefreshSkillSelectControls(self.controls, self.mainSocketGroup, "")
 
 	-- Draw contents of current tab
-	local sideBarWidth = 312
+	local sideBarWidth = self.sideBarCollapsed and 0 or uiTheme.sideBarWidth
 	local tabViewPort = {
 		x = sideBarWidth,
-		y = 32,
+		y = uiTheme.topBarHeight,
 		width = main.screenW - sideBarWidth,
-		height = main.screenH - 32
+		height = main.screenH - uiTheme.topBarHeight
 	}
-	if self.viewMode == "IMPORT" then
-		self.importTab:Draw(tabViewPort, inputEvents)  
-	elseif self.viewMode == "NOTES" then
-		self.notesTab:Draw(tabViewPort, inputEvents)
-	elseif self.viewMode == "PARTY" then
-		self.partyTab:Draw(tabViewPort, inputEvents)
-	elseif self.viewMode == "CONFIG" then
-		self.configTab:Draw(tabViewPort, inputEvents)
-	elseif self.viewMode == "TREE" then
-		self.treeTab:Draw(tabViewPort, inputEvents)
-	elseif self.viewMode == "SKILLS" then
-		self.skillsTab:Draw(tabViewPort, inputEvents)
-	elseif self.viewMode == "ITEMS" then
-		self.itemsTab:Draw(tabViewPort, inputEvents)
-	elseif self.viewMode == "CALCS" then
-		self.calcsTab:Draw(tabViewPort, inputEvents)
-	elseif self.viewMode == "COMPARE" then
-		self.compareTab:Draw(tabViewPort, inputEvents)
+	for _, view in ipairs(self.viewList) do
+		if self.viewMode == view.id then
+			self[view.tab]:Draw(tabViewPort, inputEvents)
+			break
+		end
 	end
 
 	self.unsaved = self.modFlag or self.notesTab.modFlag or self.partyTab.modFlag or self.configTab.modFlag or self.treeTab.modFlag or self.treeTab.searchFlag or self.spec.modFlag or self.skillsTab.modFlag or self.itemsTab.modFlag or self.calcsTab.modFlag
@@ -1238,20 +1256,31 @@ function buildMode:OnFrame(inputEvents)
 	SetDrawLayer(5)
 
 	-- Draw top bar background
-	SetDrawColor(0.2, 0.2, 0.2)
-	DrawImage(nil, 0, 0, main.screenW, 28)
-	SetDrawColor(0.85, 0.85, 0.85)
-	DrawImage(nil, 0, 28, main.screenW, 4)
-	DrawImage(nil, main.screenW/2 - 2, 0, 4, 28)
+	SetDrawColor(unpack(uiTheme.colour.topBarBg))
+	DrawImage(nil, 0, 0, main.screenW, uiTheme.topBarHeight - 4)
+	SetDrawColor(unpack(uiTheme.colour.topBarLine))
+	DrawImage(nil, 0, uiTheme.topBarHeight - 4, main.screenW, 4)
+	DrawImage(nil, main.screenW/2 - 2, 0, 4, uiTheme.topBarHeight - 4)
 
-	-- Draw side bar background
-	SetDrawColor(0.1, 0.1, 0.1)
-	DrawImage(nil, 0, 32, sideBarWidth - 4, main.screenH - 32)
-	SetDrawColor(0.85, 0.85, 0.85)
-	DrawImage(nil, sideBarWidth - 4, 32, 4, main.screenH - 32)
-
+	-- Draw side bar background (only when expanded)
+	if sideBarWidth > 0 then
+		SetDrawColor(unpack(uiTheme.colour.sideBarBg))
+		DrawImage(nil, 0, uiTheme.topBarHeight, sideBarWidth - 4, main.screenH - uiTheme.topBarHeight)
+		SetDrawColor(unpack(uiTheme.colour.sideBarLine))
+		DrawImage(nil, sideBarWidth - 4, uiTheme.topBarHeight, 4, main.screenH - uiTheme.topBarHeight)
+	end
 
 	self:DrawControls(main.viewPort)
+
+	-- Draw a clear active-tab accent on the sidebar nav strip
+	if not self.sideBarCollapsed then
+		local active = self.controls["mode"..self.viewMode]
+		if active and active:IsShown() then
+			local x, y = active:GetPos()
+			SetDrawColor(unpack(uiTheme.colour.navActiveAccent))
+			DrawImage(nil, x - 3, y, 3, uiTheme.navButtonHeight)
+		end
+	end
 end
 
 -- Opens the game version conversion popup

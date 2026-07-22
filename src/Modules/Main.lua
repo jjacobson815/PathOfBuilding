@@ -104,6 +104,7 @@ function main:Init()
 	self.colorHighlight = defaultColorCodes.HIGHLIGHT
 	self.showThousandsSeparators = true
 	self.edgeSearchHighlight = true
+	self.sideBarCollapsed = false
 	self.thousandsSeparator = ","
 	self.decimalSeparator = "."
 	self.defaultItemAffixQuality = 0.5
@@ -566,6 +567,9 @@ function main:LoadSettings(ignoreBuild)
 				if node.attrib.showThousandsSeparators then
 					self.showThousandsSeparators = node.attrib.showThousandsSeparators == "true"
 				end
+				if node.attrib.sideBarCollapsed then
+					self.sideBarCollapsed = node.attrib.sideBarCollapsed == "true"
+				end
 				if node.attrib.thousandsSeparator then
 					self.thousandsSeparator = node.attrib.thousandsSeparator
 				end
@@ -746,6 +750,7 @@ function main:SaveSettings()
 		showTitlebarName = tostring(self.showTitlebarName),
 		betaTest = tostring(self.betaTest),
 		edgeSearchHighlight = tostring(self.edgeSearchHighlight),
+		sideBarCollapsed = tostring(self.sideBarCollapsed),
 		defaultGemQuality = tostring(self.defaultGemQuality or 0),
 		defaultCharLevel = tostring(self.defaultCharLevel or 1),
 		defaultItemAffixQuality = tostring(self.defaultItemAffixQuality or 0.5),
