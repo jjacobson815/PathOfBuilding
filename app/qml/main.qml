@@ -706,6 +706,9 @@ Window {
                         // atlas statusChanged all call requestBufferRender(). This keeps
                         // idle CPU at 0% (no polling, no OnFrame pump).
                     }
+                    } // end treeView Item — Part 0.2: un-nest the tooltip + non-TREE
+                      // views below so they are siblings under contentArea, not children
+                      // of treeView (whose visible: activeView==="TREE" hid them all).
 
                     // Phase 4b: hover tooltip bound to the node under the cursor.
                     // Sibling of treeView (not a child) so treeView's clip doesn't
@@ -1519,8 +1522,6 @@ Window {
                     }
                 }
 
-                }
-
                 // Phase 5e: Notes/Import/Compare/Party (utility) tabs.
                 // These four views are bound to the engine tabs via the
                 // notesController / compareModel / partyModel context properties
@@ -1533,8 +1534,7 @@ Window {
                 // NOTES: a notes editor bound to notesController.notes.
                 Item {
                     id: notesView
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    anchors.fill: parent
                     visible: activeView === "NOTES"
                     clip: true
                     Flickable {
@@ -1558,8 +1558,7 @@ Window {
                 // IMPORT: paste a build share code and load it via the engine.
                 Item {
                     id: importView
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    anchors.fill: parent
                     visible: activeView === "IMPORT"
                     clip: true
                     property string importStatus: ""
@@ -1594,8 +1593,7 @@ Window {
                 // COMPARE: list of comparison build entries.
                 Item {
                     id: compareView
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    anchors.fill: parent
                     visible: activeView === "COMPARE"
                     clip: true
                     ListView {
@@ -1624,8 +1622,7 @@ Window {
                 // PARTY: list of present party buff categories.
                 Item {
                     id: partyView
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    anchors.fill: parent
                     visible: activeView === "PARTY"
                     clip: true
                     ListView {
