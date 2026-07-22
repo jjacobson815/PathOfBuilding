@@ -71,6 +71,14 @@ Full detail in `reference/00-architecture.md`. The short list:
 This is the "pertinent work already done" record. Verified against code + captures
 during the July 2026 analysis; trust code over any older plan doc.
 
+**▶ Phase 0.1 done (2026-07-22): the port is under version control.** Branch
+`phase-0-foundation` off `dev`, 4 commits: gitignore `b139c06d`, host seams
+(Build/Main/Data/UITheme) `bcb46232`, port `cf500ea4`, Suggest Path split out
+`a60a9d35`. Loose ends resolved: `runtime-win32.zip` restored to match upstream
+(it's the legacy SimpleGraphic runtime bundle — a Phase 14/15 decommission
+candidate, NOT to be dropped in Phase 0); a leaked Google API key in a repo-root
+`AQ.*.txt` was deleted by the user (gitignore still guards `AQ.*.txt`).
+
 1. **The C++/Lua bridge is solid and selftest-verified.** `pob-selftest.exe` exits
    0 across 15 headless checks (engine boot, calc output, zlib/HTTP-shim requires,
    save/load XML round-trip, build library, tree data/alloc/search, items, skills,

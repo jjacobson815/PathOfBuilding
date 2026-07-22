@@ -19,16 +19,20 @@ all small, high-leverage fixes — do them before building anything new.
 
 ## Part 0.1 — Version control the port
 
-- [ ] Create a branch; `git add` `app/`, `TreeData/`, `docker/`, `tools/`,
+- [x] Create a branch; `git add` `app/`, `TreeData/`, `docker/`, `tools/`,
   `scripts/`, `plans/`, deploy scripts, and this `port-plan/` folder. (S)
-- [ ] Separate legacy-engine feature work from port work in distinct commits: the
+  → branch `phase-0-foundation`, commit `cf500ea4` (deploy scripts live under `app/`).
+- [x] Separate legacy-engine feature work from port work in distinct commits: the
   uncommitted `src/` edits include a **"Suggest Path"** feature (`TreeTab.lua`
   +210, `PassiveSpec.lua`, `PassiveTreeView.lua`) that is unrelated to the port —
   commit it separately (or stash) so port provenance is clean. (S)
-- [ ] Extend `.gitignore`: `build-win/`, `dist/` DLLs, `captures/`, `build_*.log`,
+  → Suggest Path in its own commit `a60a9d35`; host seams (Build/Main/Data/UITheme)
+  in `bcb46232`.
+- [x] Extend `.gitignore`: `build-win/`, `dist/` DLLs, `captures/`, `build_*.log`,
   root `_*.py`/`_*.ps1` scratch files. Keep `src/Data/TimelessJewelData/*.bin`
   ignored (runtime cache). (S)
-- [ ] Restore the 5 locally-deleted timeless-jewel `.zip` LUTs:
+  → commit `b139c06d`; also ignored a leaked Google API-key file (see STATUS note).
+- [x] Restore the 5 locally-deleted timeless-jewel `.zip` LUTs:
   `git checkout -- src/Data/TimelessJewelData/`. (S)
 
 ## Part 0.2 — Fix the QML view regressions (makes the app usable)
