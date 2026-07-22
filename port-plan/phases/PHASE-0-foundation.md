@@ -40,15 +40,23 @@ all small, high-leverage fixes — do them before building anything new.
 Verified defects in `app/qml/main.qml` (line numbers drift — re-confirm against the
 live file; the *shape* of each bug is what matters):
 
-- [ ] **Un-nest 4 views.** `skillsView`, `itemsView`, `calcsView`, `configView`
+- [x] **Un-nest 4 views.** `skillsView`, `itemsView`, `calcsView`, `configView`
   are accidentally children of the `treeView` Item (which is `visible:
   activeView==="TREE"`), so they can never show. Move them to be siblings under
   `contentArea`. (S)
-- [ ] **Fix 4 zero-sized views.** `notesView`, `importView`, `compareView`,
+  → Also affected `nodeTooltip` + the generic non-TREE content. Fix: close
+  `treeView` right after its `Canvas`; the six blocks reparent to `contentArea`.
+  Commit `<qml fix>`. (The file's own comments claimed this was already done — it
+  was NOT; verified with a brace-balanced parser.)
+- [x] **Fix 4 zero-sized views.** `notesView`, `importView`, `compareView`,
   `partyView` use `Layout.fillWidth/fillHeight` under a plain `Rectangle` parent
   (meaningless → 0×0). Switch to `anchors.fill: parent`. (S)
-- [ ] Re-run `--capture` and confirm all 10 views (TREE, LIST, + 8) render content,
+- [x] Re-run `--capture` and confirm all 10 views (TREE, LIST, + 8) render content,
   not just sidebar+topbar. (S)
+  → `failed=0`, 10 PNGs @1100×720. skills/items/calcs/config/import show content;
+  notes/party/compare correctly sized but empty (no data in the default build).
+  NOTE for Phase 8: the CALCS view has a section-label/stat-row overlap (within-
+  view layout bug, out of scope for 0.2).
 
 ## Part 0.3 — Fix host-contract correctness bugs
 
