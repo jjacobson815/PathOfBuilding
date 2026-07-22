@@ -88,8 +88,13 @@ during the July 2026 analysis; trust code over any older plan doc.
   deferred to Phase 3). Packaging guard: `pack-manifest.cmake` stamps the dist
   manifest so installed builds don't trip devMode (deploy-verify in Phase 14).
   Capture harness hardened to wait for the final grab (was dropping LIST's PNG).
-- **Remaining:** 0.4 (resync `src/`), 0.5 (remove scaffold/litter), 0.6 (gates +
-  baseline). Do NOT start Phase 1 until Phase 0's gate passes and the user approves.
+- **0.4 done** — resynced `Modules/`+`Data/` to the legacy snapshot (calc parity):
+  16 pure copies, +ModScalability/TradeSiteStats/ItemSlotHelper, −ModImplicit;
+  seam files 3-way merged in LF space (Build.lua unchanged — its only drift was a
+  legacy-UI call the Qt host never invokes). Procedure + the 4 sanctioned seams
+  documented in `app/lua/HOST_CONTRACT.md`. Self-test exit 0, `--capture` all 10.
+- **Remaining:** 0.5 (remove scaffold/litter), 0.6 (gates + baseline). Do NOT
+  start Phase 1 until Phase 0's gate passes and the user approves.
 
 1. **The C++/Lua bridge is solid and selftest-verified.** `pob-selftest.exe` exits
    0 across 15 headless checks (engine boot, calc output, zlib/HTTP-shim requires,

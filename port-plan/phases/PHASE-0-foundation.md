@@ -101,17 +101,23 @@ See [[host-api-contract]] priority list. All small, all real bugs.
 
 ## Part 0.4 — Resolve the `src/` divergence contract
 
-- [ ] Document (in a short `app/lua/HOST_CONTRACT.md` or a `pob_host.lua` header)
+- [x] Document (in a short `app/lua/HOST_CONTRACT.md` or a `pob_host.lua` header)
   that `Build.lua` `viewList` registry, `Main.lua` `sideBarCollapsed`, `Data.lua`
   `TotalDotDPS`, and `UITheme.lua` are **sanctioned host seams**, not engine logic.
   Going forward, prefer `pob_host.lua` over new `src/` edits. (S)
-- [ ] **Resync Qt `src/` to the legacy snapshot** so calc parity is meaningful:
-  legacy has `ModScalability.lua` + `TradeSiteStats.lua` and merged implicits into
-  `ModItemExclusive.lua`; Qt still has separate `ModImplicit.lua`. Move `Modules/*`
-  and `Data/*` **together**. Normalize CRLF/LF before diffing so the real changes
-  aren't buried under line-ending noise; never let `.gitattributes` rewrite the
-  binary `.zip` LUTs. Re-apply the four sanctioned host seams on top. (M — mechanical
-  but must be careful; see [[data-and-assets]].)
+  → `app/lua/HOST_CONTRACT.md` (seam table + resync procedure).
+- [x] **Resync Qt `src/` to the legacy snapshot** so calc parity is meaningful. (M)
+  → Content-classified `Modules/`+`Data/` CR-normalized (most "diffs" were CRLF
+  noise). Copied 16 pure calc/data files; **added** ModScalability, TradeSiteStats,
+  ItemSlotHelper; **removed** ModImplicit (merged into ModItemExclusive; runtime
+  Data.lua no longer loads it — only the dev-only Export tool still names it, and
+  Export is not ported). Seam files 3-way merged **in LF space** (blobs are LF,
+  worktree CRLF — merging mismatched EOLs conflicts the whole file): Main.lua +
+  Data.lua merged clean; **Build.lua's only legacy drift was one legacy-UI button
+  call (`importTab:TryFetchCharacterList`) the Qt host never invokes** (QML nav
+  switches views via `setActiveView`), so Build.lua keeps the viewList seam
+  unchanged — re-homed to the QML import view (Phase 11). CRLF preserved;
+  `.gitattributes` untouched. Verified: self-test exit 0, `--capture` all 10.
 
 ## Part 0.5 — Remove demo/scaffold code from the production path
 
