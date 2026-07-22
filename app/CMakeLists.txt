@@ -105,4 +105,11 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/lua DESTINATION dist/ru
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/lua-utf8.dll
               ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/lua51.dll
         DESTINATION dist/runtime)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../manifest.xml DESTINATION dist)
+# Manifest: do NOT copy the repo-root manifest verbatim. It has a <Version> with
+# no branch/platform, which Launch.lua treats as a source-checkout marker and
+# enables devMode -> userPath routed into the source tree, defeating the
+# Documents/Path of Building user-data fix (Part 0.3). pack-manifest.cmake stamps
+# branch+platform onto the packaged copy (so the installed app is not seen as a
+# checkout) and writes an installed.cfg marker into dist/src.
+install(CODE "set(POB_MANIFEST_SRC \"${CMAKE_CURRENT_SOURCE_DIR}/../manifest.xml\")")
+install(SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/pack-manifest.cmake)
