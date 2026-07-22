@@ -1,0 +1,59 @@
+# Path of Building — Qt/QML + LuaJIT dev sandbox
+#
+# Isolated build environment for the UI modernization (Phase 0+).
+# Adds Qt6 (QML/Qt Quick) on top of the same LuaJIT toolchain the project's
+# test image already uses, so the Lua calc engine loads unchanged.
+#
+# Build:
+#   docker build -f docker/Dockerfile.dev -t pob-qt-dev .
+# Run (mount repo read-write, drop into shell):
+#   docker run --rm -it -v "%CD%:/workdir" -w /workdir pob-qt-dev
+FROM alpine:3.18
+
+# --- Base system deps -------------------------------------------------------
+RUN apk add --no-cache \
+        build-base \
+        cmake \
+        ninja \
+        git \
+        tar \
+        readline-dev \
+        curl \
+        curl-dev \
+        zlib-dev \
+        unzip \
+        openssl \
+        openssl-dev \
+        # Qt6 (QML / Qt Quick)
+        qt6-qtbase-dev \
+        qt6-qtdeclarative-dev \
+        qt6-qtsvg-dev \
+        qt6-qttools-dev \
+        qt6-qt5compat-dev
+
+# --- LuaJIT (same commit as the project's test Dockerfile) ------------------
+WORKDIR /opt
+RUN git clone https://github.com/LuaJIT/LuaJIT && \
+    cd LuaJIT && git checkout 871db2c84ecefd70a850e03a6c340214a81739f0 && \
+    make && make install
+
+# --- LuaRocks + modules the calc engine expects -----------------------------
+RUN wget https://luarocks.org/releases/luarocks-3.7.0.tar.gz && \
+    tar xf luarocks-3.7.0.tar.gz && \
+    cd luarocks-3.7.0 && ./configure --with-lua=/usr/local && make && make install
+# luautf8 provides utf8.reverse/gsub/find/sub/match/next which the calc engine
+# uses (LuaJIT's built-in utf8 lib does not). Build from source against LuaJIT
+# (luarocks cannot fetch the manifest in this environment).
+RUN git clone --depth 1 https://github.com/starwing/luautf8 && \
+    cd luautf8 && \
+    gcc -shared -fPIC -I/usr/local/include/luajit-2.1 -o utf8.so lutf8lib.c -lm && \
+    mkdir -p /usr/local/lib/lua/5.1 && \
+    cp utf8.so /usr/local/lib/lua/5.1/
+
+# LuaJIT's shared lib path for the C++ host to link against
+ENV LUAJIT_LIB=/usr/local/lib
+ENV LUAJIT_INCLUDE_DIR=/usr/local/include/luajit-2.1
+ENV PATH="/usr/local/bin:${PATH}"
+
+WORKDIR /workdir
+CMD ["sh"]

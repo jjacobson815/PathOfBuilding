@@ -1,0 +1,229 @@
+#pragma once
+#include <QObject>
+#include <QString>
+#include <QVariant>
+#include <QVariantMap>
+#include <QStringList>
+#include <lua.hpp>
+
+// Embeds a LuaJIT state and bridges the Path of Building calc engine to Qt.
+//
+// The engine expects a set of "SimpleGraphic" engine globals (ConPrintf,
+// SetMainObject, LoadModule, DrawImage, ...). Those are provided by a small
+// Lua bootstrap (lua/pob_host.lua) which routes the few that matter through
+// the C `pob` bridge table registered here. This reuses the exact seam the
+// project's own src/HeadlessWrapper.lua already uses for headless runs.
+class LuaEngine : public QObject {
+    Q_OBJECT
+public:
+    explicit LuaEngine(QObject* parent = nullptr);
+    ~LuaEngine();
+
+    // srcDir: repo/src, runtimeDir: repo/runtime, hostFile: lua/pob_host.lua
+    bool init(const QString& srcDir, const QString& runtimeDir, const QString& hostFile);
+    lua_State* state() const { return m_L; }
+
+    // Read a global Lua value (by name) as a QVariant.
+    QVariant getGlobal(const QString& name) const;
+    // Read a dotted path, e.g. "main.modes.BUILD.viewList".
+    QVariant getPath(const QString& path) const;
+    // Call a global Lua function, returning its (first) result.
+    QVariant callGlobal(const QString& name, const QVariantList& args = {});
+    // Call a method on a Lua object reached via a dotted path.
+    QVariant callMethod(const QString& objectPath, const QString& method,
+                        const QVariantList& args = {});
+
+    // Convenience accessors for the QML shell.
+    Q_INVOKABLE QStringList modeNames() const;
+    Q_INVOKABLE QVariant viewList() const { return getPath("main.modes.BUILD.viewList"); }
+
+    // Phase 1c: active BUILD-view control (sidebar). The engine tracks the
+    // active view in buildMode.viewMode (a string id such as "TREE"/"ITEMS");
+    // there is no SetActiveTab method — the engine simply assigns
+    // `self.viewMode = viewId` (see src/Modules/Build.lua). We bridge that by
+    // writing main.modes.BUILD.viewMode and reading it back.
+    Q_INVOKABLE void setActiveView(const QString& viewId);
+    Q_INVOKABLE QString currentView() const;
+    Q_PROPERTY(QString currentView READ currentView NOTIFY currentViewChanged)
+
+    // Drive an engine callback (OnInit/OnFrame/...) via the Lua runCallback global.
+    Q_INVOKABLE QVariant runCallback(const QString& name, const QVariantList& args = {});
+    // Switch the active engine mode (drives main:SetMode; next OnFrame inits it).
+    Q_INVOKABLE void setMode(const QString& mode);
+    // Current mode name string (main.mode).
+    Q_INVOKABLE QString currentMode() const;
+    Q_PROPERTY(QString currentMode READ currentMode NOTIFY currentModeChanged)
+
+    // Phase 2a: convenience setter used to demonstrate that changing engine
+    // state propagates to the typed models' NOTIFY signals. Writes
+    // main.modes.BUILD.buildName (no-op if the build mode is unavailable).
+    Q_INVOKABLE void setBuildName(const QString& name);
+
+    // Phase 2b: build save/load bridge. These delegate to the top-level Lua
+    // globals defined in app/lua/pob_host.lua (pob_saveBuild / pob_loadBuildXML
+    // / pob_getBuildXML), which wrap the engine's Build:SaveDB / Build:LoadDB
+    // seam so the exact same xml.lua serialiser the real app uses is exercised.
+    // saveBuild writes the current build to `path` (returns false on failure).
+    // loadBuildXML re-initialises the build from an XML string (returns false
+    // if the engine/build mode is unavailable). getBuildXML returns the current
+    // build serialised to an XML string (empty string if unavailable).
+    Q_INVOKABLE bool saveBuild(const QString& path);
+    Q_INVOKABLE bool loadBuildXML(const QString& xml);
+    Q_INVOKABLE QString getBuildXML();
+
+    // Phase 3: LIST-mode (build library) operations. Each delegates to a
+    // top-level Lua global in app/lua/pob_host.lua (pob_openBuild /
+    // pob_createBuild / pob_deleteBuild / pob_renameBuild / pob_importBuildFromURL
+    // / pob_createFolder / pob_deleteFolder) which wrap the engine's BuildList /
+    // Build seams. openBuild(fullFileName) loads a build .xml into BUILD mode
+    // (switching the engine to BUILD). setListMode() switches the engine to LIST
+    // mode (calls setMode("LIST")). All return false on failure.
+    Q_INVOKABLE bool openBuild(const QString& fullFileName);
+    Q_INVOKABLE bool createBuild();
+    Q_INVOKABLE bool deleteBuild(const QString& fullFileName);
+    Q_INVOKABLE bool renameBuild(const QString& fullFileName, const QString& newName);
+    Q_INVOKABLE bool importBuildFromURL(const QString& url);
+    Q_INVOKABLE bool createFolder(const QString& name);
+    Q_INVOKABLE bool deleteFolder(const QString& name);
+    Q_INVOKABLE void setListMode();
+
+    // Phase 4a: passive-tree data bridge. Delegates to the top-level Lua global
+    // pob_getTreeData (callGlobal does a single lua_getglobal, so the helper MUST
+    // be a top-level global, not a dotted name). Returns the tree data table
+    // (nodes/groups/connectors/bounds/assets/assetBasePath) or an invalid
+    // QVariant when no build/tree is loaded.
+    Q_INVOKABLE QVariant getTreeData();
+
+    // Phase 4b: passive-tree interaction bridge. Each delegates to a top-level Lua
+    // global in app/lua/pob_host.lua (callGlobal does a single lua_getglobal, so
+    // the helpers MUST be top-level globals, not dotted names). They wrap
+    // spec:AllocNode / spec:DeallocNode / spec:CountAllocNodes and the node
+    // tooltip / search seams. allocNode/deallocNode/toggleNode return a result
+    // table (QVariantMap) or an invalid QVariant when the spec/node is missing;
+    // getNodeTooltip returns { name, type, alloc, sd } or invalid; setTreeSearch /
+    // getTreeSearchResults return the list of matching node ids.
+    Q_INVOKABLE QVariant allocNode(int id);
+    Q_INVOKABLE QVariant deallocNode(int id);
+    Q_INVOKABLE QVariant toggleNode(int id);
+    Q_INVOKABLE QVariant getNodeTooltip(int id);
+    Q_INVOKABLE QVariantList setTreeSearch(const QString& str);
+    Q_INVOKABLE QVariantList getTreeSearchResults();
+
+    // Phase 5a: ItemsTab (ITEMS view) bridge. Each delegates to a top-level
+    // Lua global in app/lua/pob_host.lua (callGlobal does a single
+    // lua_getglobal, so the helpers MUST be top-level globals, not dotted
+    // names). They wrap the engine's ItemsTab (main.modes.BUILD.itemsTab)
+    // so the QML ITEMS view can browse items, equipped slots and tree jewel
+    // sockets, and add/delete items from raw text. getItems/getItemSlots/
+    // getJewelSockets return QVariantList of maps (or an empty list when the
+    // items tab is unavailable); addItemFromRaw returns the new item id (or -1
+    // on failure); deleteItem returns false on failure.
+    Q_INVOKABLE QVariantList getItems();
+    Q_INVOKABLE QVariantList getItemSlots();
+    Q_INVOKABLE QVariantList getJewelSockets();
+    Q_INVOKABLE int addItemFromRaw(const QString& raw);
+    Q_INVOKABLE bool deleteItem(int id);
+
+    // Phase 5b: SkillsTab (SKILLS view) bridge. Each delegates to a top-level
+    // Lua global in app/lua/pob_host.lua (callGlobal does a single
+    // lua_getglobal, so the helpers MUST be top-level globals, not dotted
+    // names). getSocketGroups returns the socket group list (id/label/slot/
+    // enabled/gems/mainActiveSkill); getActiveSkills returns the active-skill
+    // DPS list (name/dps/totalDps/minionDps/socketGroupLabel/isMain/
+    // socketGroupIndex/displaySkillIndex); addSocketGroupWithGem creates a
+    // group + gem and returns its id; setActiveSkill selects a display skill
+    // as the main skill and recalculates.
+    Q_INVOKABLE QVariantList getSocketGroups();
+    Q_INVOKABLE QVariantList getActiveSkills();
+    Q_INVOKABLE int addSocketGroupWithGem(const QString& label, const QString& gemName);
+    Q_INVOKABLE void setActiveSkill(int socketGroupId, int index);
+
+    // Phase 5c: CalcsTab (CALCS view) bridge. Each delegates to a top-level
+    // Lua global in app/lua/pob_host.lua (callGlobal does a single
+    // lua_getglobal, so the helpers MUST be top-level globals, not dotted
+    // names). getCalcOutput returns the full calc output table (summary +
+    // sections) or an invalid QVariant when the calcs tab is unavailable;
+    // getCalcBreakdown returns the breakdown lines (QVariantList of strings)
+    // for the given stat's breakdown key, or an empty list when none exists.
+    Q_INVOKABLE QVariant getCalcOutput();
+    Q_INVOKABLE QVariantList getCalcBreakdown(const QString& section, const QString& stat);
+
+    // full list of config option descriptors (QVariantList of QVariantMap with
+    // name/label/type/value/options/section/tooltip); setConfigOption writes a
+    // value back into the active config set and triggers a rebuild.
+    Q_INVOKABLE QVariantList getConfigOptions();
+    Q_INVOKABLE QVariant setConfigOption(const QString& name, const QVariant& value);
+
+    // Phase 5e: Notes/Import/Compare/Party (utility) tabs bridge. Delegates to
+    // the top-level Lua globals pob_getNotes / pob_setNotes /
+    // pob_importFromCode / pob_getCompareEntries / pob_getPartyMembers
+    // (callGlobal does a single lua_getglobal, so the helpers MUST be
+    // top-level globals, not dotted names). getNotes/setNotes mirror the
+    // NotesTab edit buffer; importFromCode decodes a build share code; the two
+    // getters return QVariantList of QVariantMap rows for the QML list models.
+    Q_INVOKABLE QString getNotes();
+    Q_INVOKABLE void setNotes(const QString& text);
+    Q_INVOKABLE bool importFromCode(const QString& code);
+    Q_INVOKABLE QVariantList getCompareEntries();
+    Q_INVOKABLE QVariantList getPartyMembers();
+
+    // Phase 6b: headless self-test entry point. Runs the full headless check
+    // suite (see selftest_checks.h / pob_run_all_selftests) against the live,
+    // already-initialised engine. Returns true if every check passed. Used by
+    // the `pob-qt --headless` mode so the GUI binary itself can act as a CI
+    // smoke test without creating a window or requiring a display.
+    bool runSelfTest();
+
+signals:
+    void logMessage(const QString& msg);
+    void engineReady();
+    // Event-driven update signals. Emitted ONLY after a genuine mutation (a
+    // user action or a background recalc routed through a bridge method),
+    // never from a polling timer. The typed models subscribe to these so they
+    // refresh exactly once per real state change instead of every frame.
+    void buildDataChanged();   // build name/level/class/socket groups
+    void treeChanged();        // passive tree allocation / search
+    void configChanged();      // config options
+    void itemsChanged();       // items / equipped slots / jewel sockets
+    void skillsChanged();      // active skills / socket groups
+    void calcsChanged();       // calculation output
+    void notesChanged();       // notes text
+    void compareChanged();     // compare entries
+    void partyChanged();       // party members
+    void buildListChanged();   // LIST-mode build library
+    void modeChanged();        // mode switch / new build loaded (refresh all)
+    void viewChanged();        // active view (sidebar) changed
+    void currentViewChanged(); // active BUILD view id changed (sidebar nav)
+    void currentModeChanged(); // active mode (BUILD/LIST) changed
+
+private:
+    // Write a dotted Lua path (e.g. "main.modes.BUILD.viewMode") to `value`.
+    void setPath(const QString& path, const QVariant& value);
+
+    // C callbacks exposed to Lua via the `pob` table.
+    static int l_pob_log(lua_State* L);
+    static int l_pob_setMainObject(lua_State* L);
+    static int l_pob_getScriptPath(lua_State* L);
+    static int l_pob_getRuntimePath(lua_State* L);
+    static int l_pob_getUserPath(lua_State* L);
+    static int l_pob_getTime(lua_State* L);
+    static int l_pob_copy(lua_State* L);
+    static int l_pob_paste(lua_State* L);
+    static int l_pob_openURL(lua_State* L);
+    static int l_pob_makeDir(lua_State* L);
+    static int l_pob_removeDir(lua_State* L);
+    static int l_pob_inflate(lua_State* L);
+    static int l_pob_deflate(lua_State* L);
+    static int l_pob_http(lua_State* L);
+    // Phase 3: directory listing backing the SimpleGraphic NewFileSearch stub
+    // (used by BuildListHelpers.ScanFolder). Returns an array of
+    // { name = string, modified = number } entries for `path` (a directory,
+    // optionally with a trailing wildcard pattern). `dirsOnly` lists folders.
+    static int l_pob_listDir(lua_State* L);
+    static LuaEngine* selfOf(lua_State* L);
+
+    lua_State* m_L = nullptr;
+    QString m_srcDir;
+    QString m_runtimeDir;
+    QString m_userDir;
+};

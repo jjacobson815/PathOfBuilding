@@ -1,0 +1,32 @@
+﻿{
+  "configurations": [
+    {
+      "name": "x64-MinGW-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}\\build-win",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "CMAKE_C_COMPILER",
+          "value": "C:/msys64/mingw64/bin/gcc.exe"
+        },
+        {
+          "name": "CMAKE_CXX_COMPILER",
+          "value": "C:/msys64/mingw64/bin/g++.exe"
+        },
+        {
+          "name": "CMAKE_PREFIX_PATH",
+          "value": "C:/msys64/mingw64"
+        },
+        {
+          "name": "CMAKE_MAKE_PROGRAM",
+          "value": "C:/msys64/mingw64/bin/ninja.exe"
+        }
+      ]
+    }
+  ]
+}
