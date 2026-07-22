@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <lauxlib.h>
 
 #include <zlib.h>
@@ -33,10 +34,22 @@ LuaEngine* LuaEngine::selfOf(lua_State* L) {
     return self;
 }
 
-bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QString& hostFile) {
+bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QString& hostFile,
+                     const QStringList& launchArgs) {
     m_srcDir = srcDir;
     m_runtimeDir = runtimeDir;
-    m_userDir = QDir::tempPath() + "/pob-qt";
+    m_launchArgs = launchArgs;
+    m_clock.start();   // monotonic clock backing GetTime (ms since init)
+
+    // GetUserPath() must return the Documents dir; the engine appends
+    // "/Path of Building/" (Main.lua), so returning Documents/Path of Building
+    // would double-append and hide every existing user's build library. The old
+    // value (QDir::tempPath()+"/pob-qt") pointed at an OS-wipeable throwaway dir,
+    // so existing users saw an empty library + reset settings. Fall back to
+    // ~/Documents if the standard location is unavailable.
+    m_userDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (m_userDir.isEmpty())
+        m_userDir = QDir::homePath() + "/Documents";
     QDir().mkpath(m_userDir);
 
     // One-time libcurl global init (idempotent across engine instances).
@@ -69,6 +82,8 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
         { "copy",          l_pob_copy },
         { "paste",         l_pob_paste },
         { "openURL",       l_pob_openURL },
+        { "isKeyDown",     l_pob_isKeyDown },
+        { "setForeground", l_pob_setForeground },
 #endif
         { "makeDir",       l_pob_makeDir },
         { "removeDir",     l_pob_removeDir },
@@ -90,6 +105,18 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
     // shims (lcurl/safe.lua, lzip.lua) via package.path in pob_host.lua.
     lua_pushstring(m_L, QFileInfo(hostFile).dir().absolutePath().toUtf8().constData());
     lua_setglobal(m_L, "_POB_LUA_DIR");
+
+    // CLI `arg` table (Lua convention: arg[0]=program, arg[1..]=params). Set
+    // before the host bootstrap runs OnInit so Main.lua can read arg[1] as an
+    // open-on-launch build file / import URL. pob_host.lua keeps this via
+    // `arg = arg or {}` instead of clobbering it with an empty table.
+    lua_newtable(m_L);
+    for (int i = 0; i < m_launchArgs.size(); i++) {
+        lua_pushinteger(m_L, i);
+        lua_pushstring(m_L, m_launchArgs[i].toUtf8().constData());
+        lua_settable(m_L, -3);
+    }
+    lua_setglobal(m_L, "arg");
 
     if (luaL_dofile(m_L, hostFile.toUtf8().constData()) != LUA_OK) {
         qCritical() << "Host bootstrap error:" << lua_tostring(m_L, -1);
@@ -130,7 +157,10 @@ int LuaEngine::l_pob_getUserPath(lua_State* L) {
 }
 
 int LuaEngine::l_pob_getTime(lua_State* L) {
-    lua_pushnumber(L, double(QDateTime::currentMSecsSinceEpoch()));
+    // Legacy GetTime() semantics: monotonic milliseconds since program start,
+    // NOT epoch. The engine uses it for frame deltas, timers and unique markers;
+    // a monotonic clock avoids wall-clock jumps (NTP/DST) skewing those deltas.
+    lua_pushnumber(L, double(selfOf(L)->m_clock.elapsed()));
     return 1;
 }
 
@@ -161,15 +191,69 @@ int LuaEngine::l_pob_openURL(lua_State* L) {
     return 0;
 }
 
+// MakeDir(path) -> ok[, errMsg]. The engine's contract (13 sites, incl.
+// pob_createFolder and Main.lua folder ops) is (ok, errMsg): the old version
+// returned nothing, so `if not res` was always true and every create/rename
+// reported false failure. mkpath is idempotent (returns true if the dir
+// already exists), matching legacy MakeDir.
 int LuaEngine::l_pob_makeDir(lua_State* L) {
-    if (lua_gettop(L) >= 1)
-        QDir().mkpath(QString::fromUtf8(lua_tostring(L, 1)));
-    return 0;
+    if (lua_gettop(L) < 1 || !lua_isstring(L, 1)) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "MakeDir: missing path");
+        return 2;
+    }
+    QString path = QString::fromUtf8(lua_tostring(L, 1));
+    if (QDir().mkpath(path)) {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    lua_pushboolean(L, 0);
+    lua_pushstring(L, "MakeDir: could not create directory");
+    return 2;
 }
 
+// RemoveDir(path) -> ok[, errMsg]. A path that is already gone counts as
+// success (idempotent delete), matching legacy RemoveDir.
 int LuaEngine::l_pob_removeDir(lua_State* L) {
-    if (lua_gettop(L) >= 1)
-        QDir(QString::fromUtf8(lua_tostring(L, 1))).removeRecursively();
+    if (lua_gettop(L) < 1 || !lua_isstring(L, 1)) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "RemoveDir: missing path");
+        return 2;
+    }
+    QDir dir(QString::fromUtf8(lua_tostring(L, 1)));
+    if (!dir.exists() || dir.removeRecursively()) {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    lua_pushboolean(L, 0);
+    lua_pushstring(L, "RemoveDir: could not remove directory");
+    return 2;
+}
+
+// IsKeyDown(name) -> bool. Real modifier state via the platform keyboard
+// modifiers (CTRL/SHIFT/ALT — the only names the engine branches on outside
+// event handlers). Other key names return false. Headless (POB_NO_GUI): the
+// pob.isKeyDown bridge is absent and the Lua wrapper returns false.
+int LuaEngine::l_pob_isKeyDown(lua_State* L) {
+    bool down = false;
+#ifndef POB_NO_GUI
+    if (qGuiApp && lua_gettop(L) >= 1 && lua_isstring(L, 1)) {
+        QString k = QString::fromUtf8(lua_tostring(L, 1)).toUpper();
+        Qt::KeyboardModifiers m = QGuiApplication::queryKeyboardModifiers();
+        if (k == "CTRL")       down = m.testFlag(Qt::ControlModifier);
+        else if (k == "SHIFT") down = m.testFlag(Qt::ShiftModifier);
+        else if (k == "ALT")   down = m.testFlag(Qt::AltModifier);
+    }
+#endif
+    lua_pushboolean(L, down ? 1 : 0);
+    return 1;
+}
+
+// SetForeground() -> raise/activate the app window. Emits a signal wired to the
+// QQuickWindow in main.cpp. One engine site (PoEAPI.lua, after OAuth); adding
+// it prevents an `attempt to call nil` crash if OAuth ever succeeds.
+int LuaEngine::l_pob_setForeground(lua_State* L) {
+    emit selfOf(L)->foregroundRequested();
     return 0;
 }
 

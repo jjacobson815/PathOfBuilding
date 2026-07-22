@@ -4,6 +4,7 @@
 #include <QVariant>
 #include <QVariantMap>
 #include <QStringList>
+#include <QElapsedTimer>
 #include <lua.hpp>
 
 // Embeds a LuaJIT state and bridges the Path of Building calc engine to Qt.
@@ -19,8 +20,12 @@ public:
     explicit LuaEngine(QObject* parent = nullptr);
     ~LuaEngine();
 
-    // srcDir: repo/src, runtimeDir: repo/runtime, hostFile: lua/pob_host.lua
-    bool init(const QString& srcDir, const QString& runtimeDir, const QString& hostFile);
+    // srcDir: repo/src, runtimeDir: repo/runtime, hostFile: lua/pob_host.lua.
+    // launchArgs: CLI args exposed to the engine as the Lua `arg` table
+    // (arg[0]=program, arg[1..]=params; the engine reads arg[1] as an
+    // open-on-launch build file / import URL — fully realized in Phase 11).
+    bool init(const QString& srcDir, const QString& runtimeDir, const QString& hostFile,
+              const QStringList& launchArgs = {});
     lua_State* state() const { return m_L; }
 
     // Read a global Lua value (by name) as a QVariant.
@@ -177,6 +182,9 @@ public:
 signals:
     void logMessage(const QString& msg);
     void engineReady();
+    // Emitted when the engine calls SetForeground() (raise/activate window).
+    // Wired to the QQuickWindow in main.cpp; a no-op in headless hosts.
+    void foregroundRequested();
     // Event-driven update signals. Emitted ONLY after a genuine mutation (a
     // user action or a background recalc routed through a bridge method),
     // never from a polling timer. The typed models subscribe to these so they
@@ -212,6 +220,8 @@ private:
     static int l_pob_openURL(lua_State* L);
     static int l_pob_makeDir(lua_State* L);
     static int l_pob_removeDir(lua_State* L);
+    static int l_pob_isKeyDown(lua_State* L);
+    static int l_pob_setForeground(lua_State* L);
     static int l_pob_inflate(lua_State* L);
     static int l_pob_deflate(lua_State* L);
     static int l_pob_http(lua_State* L);
@@ -226,4 +236,6 @@ private:
     QString m_srcDir;
     QString m_runtimeDir;
     QString m_userDir;
+    QStringList m_launchArgs;   // exposed to Lua as the `arg` table
+    QElapsedTimer m_clock;      // monotonic clock backing GetTime (ms since init)
 };

@@ -124,9 +124,15 @@ static int runCapture(LuaEngine& engine, QQmlApplicationEngine& qml, const QStri
     timer->setInterval(500);
     QObject::connect(timer, &QTimer::timeout, [ctx, timer]() {
         if (ctx->idx >= ctx->ids.size()) {
-            capLog(ctx->statusPath, QString("done (failed=%1) -> %2").arg(ctx->failed).arg(QDir(ctx->outDir).absolutePath()));
             timer->stop();
-            QCoreApplication::exit(ctx->failed > 0 ? 1 : 0);
+            // Wait for the LAST item's grab singleShot (scheduled at +300ms below)
+            // to run before exiting. QCoreApplication::exit() cancels pending
+            // singleShots, so exiting immediately dropped the final view's PNG
+            // (e.g. LIST) whenever the closing tick raced ahead of its grab.
+            QTimer::singleShot(400, [ctx]() {
+                capLog(ctx->statusPath, QString("done (failed=%1) -> %2").arg(ctx->failed).arg(QDir(ctx->outDir).absolutePath()));
+                QCoreApplication::exit(ctx->failed > 0 ? 1 : 0);
+            });
             return;
         }
         QString id = ctx->ids[ctx->idx++];
@@ -180,6 +186,13 @@ int main(int argc, char** argv) {
     bool headless = false;
     bool capture = false;
     QString captureDir;
+    // Positional (non-harness) CLI args passed through to the engine as `arg`
+    // (arg[0]=program, arg[1..]=params). The engine reads arg[1] as an
+    // open-on-launch build file / import URL (fully realized in Phase 11). Our
+    // own harness flags (--headless/--capture/--src/--runtime/--host) are
+    // consumed here and NOT forwarded, so they can't be mistaken for a build/URL.
+    QStringList launchArgs;
+    launchArgs << QString::fromLocal8Bit(argv[0]);
     for (int i = 1; i < argc; i++) {
         QString a = argv[i];
         if (a == "--headless") headless = true;
@@ -192,6 +205,7 @@ int main(int argc, char** argv) {
         else if (a == "--src" && i + 1 < argc) srcDir = argv[++i];
         else if (a == "--runtime" && i + 1 < argc) runtimeDir = argv[++i];
         else if (a == "--host" && i + 1 < argc) hostFile = argv[++i];
+        else launchArgs << a;
     }
 
     // Phase 8: offscreen capture harness. By default we use the system's native
@@ -237,7 +251,7 @@ int main(int argc, char** argv) {
         LuaEngine engine;
         QObject::connect(&engine, &LuaEngine::logMessage,
                          [](const QString& m) { qDebug().noquote() << "[lua]" << m; });
-        if (!engine.init(srcDir, runtimeDir, hostFile)) {
+        if (!engine.init(srcDir, runtimeDir, hostFile, launchArgs)) {
             qCritical() << "Failed to initialise Lua engine";
             return 1;
         }
@@ -309,12 +323,22 @@ int main(int argc, char** argv) {
     LuaEngine engine;
     QObject::connect(&engine, &LuaEngine::logMessage,
                      [](const QString& m) { qDebug().noquote() << "[lua]" << m; });
-    if (!engine.init(srcDir, runtimeDir, hostFile)) {
+    if (!engine.init(srcDir, runtimeDir, hostFile, launchArgs)) {
         mainLog("engine.init FAILED");
         qCritical() << "Failed to initialise Lua engine";
         return 1;
     }
     mainLog("engine.init OK");
+
+    // Data-loss fix: run the engine shutdown on quit so main:Shutdown ->
+    // SaveSettings persists Settings.xml (and the last-open build) — the Qt host
+    // previously never called it, so settings never saved. runCallback dispatches
+    // to launch:OnExit; the engine's errorReadingSettings latch is respected
+    // (SaveSettings early-returns when it is set, so a cloud-read failure does not
+    // clobber the file with defaults).
+    QObject::connect(&app, &QGuiApplication::aboutToQuit, &engine, [&engine]() {
+        engine.runCallback("OnExit");
+    });
 
     QQmlApplicationEngine qml;
     qml.rootContext()->setContextProperty("luaEngine", &engine);
@@ -478,6 +502,16 @@ int main(int argc, char** argv) {
         return 1;
     }
     mainLog("qml loaded");
+
+    // Wire SetForeground() (engine -> foregroundRequested) to raise/activate the
+    // main window. Only reached after a successful OAuth today (Phase 11), but
+    // the connection is harmless and keeps the bridge non-nil.
+    if (auto* win = qobject_cast<QQuickWindow*>(qml.rootObjects().value(0))) {
+        QObject::connect(&engine, &LuaEngine::foregroundRequested, win, [win]() {
+            win->raise();
+            win->requestActivate();
+        });
+    }
 
     // Phase 1a: drive the engine's OnFrame from the Qt event loop. This replaces
     // the old single-shot OnFrame pump in pob_host.lua's boot with a continuous

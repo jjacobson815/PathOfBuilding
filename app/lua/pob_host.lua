@@ -126,7 +126,11 @@ function SetWindowTitle(title) end
 function GetCursorPos() return 0, 0 end
 function SetCursorPos(x, y) end
 function ShowCursor(doShow) end
-function IsKeyDown(keyName) end
+function IsKeyDown(keyName)
+	if pob.isKeyDown then return pob.isKeyDown(keyName) end
+	return false
+end
+function SetForeground() if pob.setForeground then pob.setForeground() end end
 function Copy(text) if pob.copy then pob.copy(text) end end
 function Paste() if pob.paste then return pob.paste() end end
 function Deflate(data) return pob.deflate(data) end
@@ -135,8 +139,8 @@ function GetTime() return pob.getTime() end
 function GetScriptPath() return _SRC_DIR end
 function GetRuntimePath() return _RUNTIME_DIR end
 function GetUserPath() return _USER_DIR end
-function MakeDir(path) pob.makeDir(path) end
-function RemoveDir(path) pob.removeDir(path) end
+function MakeDir(path) return pob.makeDir(path) end
+function RemoveDir(path) return pob.removeDir(path) end
 function SetWorkDir(path) end
 function GetWorkDir() return "." end
 function LaunchSubScript(scriptText, funcList, subList, ...) end
@@ -1158,7 +1162,10 @@ function pob_selftestMiscTabs()
 end
 
 -- Boot the engine (same sequence as src/HeadlessWrapper.lua).
-arg = { } -- standalone Lua sets this to CLI args; engine reads arg[1] for import links
+-- `arg` is set by the C host (LuaEngine::init) from the process CLI args before
+-- this bootstrap runs; keep it if present (engine reads arg[1] for import links),
+-- otherwise default to an empty table.
+arg = arg or { }
 dofile(_SRC_DIR .. "/Launch.lua")
 mainObject.continuousIntegrationMode = os.getenv("CI")
 
