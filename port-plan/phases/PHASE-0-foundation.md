@@ -60,33 +60,44 @@ live file; the *shape* of each bug is what matters):
 
 ## Part 0.3 — Fix host-contract correctness bugs
 
-See [[host-api-contract]] priority list. All small, all real bugs:
+See [[host-api-contract]] priority list. All small, all real bugs.
+**All verified via a headless probe (scratchpad `probe_host.lua` through
+`pob-selftest`) + self-test exit 0 + `--capture` all 10 views.**
 
-- [ ] `MakeDir`/`RemoveDir` must return `(ok, errMsg)` in `LuaEngine.cpp`; this
+- [x] `MakeDir`/`RemoveDir` must return `(ok, errMsg)` in `LuaEngine.cpp`; this
   un-breaks `pob_createFolder`/`pob_deleteFolder` (which today always report
   failure) and the Main.lua folder flows. (S)
-- [ ] Add `SetForeground()` (raise/activate window) to the `pob` bridge +
+  → return contract now `ok` / `false,msg`; probe: `MakeDir_ok=true`, empty path
+  → `false, "MakeDir: could not create directory"`. Lua wrappers now `return` it.
+- [x] Add `SetForeground()` (raise/activate window) to the `pob` bridge +
   `pob_host.lua`; prevents an `attempt to call nil` crash if OAuth ever succeeds. (S)
-- [ ] `GetTime` → monotonic ms-since-start via `QElapsedTimer` (matches legacy
-  semantics exactly). (S)
-- [ ] **Wire `CanExit`/`OnExit` from the Qt shutdown path** so `main:Shutdown` runs
-  → `SaveSettings` persists `Settings.xml` and the unsaved-build prompt fires.
-  **This is a data-loss fix, not a nicety.** Preserve the `errorReadingSettings`
-  latch behavior (don't clobber settings with defaults after a cloud-read failure).
-  (M)
-- [ ] Make `IsKeyDown` return real modifier state (`queryKeyboardModifiers`) — some
-  engine paths branch on CTRL/SHIFT during `pob_*`-invoked actions. (S)
-- [ ] Populate `arg` from `QCoreApplication` args (enables open-on-launch build/URL,
-  fully realized in Phase 11). (S)
-- [ ] **Fix userPath — CRITICAL, existing users see an empty library today.**
-  `LuaEngine.cpp:39` points `m_userDir` at `QDir::tempPath()+"/pob-qt"`; change to
-  `QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)` (add
-  `#include <QStandardPaths>`; fallback `QDir::homePath()+"/Documents"`). Return the
-  Documents **parent** — the engine appends `"/Path of Building/"`, so returning
-  `Documents/Path of Building` double-appends and still shows an empty library. (S)
-- [ ] Guard the installed-mode launch branch: ensure no remote-style `manifest.xml`
-  on the process CWD flips `devMode` (which routes userPath into the source tree);
-  verify `_SRC_DIR != _RUNTIME_DIR` holds in packaged builds. (S)
+  → `pob.setForeground` emits `foregroundRequested` → `win->raise/requestActivate`
+  (wired in main.cpp). Headless: bridge absent, Lua wrapper no-ops.
+- [x] `GetTime` → monotonic ms-since-start via `QElapsedTimer` (matches legacy
+  semantics exactly). (S) → probe: t1=996, t2=997, monotonic & non-epoch.
+- [x] **Wire `CanExit`/`OnExit` from the Qt shutdown path** so `main:Shutdown` runs
+  → `SaveSettings` persists `Settings.xml`. **Data-loss fix.** Preserve the
+  `errorReadingSettings` latch (don't clobber settings after a cloud-read failure).
+  (M) → `OnExit` wired to `QGuiApplication::aboutToQuit`; latch respected (we only
+  invoke the existing Shutdown path). **PARTIAL:** the interactive unsaved-build
+  `CanExit` prompt (`OpenSavePopup`) needs a QML modal + close-event intercept →
+  deferred to **Phase 3 (Build Shell)**; settings-save (the data-loss part) is done.
+- [x] Make `IsKeyDown` return real modifier state (`queryKeyboardModifiers`). (S)
+  → probe: `IsKeyDown("CTRL")` type=boolean, false (headless). CTRL/SHIFT/ALT only.
+- [x] Populate `arg` from `QCoreApplication` args (open-on-launch, realized Phase 11).
+  (S) → main.cpp collects non-harness positionals (arg[0]=program); set as the Lua
+  `arg` global before boot; `pob_host` keeps it via `arg = arg or {}`.
+- [x] **Fix userPath — CRITICAL.** (S) → `LuaEngine::init` now returns
+  `QStandardPaths DocumentsLocation` (fallback `~/Documents`). Probe:
+  `GetUserPath=C:/Users/User/OneDrive/Documents` (real Documents, not temp).
+  NOTE: resolved to **OneDrive-redirected** Documents → the latent OneDrive
+  `errorReadingSettings` latch (STATUS 7b) is now reachable; **Phase 1** owns it.
+- [x] Guard the installed-mode launch branch. (S) → Found the real trigger:
+  `app/CMakeLists.txt` installed the remote-style repo `manifest.xml` into `dist/`,
+  so the *packaged* app also tripped devMode → source-tree userPath. Fix:
+  `pack-manifest.cmake` stamps branch+platform onto the packaged manifest +
+  writes `installed.cfg`. `_SRC_DIR != _RUNTIME_DIR` verified (dist/src vs
+  dist/runtime). Packaged verification deferred to a deploy run (Phase 14).
 
 ## Part 0.4 — Resolve the `src/` divergence contract
 

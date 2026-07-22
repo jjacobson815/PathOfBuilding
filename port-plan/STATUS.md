@@ -71,13 +71,25 @@ Full detail in `reference/00-architecture.md`. The short list:
 This is the "pertinent work already done" record. Verified against code + captures
 during the July 2026 analysis; trust code over any older plan doc.
 
-**▶ Phase 0.1 done (2026-07-22): the port is under version control.** Branch
-`phase-0-foundation` off `dev`, 4 commits: gitignore `b139c06d`, host seams
-(Build/Main/Data/UITheme) `bcb46232`, port `cf500ea4`, Suggest Path split out
-`a60a9d35`. Loose ends resolved: `runtime-win32.zip` restored to match upstream
-(it's the legacy SimpleGraphic runtime bundle — a Phase 14/15 decommission
-candidate, NOT to be dropped in Phase 0); a leaked Google API key in a repo-root
-`AQ.*.txt` was deleted by the user (gitignore still guards `AQ.*.txt`).
+**▶ Phase 0 in progress (2026-07-22), branch `phase-0-foundation` off `dev`.**
+- **0.1 done** — port under version control (gitignore `b139c06d`, host seams
+  `bcb46232`, port `cf500ea4`, Suggest Path split out `a60a9d35`). `runtime-win32.zip`
+  restored (legacy SimpleGraphic bundle — a Phase 14/15 decommission candidate, NOT
+  dropped in Phase 0); the leaked `AQ.*.txt` API key was deleted by the user
+  (gitignore still guards it).
+- **0.2 done** — un-nested the 8 broken QML views (skills/items/calcs/config were
+  trapped in `treeView`; notes/import/compare/party were 0×0). `--capture` renders
+  all 10 (`failed=0`). The file's own comments falsely claimed this was already done.
+- **0.3 done** — host-contract bugs fixed & probe-verified: userPath →
+  `QStandardPaths` Documents (was a temp dir; **resolves to OneDrive Documents** →
+  the latent `errorReadingSettings` latch is now reachable, Phase 1); MakeDir/RemoveDir
+  return `(ok,err)`; GetTime monotonic; IsKeyDown modifiers; SetForeground; `arg`
+  from CLI; `OnExit`→SaveSettings on quit (the unsaved-build `CanExit` *modal* is
+  deferred to Phase 3). Packaging guard: `pack-manifest.cmake` stamps the dist
+  manifest so installed builds don't trip devMode (deploy-verify in Phase 14).
+  Capture harness hardened to wait for the final grab (was dropping LIST's PNG).
+- **Remaining:** 0.4 (resync `src/`), 0.5 (remove scaffold/litter), 0.6 (gates +
+  baseline). Do NOT start Phase 1 until Phase 0's gate passes and the user approves.
 
 1. **The C++/Lua bridge is solid and selftest-verified.** `pob-selftest.exe` exits
    0 across 15 headless checks (engine boot, calc output, zlib/HTTP-shim requires,
