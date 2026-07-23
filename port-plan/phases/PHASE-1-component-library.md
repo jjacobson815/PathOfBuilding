@@ -19,10 +19,20 @@ the infra tier (Tier 0) first — it gates all text-bearing components.
 
 ## Part 1.1 — Split main.qml into modules
 
-- [ ] Extract each view into its own `.qml` under `app/qml/views/`, shared widgets
+- [x] Extract each view into its own `.qml` under `app/qml/views/`, shared widgets
   under `app/qml/components/`, and register a QML module / update `qml.qrc`. Do this
   **after** Phase 0's nesting fixes so behavior is verifiable before/after via
   capture diff. (M-L)
+  — **DONE (2026-07-23).** `main.qml` 1789→~330 lines (shell: window state + top bar
+  + sidebar + StackLayout). 11 view bodies extracted to `app/qml/views/`: TreeView,
+  SkillsView, ItemsView, CalcsView, ConfigView, NotesView, ImportView, CompareView,
+  PartyView, PlaceholderView, BuildListPage. Each view's private state moved off the
+  root (selectedItem+rarityColor→ItemsView, fileUrl→TreeView, saveLoadStatus+viewLabel
+  →PlaceholderView, list*+openSelected→BuildListPage). Parent drives each view's
+  `visible: root.activeView==="X"`. Registered via `import "views"` + `qml.qrc` entries
+  (AUTORCC). `components/` intentionally still empty — shared widgets get built in
+  1.2–1.3. Verified: build clean, capture failed=0 (TREE/SKILLS/ITEMS spot-checked
+  render-identical), selftest 0, headless 0. Top bar + sidebar kept inline (→ Part 1.4).
 
 ## Part 1.2a — Text-rendering subsystem (build FIRST — gates all text)
 
@@ -39,13 +49,28 @@ most pervasive concern. The bitmap font atlases already ship in
   `Theme.cpp:80`): add `fontVar`/`fontVarBold`/`fontFixed` (+ `fontFontinSC`/
   `fontFontin` if licensed) + a name→QFont resolver keyed by the 7 `fontMap`
   strings. Wire QML widgets to the right family (monospace fields → `fontFixed`). (S-M)
-- [ ] **`TextMetrics` engine** — a C++ class that loads `runtime/SimpleGraphic/
+- [x] **`TextMetrics` engine** — a C++ class that loads `runtime/SimpleGraphic/
   Fonts/*.tgf` and reproduces `r_font_c` EXACTLY (per-glyph `ceil`, `width+spLeft+
   spRight`, atlas selection + scale, tab=4×space, tofu for ≥128, inline escape
   skip). **Do NOT use `QFontMetrics`** — it drifts and breaks caret/ellipsis/auto-
   width. Expose to Lua (real `DrawStringWidth`/`DrawStringCursorIndex`, replacing
   the `pob_host.lua:78-83` stubs) AND to QML (`Q_INVOKABLE width`/`cursorIndex`).
   Add golden parity tests vs legacy for a mixed corpus. (L)
+  — **DONE (2026-07-23).** `app/src/TextMetrics.{h,cpp}` (QObject). Algorithm
+  verified against upstream `r_font.cpp` (FindFontHeight/fontHeightMap →
+  nearest-baked + scale=h/baked; per-glyph `width+spLeft+spRight`; `ceil` after each
+  char; `^`d/`^x`+6hex escapes skip 2/8 chars zero-width; tab=space×4; codepoint
+  ≥128 → `[U+XXXX]` tofu at a ≥3px-smaller baked height; multi-line → max). Font
+  name→`.tgf` map (VAR→Liberation Sans, VAR BOLD→…Bold, FIXED→Bitstream Vera Sans
+  Mono, FONTIN*→Fontin family; nil→FIXED). Wired Lua→C++ via new `pob.stringWidth`/
+  `pob.stringCursorIndex` bridge fns (`LuaEngine`), replacing the `pob_host.lua`
+  stubs; exposed to QML as the `textMetrics` context property (`main.cpp`). Selftest
+  asserts fonts actually loaded + monospace-exact + escape-zero + multiline-max +
+  empty-zero (exit 0). Probed values sane (FIXED A=8/AAAA=32, VAR A=9, VAR BOLD
+  Life=26, FONTIN SC "Kaom's Heart"=86; cursor 0..5 across "Hello"). **Still TODO
+  in 1.2a:** golden parity vs *legacy actual* values (needs legacy SimpleGraphic run
+  — deferred); cursor hit-test uses a midpoint approximation for non-tab chars
+  (refine when EditControl lands). See remaining 1.2a items (fonts+Theme, color parser).
 - [ ] **Color-code rich-text renderer** — one shared C++ parser: PoB string →
   ordered `(QColor, text)` runs, honoring `^0`–`^9` (exact palette; `fromRgbF` for
   ^8/^9), `^xRRGGBB`/`^XRRGGBB`, literal `^`, and carry-forward default (`^7` =

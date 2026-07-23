@@ -17,6 +17,7 @@
 #include "LuaEngine.h"
 #include "selftest_checks.h"
 #include "Theme.h"
+#include "TextMetrics.h"
 #include "BuildModel.h"
 #include "SocketGroupModel.h"
 #include "SaveLoadModel.h"
@@ -346,6 +347,12 @@ int main(int argc, char** argv) {
     Theme* theme = new Theme(&app);
     theme->init(&engine);
     qml.rootContext()->setContextProperty("theme", theme);
+
+    // Phase 1.2a: expose the SAME .tgf-backed TextMetrics instance the Lua engine
+    // uses (created in engine.init()) to QML, so QML-side layout math (auto-width,
+    // caret, ellipsis) measures identically to the engine. Q_INVOKABLE
+    // textMetrics.width(height, font, text) / cursorIndex(...).
+    qml.rootContext()->setContextProperty("textMetrics", engine.textMetrics());
 
     // Phase 2a: typed build-state models. They are parented to the app so they
     // live for the process lifetime; the QML context properties keep references.

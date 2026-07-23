@@ -76,8 +76,19 @@ function SetDrawColor(r, g, b, a) end
 function DrawImage(imgHandle, left, top, width, height, tcLeft, tcTop, tcRight, tcBottom) end
 function DrawImageQuad(imageHandle, x1, y1, x2, y2, x3, y3, x4, y4, s1, t1, s2, t2, s3, t3, s4, t4) end
 function DrawString(left, top, align, height, font, text) end
-function DrawStringWidth(height, font, text) return 1 end
-function DrawStringCursorIndex(height, font, text, cursorX, cursorY) return 0 end
+-- Phase 1.2a: DrawString is a no-op (QML owns rendering), but the two *measure*
+-- globals must be REAL — ported control layout math (EditControl caret, ListControl
+-- ellipsis, DropDown/Tooltip/GemSelect auto-width: 103 DrawStringWidth + 8
+-- DrawStringCursorIndex sites) depends on legacy-exact widths. Backed by the
+-- .tgf-driven C++ TextMetrics engine via the pob bridge. `font` nil defaults to
+-- FIXED inside TextMetrics.
+function DrawStringWidth(height, font, text)
+    return pob.stringWidth(height or 0, font, text ~= nil and tostring(text) or "")
+end
+function DrawStringCursorIndex(height, font, text, cursorX, cursorY)
+    return pob.stringCursorIndex(height or 0, font, text ~= nil and tostring(text) or "",
+                                 cursorX or 0, cursorY or 0)
+end
 function StripEscapes(text)
     return text:gsub("%^%d", ""):gsub("%^x%x%x%x%x%x%x", "")
 end

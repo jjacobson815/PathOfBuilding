@@ -9,12 +9,19 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**Phase 0 — COMPLETE (implementation).** Local gate GREEN (pob-selftest 0,
-pob-qt --headless 0, `--capture` all 10). **Next: Phase 1 — QML Component Library
-& Shell** (`phases/PHASE-1-component-library.md`) — but per the stop-at-phase-
-boundaries rule, **do NOT start Phase 1 until the user approves**. Before Phase 1,
-a `dev` push should confirm CI green (`test.yml` busted + `qt-selftest.yml`), which
-can't be run on the Windows workstation.
+**Phase 1 — QML Component Library & App Shell — IN PROGRESS** (started 2026-07-23,
+user-approved). Spec: `phases/PHASE-1-component-library.md`. Phase 0 is COMPLETE
+(implementation), local gate GREEN (pob-selftest 0, pob-qt --headless 0,
+`--capture` all 10).
+
+**CI confirmation: DEFERRED (skipped by user 2026-07-23).** Pushed the branch to
+the personal fork `github.com/jjacobson815/PathOfBuilding` `dev` (`git push fork
+phase-0-foundation:dev`, ff `92bc0df0`→`fa3cc1ea`); all workflows dispatched but
+GitHub refused to start any job — *"account is locked due to a billing issue"* on
+the `jjacobson815` account. So `test.yml`/`qt-selftest.yml` remain **unverified in
+CI** (config is valid; jobs never ran). Re-trigger once the billing lock clears
+(Actions page re-run, `workflow_dispatch`, or empty commit). `fork` remote is now
+configured locally.
 
 ---
 
@@ -57,9 +64,12 @@ Full detail in `reference/00-architecture.md`. The short list:
   dir (lossless round-trip + zero migration, but needs engine-version lockstep) vs
   SEPARATE dir with first-run migration. Recommend SHARE for v1. (The temp-dir
   path bug itself is fixed in Phase 0 regardless.)
-- **Fontin font licensing** (Phase 1) — bundle Fontin TTFs (needs an exljbris
-  Extended License), reuse the already-bundled bitmap atlases (a legal question),
-  or substitute an OFL small-caps face (item-name visual drift). 104 sites.
+- **Fontin font licensing** (Phase 1) — **DECIDED 2026-07-23: DEFER.** Build the
+  TextMetrics + color-code subsystem now against the VAR/FIXED fonts (Liberation
+  Sans / mono); stub `fontFontinSC`/`fontFontin` → the VAR face. Revisit the real
+  licensing choice (bundle Fontin TTFs w/ exljbris Extended License, reuse the
+  already-bundled bitmap atlases [legal Q], or substitute an OFL small-caps face)
+  before shipping. 104 item/gem/tree sites will use VAR until then.
 - **Parity baseline snapshot** (Phase 0) — Qt repo has 18 System specs, legacy 26;
   pick one as the calc-parity reference.
 - **OAuth token storage** (Phase 11) — keep Settings.xml plaintext (legacy) or move
@@ -68,6 +78,29 @@ Full detail in `reference/00-architecture.md`. The short list:
 ---
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
+
+**▶ Phase 1 (started 2026-07-23):** **Part 1.2a TextMetrics DONE** — `.tgf`-backed
+`app/src/TextMetrics.{h,cpp}` reproduces legacy `r_font_c` (verified vs upstream
+`r_font.cpp`): real `DrawStringWidth`/`DrawStringCursorIndex` now wired Lua→C++ via
+`pob.stringWidth`/`pob.stringCursorIndex` (replacing the 1/0 stubs), also exposed to
+QML as the `textMetrics` context property. NEVER use QFontMetrics for measurement.
+Selftest gate extended (fonts-loaded + monospace-exact + escape-zero + multiline-max).
+Remaining 1.2a: bundle fonts + `QFontDatabase::addApplicationFont` + extend `Theme`
+(fontVar/fontVarBold/fontFixed resolver), and the shared `^0`–`^9`/`^xRRGGBB`
+color-code rich-text renderer. Fontin DEFERRED → VAR fallback (see open decisions).
+
+**Part 1.1 DONE** — `main.qml` split from 1789
+lines into an app shell (~330 lines: window state + top bar + sidebar + StackLayout)
+plus 11 view components under `app/qml/views/` (TreeView/SkillsView/ItemsView/CalcsView/
+ConfigView/NotesView/ImportView/CompareView/PartyView/PlaceholderView/BuildListPage),
+registered via `import "views"` + `qml.qrc`. Per-view state moved off the root Window
+into each view; parent drives `visible: root.activeView==="X"`. Top bar + sidebar stay
+inline (→ Part 1.4). `app/qml/components/` exists conceptually but is still empty
+(widgets land in 1.2–1.3). Verified: build clean, `--capture` failed=0 (render-identical
+to Phase 0 baseline), selftest 0, headless 0. **Env gotcha:** unsigned mingw binaries
+need Windows **Smart App Control OFF** (else exit 127 / 0xC0E9 crash, no output); pob-qt
+writes to OneDrive\Documents so Controlled Folder Access may block it (allow the exe).
+
 
 This is the "pertinent work already done" record. Verified against code + captures
 during the July 2026 analysis; trust code over any older plan doc.

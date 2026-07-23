@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QString>
 #include "LuaEngine.h"
+#include "TextMetrics.h"
 
 // Shared headless self-test suite for the LuaJIT bridge.
 //
@@ -310,6 +311,38 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         if (!ok) {
             qCritical() << "misc-tabs check FAILED:"
                         << mt.value("error").toString();
+            return false;
+        }
+    }
+
+    // Phase 1.2a: text-metrics engine. Exercise the REAL DrawStringWidth global
+    // (Lua → pob.stringWidth → .tgf TextMetrics), asserting the .tgf fonts actually
+    // loaded (not the degenerate fallback) plus the load-bearing invariants:
+    //   * a glyph has positive width; the empty string is zero;
+    //   * FIXED is monospace at a baked height (scale 1) → width scales exactly;
+    //   * multi-line width = the max line width;
+    //   * a ^7 colour escape contributes zero width.
+    {
+        TextMetrics* tm = engine.textMetrics();
+        const int wA     = engine.callGlobal("DrawStringWidth", { 16, "FIXED", "A" }).toInt();
+        const int wAAAA  = engine.callGlobal("DrawStringWidth", { 16, "FIXED", "AAAA" }).toInt();
+        const int wHello = engine.callGlobal("DrawStringWidth", { 16, "FIXED", "Hello" }).toInt();
+        const int wEmpty = engine.callGlobal("DrawStringWidth", { 16, "FIXED", "" }).toInt();
+        const int wMulti = engine.callGlobal("DrawStringWidth", { 16, "FIXED", "Hi\nHello" }).toInt();
+        const int wEsc   = engine.callGlobal("DrawStringWidth", { 16, "VAR", "^7Hello" }).toInt();
+        const int wPlain = engine.callGlobal("DrawStringWidth", { 16, "VAR", "Hello" }).toInt();
+        const bool loaded = tm && tm->anyFontLoaded();
+        qDebug().noquote() << "textmetrics: fontsLoaded=" << loaded
+                 << " wA=" << wA << " wAAAA=" << wAAAA << " wHello=" << wHello
+                 << " wEmpty=" << wEmpty << " wMulti=" << wMulti
+                 << " wEsc=" << wEsc << " wPlain=" << wPlain;
+        const bool tmOk = loaded && wA > 0 && wEmpty == 0
+                       && wAAAA == 4 * wA && wMulti == wHello && wEsc == wPlain;
+        if (!tmOk) {
+            qCritical() << "text-metrics check FAILED (loaded=" << loaded
+                        << " wA=" << wA << " wAAAA=" << wAAAA << " wEmpty=" << wEmpty
+                        << " wMulti=" << wMulti << " wHello=" << wHello
+                        << " wEsc=" << wEsc << " wPlain=" << wPlain << ")";
             return false;
         }
     }

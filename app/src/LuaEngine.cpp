@@ -1,6 +1,7 @@
 #include "LuaEngine.h"
 #include "selftest_checks.h"
 #include "luabridge.h"
+#include "TextMetrics.h"
 
 #include <QDebug>
 #ifndef POB_NO_GUI
@@ -52,6 +53,13 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
         m_userDir = QDir::homePath() + "/Documents";
     QDir().mkpath(m_userDir);
 
+    // Phase 1.2a: create the .tgf-backed text-measurement engine before the host
+    // bootstrap runs, so DrawStringWidth/DrawStringCursorIndex are real from the
+    // first OnInit layout pass. Fonts load lazily on first use. The bitmap-font
+    // metrics ship under <runtime>/SimpleGraphic/Fonts.
+    m_textMetrics = new TextMetrics(this);
+    m_textMetrics->setFontDir(m_runtimeDir + "/SimpleGraphic/Fonts");
+
     // One-time libcurl global init (idempotent across engine instances).
     static bool curlReady = false;
     if (!curlReady) {
@@ -91,6 +99,8 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
         { "deflate",       l_pob_deflate },
         { "http",          l_pob_http },
         { "listDir",       l_pob_listDir },
+        { "stringWidth",       l_pob_stringWidth },
+        { "stringCursorIndex", l_pob_stringCursorIndex },
         { nullptr, nullptr }
     };
     lua_newtable(m_L);
@@ -161,6 +171,33 @@ int LuaEngine::l_pob_getTime(lua_State* L) {
     // NOT epoch. The engine uses it for frame deltas, timers and unique markers;
     // a monotonic clock avoids wall-clock jumps (NTP/DST) skewing those deltas.
     lua_pushnumber(L, double(selfOf(L)->m_clock.elapsed()));
+    return 1;
+}
+
+// DrawStringWidth(height, font, text) — real metrics via the .tgf TextMetrics
+// engine (replaces the pob_host.lua stub that returned 1). font may be nil → FIXED.
+int LuaEngine::l_pob_stringWidth(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    const int height = (int)lua_tonumber(L, 1);
+    const QString font = lua_isstring(L, 2) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    const QString text = lua_isstring(L, 3) ? QString::fromUtf8(lua_tostring(L, 3)) : QString();
+    const int w = self->m_textMetrics ? self->m_textMetrics->stringWidth(height, font, text) : 1;
+    lua_pushinteger(L, w);
+    return 1;
+}
+
+// DrawStringCursorIndex(height, font, text, cursorX, cursorY) — caret hit-testing
+// (replaces the stub that returned 0). Returns a 0-based char offset.
+int LuaEngine::l_pob_stringCursorIndex(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    const int height = (int)lua_tonumber(L, 1);
+    const QString font = lua_isstring(L, 2) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    const QString text = lua_isstring(L, 3) ? QString::fromUtf8(lua_tostring(L, 3)) : QString();
+    const int curX = (int)lua_tonumber(L, 4);
+    const int curY = (int)lua_tonumber(L, 5);
+    const int idx = self->m_textMetrics
+        ? self->m_textMetrics->stringCursorIndex(height, font, text, curX, curY) : 0;
+    lua_pushinteger(L, idx);
     return 1;
 }
 

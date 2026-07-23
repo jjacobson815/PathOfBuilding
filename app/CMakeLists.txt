@@ -21,6 +21,7 @@ pkg_check_modules(CURL REQUIRED libcurl)
 add_executable(pob-qt
     src/main.cpp
     src/LuaEngine.cpp
+    src/TextMetrics.cpp
     src/Theme.cpp
     src/BuildModel.cpp
     src/SocketGroupModel.cpp
@@ -62,6 +63,7 @@ target_compile_definitions(pob-qt PRIVATE
 add_executable(pob-selftest
     src/selftest.cpp
     src/LuaEngine.cpp
+    src/TextMetrics.cpp
     src/luabridge.cpp
 )
 target_include_directories(pob-selftest PRIVATE

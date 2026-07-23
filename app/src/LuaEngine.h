@@ -14,6 +14,8 @@
 // Lua bootstrap (lua/pob_host.lua) which routes the few that matter through
 // the C `pob` bridge table registered here. This reuses the exact seam the
 // project's own src/HeadlessWrapper.lua already uses for headless runs.
+class TextMetrics;
+
 class LuaEngine : public QObject {
     Q_OBJECT
 public:
@@ -230,6 +232,10 @@ private:
     // { name = string, modified = number } entries for `path` (a directory,
     // optionally with a trailing wildcard pattern). `dirsOnly` lists folders.
     static int l_pob_listDir(lua_State* L);
+    // Phase 1.2a: real text metrics (replace the DrawStringWidth/CursorIndex stubs
+    // in pob_host.lua). Backed by the .tgf-driven TextMetrics engine.
+    static int l_pob_stringWidth(lua_State* L);
+    static int l_pob_stringCursorIndex(lua_State* L);
     static LuaEngine* selfOf(lua_State* L);
 
     lua_State* m_L = nullptr;
@@ -238,4 +244,11 @@ private:
     QString m_userDir;
     QStringList m_launchArgs;   // exposed to Lua as the `arg` table
     QElapsedTimer m_clock;      // monotonic clock backing GetTime (ms since init)
+    TextMetrics* m_textMetrics = nullptr;  // .tgf-backed string measurement (Phase 1.2a)
+
+public:
+    // Shared TextMetrics instance (created in init() from the runtime Fonts dir).
+    // main.cpp exposes this same object to QML as the `textMetrics` context
+    // property so QML and the Lua engine measure identically.
+    TextMetrics* textMetrics() const { return m_textMetrics; }
 };

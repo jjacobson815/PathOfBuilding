@@ -1,5 +1,16 @@
 <RCC>
     <qresource prefix="/qml">
         <file>main.qml</file>
+        <file>views/TreeView.qml</file>
+        <file>views/SkillsView.qml</file>
+        <file>views/ItemsView.qml</file>
+        <file>views/CalcsView.qml</file>
+        <file>views/ConfigView.qml</file>
+        <file>views/NotesView.qml</file>
+        <file>views/ImportView.qml</file>
+        <file>views/CompareView.qml</file>
+        <file>views/PartyView.qml</file>
+        <file>views/PlaceholderView.qml</file>
+        <file>views/BuildListPage.qml</file>
     </qresource>
 </RCC>
