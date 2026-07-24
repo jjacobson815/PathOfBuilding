@@ -90,6 +90,7 @@ Item {
                     model: calcModel
                     delegate: Rectangle {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: secCol.height + theme.space2 * 2
                         color: theme.background
                         border.color: theme.section
                         radius: theme.radiusControl
@@ -99,6 +100,7 @@ Item {
                             id: secCol
                             anchors.left: parent.left
                             anchors.right: parent.right
+                            anchors.top: parent.top
                             anchors.margins: theme.space2
                             spacing: 2
                             Text {

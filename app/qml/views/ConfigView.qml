@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "../components" as Widgets
 
 // CONFIG (ConfigTab) view. Extracted from main.qml (Part 1.1); behaviour
 // unchanged. Renders the build's config options (src/Modules/ConfigOptions.lua)
@@ -121,10 +122,10 @@ Item {
                             hoverEnabled: true
                             ToolTip.text: model.tooltip ? model.tooltip : ""
                             ToolTip.visible: model.tooltip ? containsMouse : false
-                            Text {
+                            Widgets.ColorText {
                                 id: labelText
-                                text: model.label || model.name
-                                color: theme.text
+                                sourceText: model.label || model.name
+                                defaultColor: theme.text
                                 font.pixelSize: theme.fontSize
                                 width: parent.width
                                 wrapMode: Text.WordWrap
