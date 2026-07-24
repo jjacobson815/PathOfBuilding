@@ -20,6 +20,12 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         qCritical() << "expected modes LIST and BUILD";
         return false;
     }
+    // Part 1.4: modeNames() must be deterministic across runs (the top-bar mode
+    // buttons used to reorder run-to-run). Assert the exact registration order.
+    if (modes != QStringList{ "LIST", "BUILD" }) {
+        qCritical() << "modeNames order not stable/expected (want [LIST,BUILD]) got" << modes;
+        return false;
+    }
 
     QVariant viewList = engine.getPath("main.modes.BUILD.viewList");
     if (viewList.typeId() == QMetaType::QVariantList) {
@@ -343,6 +349,147 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
                         << " wA=" << wA << " wAAAA=" << wAAAA << " wEmpty=" << wEmpty
                         << " wMulti=" << wMulti << " wHello=" << wHello
                         << " wEsc=" << wEsc << " wPlain=" << wPlain << ")";
+            return false;
+        }
+    }
+
+    // Part 1.4: mode manager — the BUILD mode bar button must reopen the LAST
+    // build via GetArgs persistence, not force a fresh "Unnamed build". Names +
+    // saves a probe build, detours to LIST, re-enters BUILD via pob_setBuildMode
+    // (the path LuaEngine::setMode("BUILD") drives) and asserts the reopened
+    // build kept its name AND file (reloaded from disk).
+    {
+        QVariant rlb = engine.callGlobal("pob_selftestReopenLastBuild");
+        if (rlb.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestReopenLastBuild missing or wrong type:" << rlb.typeName();
+            return false;
+        }
+        const QVariantMap m = rlb.toMap();
+        qDebug().noquote() << "reopen-last-build:"
+                 << "saved=" << m.value("saved").toBool()
+                 << "inList=" << m.value("inList").toString()
+                 << "gotMode=" << m.value("gotMode").toString()
+                 << "wantName=" << m.value("wantName").toString()
+                 << "gotName=" << m.value("gotName").toString()
+                 << "wantFile=" << m.value("wantFile").toString()
+                 << "gotFile=" << m.value("gotFile").toString();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "reopen-last-build check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Part 1.4: cloud robustness — (1) GetCloudProvider is a real fs-inspecting
+    // implementation (not the null stub): a missing path yields a different status
+    // than an existing one, and the pob.fileAttributes bridge is present; (2) the
+    // errorReadingSettings latch is non-fatal — forcing it then running a natural
+    // LoadSettings clears it (the old one-strike latch left it set forever,
+    // permanently disabling settings persistence for the session).
+    {
+        QVariant cr = engine.callGlobal("pob_selftestCloudRobustness");
+        if (cr.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestCloudRobustness missing or wrong type:" << cr.typeName();
+            return false;
+        }
+        const QVariantMap m = cr.toMap();
+        qDebug().noquote() << "cloud-robustness:"
+                 << "providerReal=" << m.value("providerReal").toBool()
+                 << "hasFileAttributes=" << m.value("hasFileAttributes").toBool()
+                 << "latchCleared=" << m.value("latchCleared").toBool()
+                 << "statusMissing=" << m.value("statusMissing").toString()
+                 << "statusExisting=" << m.value("statusExisting").toString();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "cloud-robustness check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Part 1.4: Options dialog bridge — (1) pob_getOptions yields the full,
+    // well-formed descriptor list; (2) a live-preview boolean field flips on the
+    // engine via pob_previewOption and reverts cleanly (the Cancel path); (3) the
+    // defaultCharLevel numeric clamp [1,100] is enforced. Side-effect-free: never
+    // calls pob_commitOptions, so Settings.xml is untouched.
+    {
+        QVariant op = engine.callGlobal("pob_selftestOptions");
+        if (op.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestOptions missing or wrong type:" << op.typeName();
+            return false;
+        }
+        const QVariantMap m = op.toMap();
+        qDebug().noquote() << "options:"
+                 << "count=" << m.value("count").toInt()
+                 << "boolKey=" << m.value("boolKey").toString()
+                 << "flipOk=" << m.value("flipOk").toBool()
+                 << "clampOk=" << m.value("clampOk").toBool();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "options check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Part 1.4: genuine Settings.xml round-trip against the REAL userPath (not a
+    // scratch dir). Backs up the real file, writes a distinctive defaultCharLevel
+    // via main:SaveSettings(), clears the in-memory value, re-reads via
+    // main:LoadSettings(), asserts it survived the disk round trip, then restores
+    // the exact original file bytes. This is the disk-level analogue of "quit and
+    // relaunch" (the actual quit/relaunch app-restart behaviour is verified
+    // separately via a manual real-process test, not the automated gate).
+    {
+        QVariant sr = engine.callGlobal("pob_selftestSettingsRoundTrip");
+        if (sr.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestSettingsRoundTrip missing or wrong type:" << sr.typeName();
+            return false;
+        }
+        const QVariantMap m = sr.toMap();
+        qDebug().noquote() << "settings-round-trip:"
+                 << "wantVal=" << m.value("wantVal").toString()
+                 << "gotVal=" << m.value("gotVal").toString()
+                 << "roundTripOk=" << m.value("roundTripOk").toBool()
+                 << "saveErrorLatched=" << m.value("saveErrorLatched").toBool()
+                 << "loadErrorLatched=" << m.value("loadErrorLatched").toBool();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "settings-round-trip check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Part 1.4 (bullet 5): toast bridge -- add -> list -> update -> dismiss ->
+    // clear, asserting the pob_host.lua ToastNotification mirror stays
+    // consistent with each mutation (independent of pob.toastsChanged/QML,
+    // which this check doesn't exercise -- no QML host in a headless run).
+    {
+        QVariant tc = engine.callGlobal("pob_selftestToast");
+        if (tc.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestToast missing or wrong type:" << tc.typeName();
+            return false;
+        }
+        const QVariantMap m = tc.toMap();
+        qDebug().noquote() << "toast:"
+                 << "foundAfterAdd=" << m.value("foundAfterAdd").toBool()
+                 << "updatedOk=" << m.value("updatedOk").toBool()
+                 << "dismissedOk=" << m.value("dismissedOk").toBool()
+                 << "clearOk=" << m.value("clearOk").toBool();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "toast check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Part 1.4 (bullet 6): About popup content bridge -- changelog.txt/help.txt
+    // parse into a non-empty, well-formed row list.
+    {
+        QVariant ac = engine.callGlobal("pob_selftestAboutContent");
+        if (ac.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestAboutContent missing or wrong type:" << ac.typeName();
+            return false;
+        }
+        const QVariantMap m = ac.toMap();
+        qDebug().noquote() << "about-content:"
+                 << "changeCount=" << m.value("changeCount").toInt()
+                 << "helpCount=" << m.value("helpCount").toInt()
+                 << "helpSectionCount=" << m.value("helpSectionCount").toInt();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "about-content check FAILED:" << m;
             return false;
         }
     }

@@ -64,7 +64,12 @@ Item {
         visible: root.isGlyph
         anchors.fill: parent
 
-        property color glyphColor: root.controlEnabled ? theme.text : theme.background
+        // Disabled glyphs use theme.muted, not theme.background: the disabled
+        // Chrome fill (#141822) and theme.background (#0F172A) are nearly
+        // identical dark navies, so background-on-disabled-fill is unreadable
+        // (found via a real BottomBar screenshot — Part 1.3's original
+        // contrast rule mis-assumed theme.disabled was a lighter grey).
+        property color glyphColor: root.controlEnabled ? theme.text : theme.muted
 
         onGlyphColorChanged: requestPaint()
         onVisibleChanged: if (visible) requestPaint()
@@ -101,15 +106,18 @@ Item {
         anchors.centerIn: parent
         label: root.label
         size: Math.max(8, root.height - 4)
-        defaultColor: root.controlEnabled ? theme.text : theme.background
+        defaultColor: root.controlEnabled ? theme.text : theme.muted
     }
 
     MouseArea {
         id: ma
         anchors.fill: parent
         hoverEnabled: true
-        enabled: root.controlEnabled
-        onClicked: root.clicked()
+        // Always enabled so hover (and thus a disabled-explains-why tooltip)
+        // still works when controlEnabled is false; the click itself is
+        // gated below. Chrome's own controlEnabled coloring is unaffected —
+        // it ignores hover state while disabled (see Chrome.qml).
+        onClicked: if (root.controlEnabled) root.clicked()
     }
 
     Tooltip {
@@ -117,7 +125,9 @@ Item {
     }
 
     function _showTooltip() {
-        if (!root.hovered || root.controlEnabled === false) { tt.hide(); return; }
+        // A disabled button can still show a tooltip (e.g. explaining why it's
+        // disabled) — only click is gated by controlEnabled, not hover/tooltip.
+        if (!root.hovered) { tt.hide(); return; }
         if (!root.noTooltip || root.forceTooltip) {
             tt.clear();
             if (root.tooltipFunc) root.tooltipFunc(tt);

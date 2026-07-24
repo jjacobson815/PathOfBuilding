@@ -16,9 +16,26 @@
 #include <QStandardPaths>
 #include <lauxlib.h>
 
+// Part 1.4: Win32 file attributes for OneDrive-dehydration detection
+// (l_pob_fileAttributes). NOMINMAX so windows.h's min/max macros don't collide
+// with std::min/max used via <algorithm> below.
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#ifndef FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+#define FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS 0x00400000
+#endif
+#ifndef FILE_ATTRIBUTE_RECALL_ON_OPEN
+#define FILE_ATTRIBUTE_RECALL_ON_OPEN 0x00040000
+#endif
+#endif
+
 #include <zlib.h>
 #include <curl/curl.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -101,6 +118,15 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
         { "listDir",       l_pob_listDir },
         { "stringWidth",       l_pob_stringWidth },
         { "stringCursorIndex", l_pob_stringCursorIndex },
+        // Part 1.4: cloud robustness. GUI-independent (registered even headless):
+        // fileAttributes backs GetCloudProvider; the two *Popup fns emit Qt
+        // signals the QML host turns into real dialogs (no-op with no listener).
+        { "fileAttributes",    l_pob_fileAttributes },
+        { "cloudErrorPopup",   l_pob_cloudErrorPopup },
+        { "pathErrorPopup",    l_pob_pathErrorPopup },
+        // Part 1.4 (bullet 5): toast mirror change notification (Lua-initiated
+        // push, same pattern as cloudErrorPopup/pathErrorPopup above).
+        { "toastsChanged",     l_pob_toastsChanged },
         { nullptr, nullptr }
     };
     lua_newtable(m_L);
@@ -199,6 +225,68 @@ int LuaEngine::l_pob_stringCursorIndex(lua_State* L) {
         ? self->m_textMetrics->stringCursorIndex(height, font, text, curX, curY) : 0;
     lua_pushinteger(L, idx);
     return 1;
+}
+
+// Part 1.4: pob.fileAttributes(path) -> { exists, offline, recallOnDataAccess,
+// recallOnOpen, reparsePoint }. Backs the real GetCloudProvider Lua global. On
+// Windows the RECALL_ON_* / OFFLINE flags mark a OneDrive "files on demand"
+// dehydrated placeholder — the exact state whose transient read failure trips
+// the engine's errorReadingSettings path. On non-Windows only `exists` is set.
+int LuaEngine::l_pob_fileAttributes(lua_State* L) {
+    if (lua_gettop(L) < 1 || !lua_isstring(L, 1)) { lua_pushnil(L); return 1; }
+    QString path = QString::fromUtf8(lua_tostring(L, 1));
+    lua_newtable(L);
+    lua_pushboolean(L, QFileInfo::exists(path) ? 1 : 0);
+    lua_setfield(L, -2, "exists");
+#ifdef Q_OS_WIN
+    const std::wstring wpath = path.toStdWString();
+    DWORD attrs = GetFileAttributesW(wpath.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES) {
+        lua_pushboolean(L, (attrs & FILE_ATTRIBUTE_OFFLINE) != 0);
+        lua_setfield(L, -2, "offline");
+        lua_pushboolean(L, (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0);
+        lua_setfield(L, -2, "recallOnDataAccess");
+        lua_pushboolean(L, (attrs & FILE_ATTRIBUTE_RECALL_ON_OPEN) != 0);
+        lua_setfield(L, -2, "recallOnOpen");
+        lua_pushboolean(L, (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
+        lua_setfield(L, -2, "reparsePoint");
+    }
+#endif
+    return 1;
+}
+
+// Part 1.4: pob.cloudErrorPopup(path, provider, status) — the engine's
+// OpenCloudErrorPopup hands off here; we emit cloudErrorRequested so the QML host
+// opens a real MessagePopup. No-op (but harmless) when nothing is connected
+// (headless / pob-selftest).
+int LuaEngine::l_pob_cloudErrorPopup(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    QString path     = lua_isstring(L, 1) ? QString::fromUtf8(lua_tostring(L, 1)) : QString();
+    QString provider = lua_isstring(L, 2) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    QString status   = lua_isstring(L, 3) ? QString::fromUtf8(lua_tostring(L, 3)) : QString();
+    if (self) emit self->cloudErrorRequested(path, provider, status);
+    return 0;
+}
+
+// Part 1.4: pob.pathErrorPopup(invalidPath, errMsg) — the engine's OpenPathPopup
+// hands off here; we emit pathErrorRequested so the QML host opens a real
+// MessagePopup.
+int LuaEngine::l_pob_pathErrorPopup(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    QString invalidPath = lua_isstring(L, 1) ? QString::fromUtf8(lua_tostring(L, 1)) : QString();
+    QString errMsg      = lua_isstring(L, 2) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    if (self) emit self->pathErrorRequested(invalidPath, errMsg);
+    return 0;
+}
+
+// Part 1.4 (bullet 5): pob.toastsChanged() -- the pob_host.lua ToastNotification
+// wrap calls this after every Add/Update/Remove/Clear; we emit toastsChanged()
+// so the QML host re-fetches the current list via getToasts(). No-op (but
+// harmless) when nothing is connected (headless / pob-selftest).
+int LuaEngine::l_pob_toastsChanged(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    if (self) emit self->toastsChanged();
+    return 0;
 }
 
 int LuaEngine::l_pob_copy(lua_State* L) {
@@ -624,6 +712,22 @@ QStringList LuaEngine::modeNames() const {
         lua_pop(m_L, 1); // pop value, keep key for next iteration
     }
     lua_pop(m_L, 2); // pop modes, main
+
+    // main.modes is a hash table, so lua_next (pairs) yields its keys in an
+    // unspecified, run-to-run-variable order — the top-bar mode buttons flipped
+    // between LIST/BUILD orderings across runs. Impose a stable order matching
+    // the engine's own registration sequence (Modules/Main.lua registers LIST
+    // then BUILD); any unknown/future mode sorts alphabetically after the known
+    // ones so the ordering stays deterministic regardless.
+    static const QStringList kModeOrder = { "LIST", "BUILD" };
+    std::stable_sort(out.begin(), out.end(), [](const QString& a, const QString& b) {
+        int ia = kModeOrder.indexOf(a);
+        int ib = kModeOrder.indexOf(b);
+        if (ia < 0) ia = kModeOrder.size();
+        if (ib < 0) ib = kModeOrder.size();
+        if (ia != ib) return ia < ib;
+        return a < b; // stable, deterministic tiebreak for unknown modes
+    });
     return out;
 }
 
@@ -663,10 +767,15 @@ QVariant LuaEngine::runCallback(const QString& name, const QVariantList& args) {
 // immediately (e.g. from a QML button click on the GUI thread).
 void LuaEngine::setMode(const QString& mode) {
     if (mode == "BUILD") {
-        // buildMode:Init reverts to LIST unless a buildName is supplied
-        // (see src/Modules/Build.lua). Mirror the boot's forced-build args so
-        // the mode actually lands on BUILD instead of bouncing back to LIST.
-        callMethod("main", "SetMode", {mode, false, "Unnamed build"});
+        // Reopen the LAST build the user had open (GetArgs persistence) rather
+        // than force-opening a fresh "Unnamed build" on every toggle back to
+        // BUILD. The decision — which dbFileName/buildName to replay and the
+        // genuine first-run "Unnamed build" fallback — lives in the
+        // pob_setBuildMode Lua global so it can read main.modes.BUILD:GetArgs()
+        // naturally (Build.lua). buildMode:Init still reverts to LIST if it is
+        // handed no buildName, so the fallback always supplies one. See
+        // app/lua/pob_host.lua.
+        callGlobal("pob_setBuildMode");
     } else {
         callMethod("main", "SetMode", {mode});
     }
@@ -925,6 +1034,53 @@ QVariant LuaEngine::setConfigOption(const QString& name, const QVariant& value) 
     emit configChanged();
     emit calcsChanged();
     return r;
+}
+
+// Part 1.4: Options dialog bridge. See the header for the live-vs-commit split.
+QVariantList LuaEngine::getOptions() {
+    QVariant res = callGlobal("pob_getOptions");
+    if (res.typeId() == QMetaType::QVariantList) {
+        return res.toList();
+    }
+    return { };
+}
+
+QVariant LuaEngine::previewOption(const QString& key, const QVariant& value) {
+    QVariant r = callGlobal("pob_previewOption", { key, value });
+    // Live-preview fields (node-power theme, hex colours, ...) are mutated on the
+    // engine immediately; emit configChanged so any live-bound QML refreshes.
+    emit configChanged();
+    return r;
+}
+
+bool LuaEngine::commitOptions(const QVariantMap& values) {
+    bool ok = callGlobal("pob_commitOptions", QVariantList{ QVariant(values) }).toBool();
+    emit configChanged();
+    return ok;
+}
+
+// Part 1.4 (bullet 5): toast bridge. Delegates to the top-level Lua globals
+// pob_getToasts / pob_dismissToast (callGlobal resolves only top-level globals).
+QVariantList LuaEngine::getToasts() {
+    QVariant v = callGlobal("pob_getToasts");
+    if (v.typeId() == QMetaType::QVariantList) return v.toList();
+    return { };
+}
+
+void LuaEngine::dismissToast(const QString& id) {
+    callGlobal("pob_dismissToast", { id });
+    // pob_dismissToast -> ToastNotification:Remove -> the wrap's pob.toastsChanged()
+    // already emits toastsChanged() synchronously; nothing further to do here.
+}
+
+// Part 1.4 (bullet 6): About popup content bridge. Delegates to the top-level
+// Lua global pob_getAboutContent (callGlobal resolves only top-level globals).
+QVariant LuaEngine::getAboutContent() {
+    return callGlobal("pob_getAboutContent");
+}
+
+void LuaEngine::openURL(const QString& url) {
+    callGlobal("OpenURL", { url });
 }
 
 // Phase 5e: Notes/Import/Compare/Party (utility) tabs bridge. Delegates

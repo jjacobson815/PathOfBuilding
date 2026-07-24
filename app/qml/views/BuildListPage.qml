@@ -1,12 +1,23 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+// Namespaced import (avoids the components/Button.qml vs QtQuick.Controls.Button
+// ambiguity — see main.qml's own note): reach the component library as
+// Widgets.* for this view's Part 1.4 acceptance-gate widget adoption.
+import "../components" as Widgets
 
 // LIST-mode page — the build library browser. Extracted from main.qml (Part 1.1);
 // behaviour unchanged. Bound to buildListModel. The selection state and
 // openSelected() helper (previously root Window properties) are local to this page
 // — they are only used here. This is Page 1 of the top-level StackLayout, so the
 // root ColumnLayout carries the Layout margins (StackLayout ignores anchors).
+//
+// Part 1.4 acceptance gate: adopted the Tier 0/1 component kit here (Widgets.
+// Button + Widgets.Label replacing hand-rolled QtQuick.Controls.Button/Text) —
+// one of the two required `import "components"` consumers outside main.qml/
+// OptionsDialog.qml. Mechanical swap only; the ListView delegate (bound to
+// buildListModel's per-row data) is left as-is — that's real Phase 3+ work,
+// not a widget-kit adoption.
 ColumnLayout {
     id: buildListPage
     Layout.fillWidth: true
@@ -36,28 +47,33 @@ ColumnLayout {
         luaEngine.openBuild(listSelectedFullFileName)
     }
 
-    Text {
-        text: "Build Library"
-        color: theme.text
-        font.bold: true
-        font.pixelSize: theme.fontSize + 6
+    Widgets.Label {
+        label: "Build Library"
+        size: theme.fontSize + 6
     }
 
     // Toolbar: create / import / delete / rename controls.
     RowLayout {
+        Layout.fillWidth: true
         spacing: theme.space1
-        Button {
-            text: "New Build"
+        Widgets.Button {
+            label: "New Build"
+            implicitWidth: 82
+            implicitHeight: 20
             onClicked: luaEngine.createBuild()
         }
-        Button {
-            text: "Open"
-            enabled: buildListPage.listSelectedIndex >= 0 && !buildListPage.listSelectedIsFolder
+        Widgets.Button {
+            label: "Open"
+            implicitWidth: 56
+            implicitHeight: 20
+            controlEnabled: buildListPage.listSelectedIndex >= 0 && !buildListPage.listSelectedIsFolder
             onClicked: buildListPage.openSelected()
         }
-        Button {
-            text: "Delete"
-            enabled: buildListPage.listSelectedIndex >= 0
+        Widgets.Button {
+            label: "Delete"
+            implicitWidth: 64
+            implicitHeight: 20
+            controlEnabled: buildListPage.listSelectedIndex >= 0
             onClicked: {
                 if (buildListPage.listSelectedIsFolder)
                     luaEngine.deleteFolder(buildListPage.listSelectedName)
@@ -70,20 +86,24 @@ ColumnLayout {
         TextField {
             id: folderNameField
             placeholderText: "New folder name"
-            Layout.preferredWidth: 160
+            Layout.preferredWidth: 130
             font.pixelSize: theme.fontSize
         }
-        Button {
-            text: "New Folder"
-            enabled: folderNameField.text !== ""
+        Widgets.Button {
+            label: "New Folder"
+            implicitWidth: 110
+            implicitHeight: 20
+            controlEnabled: folderNameField.text !== ""
             onClicked: {
                 luaEngine.createFolder(folderNameField.text)
                 folderNameField.text = ""
             }
         }
+        Item { Layout.preferredWidth: theme.space2 } // trailing margin (StackLayout page inset unreliable at exact width fit)
     }
 
     RowLayout {
+        Layout.fillWidth: true
         spacing: theme.space1
         TextField {
             id: importUrlField
@@ -91,14 +111,17 @@ ColumnLayout {
             Layout.fillWidth: true
             font.pixelSize: theme.fontSize
         }
-        Button {
-            text: "Import URL"
-            enabled: importUrlField.text !== ""
+        Widgets.Button {
+            label: "Import URL"
+            implicitWidth: 110
+            implicitHeight: 20
+            controlEnabled: importUrlField.text !== ""
             onClicked: {
                 luaEngine.importBuildFromURL(importUrlField.text)
                 importUrlField.text = ""
             }
         }
+        Item { Layout.preferredWidth: theme.space2 } // trailing margin (StackLayout page inset unreliable at exact width fit)
     }
 
     // The build/folder list, bound to the BuildListModel.
@@ -150,9 +173,8 @@ ColumnLayout {
         }
     }
 
-    Text {
-        text: "Builds/folders: " + buildListModel.count
-        color: theme.muted
-        font.pixelSize: theme.fontSize
+    Widgets.Label {
+        label: "Builds/folders: " + buildListModel.count
+        defaultColor: theme.muted
     }
 }

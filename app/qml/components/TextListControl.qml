@@ -38,6 +38,11 @@ Item {
     implicitWidth: 300
     implicitHeight: 200
 
+    // Part 1.4: programmatic scroll control (About popup's help-section jump
+    // on open). Forwards to the internal ScrollBar, which isn't otherwise
+    // exposed outside this component.
+    function setScrollOffset(v) { scrollBar.setOffset(v) }
+
     Chrome { anchors.fill: parent }
 
     Item {

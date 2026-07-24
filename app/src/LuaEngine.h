@@ -161,6 +161,41 @@ public:
     Q_INVOKABLE QVariantList getConfigOptions();
     Q_INVOKABLE QVariant setConfigOption(const QString& name, const QVariant& value);
 
+    // Part 1.4: Options dialog bridge (main:OpenOptionsPopup). getOptions returns
+    // the full ~28-setting descriptor list (each a QVariantMap: key/label/type/
+    // value/section/tooltip/options/min/max/step/maxChars/commit). previewOption
+    // LIVE-applies a field onto self.* (the fields legacy mutates as the control
+    // changes; Cancel reverts by replaying the pre-open snapshot through this same
+    // method). commitOptions applies the Save-button-only fields
+    // (connectionProtocol/proxy/buildPath) and persists Settings.xml. Delegates to
+    // the top-level Lua globals pob_getOptions / pob_previewOption /
+    // pob_commitOptions (callGlobal resolves only top-level globals). Each mutation
+    // emits configChanged so any live-bound QML (e.g. a node-power swatch) refreshes.
+    Q_INVOKABLE QVariantList getOptions();
+    Q_INVOKABLE QVariant previewOption(const QString& key, const QVariant& value);
+    Q_INVOKABLE bool commitOptions(const QVariantMap& values);
+
+    // Part 1.4 (bullet 5): Toast notification bridge. getToasts() returns the
+    // current [{id, message}, ...] mirror list (delegates to the top-level Lua
+    // global pob_getToasts); dismissToast(id) delegates to pob_dismissToast.
+    // The mirror is kept current by a pob_host.lua host seam that wraps
+    // ToastNotification's Add/Update/Remove/Clear and calls pob.toastsChanged()
+    // on every mutation, which this class turns into the toastsChanged() Qt
+    // signal (see l_pob_toastsChanged) -- QML listens and re-fetches via
+    // getToasts(), the same push-then-pull pattern as cloudErrorRequested.
+    Q_INVOKABLE QVariantList getToasts();
+    Q_INVOKABLE void dismissToast(const QString& id);
+
+    // Part 1.4 (bullet 6): About popup content bridge (main:OpenAboutPopup).
+    // Delegates to the top-level Lua global pob_getAboutContent, which parses
+    // changelog.txt/help.txt into TextListControl-shaped row lists. Returns
+    // { changeList, changeVersionHeights, helpList, helpSectionHeights,
+    //   helpSections, versionNumber, versionBranch, devMode }.
+    Q_INVOKABLE QVariant getAboutContent();
+    // About popup's GitHub link. Delegates to the top-level Lua global OpenURL
+    // (pob_host.lua), which routes through the existing pob.openURL bridge.
+    Q_INVOKABLE void openURL(const QString& url);
+
     // Phase 5e: Notes/Import/Compare/Party (utility) tabs bridge. Delegates to
     // the top-level Lua globals pob_getNotes / pob_setNotes /
     // pob_importFromCode / pob_getCompareEntries / pob_getPartyMembers
@@ -203,6 +238,16 @@ signals:
     void buildListChanged();   // LIST-mode build library
     void modeChanged();        // mode switch / new build loaded (refresh all)
     void viewChanged();        // active view (sidebar) changed
+    // Part 1.4: cloud/path error dialogs. Emitted when the engine's
+    // OpenCloudErrorPopup / OpenPathPopup fire (via the pob.cloudErrorPopup /
+    // pob.pathErrorPopup bridge). main.qml listens and opens a real MessagePopup
+    // (the SimpleGraphic control trees those functions built are inert in QML).
+    void cloudErrorRequested(const QString& path, const QString& provider, const QString& status);
+    void pathErrorRequested(const QString& invalidPath, const QString& errMsg);
+    // Part 1.4 (bullet 5): emitted when the Lua-side toast mirror changes (via
+    // pob.toastsChanged(), called from the pob_host.lua ToastNotification wrap).
+    // Carries no payload -- QML re-fetches the full list via getToasts().
+    void toastsChanged();
     void currentViewChanged(); // active BUILD view id changed (sidebar nav)
     void currentModeChanged(); // active mode (BUILD/LIST) changed
 
@@ -236,6 +281,18 @@ private:
     // in pob_host.lua). Backed by the .tgf-driven TextMetrics engine.
     static int l_pob_stringWidth(lua_State* L);
     static int l_pob_stringCursorIndex(lua_State* L);
+    // Part 1.4: Win32 file-attribute probe (OneDrive dehydration detection)
+    // backing the real GetCloudProvider Lua global. Returns a table
+    // { exists, offline, recallOnDataAccess, recallOnOpen, reparsePoint }.
+    static int l_pob_fileAttributes(lua_State* L);
+    // Part 1.4: bridge the engine's OpenCloudErrorPopup / OpenPathPopup to real
+    // QML dialogs by emitting cloudErrorRequested / pathErrorRequested.
+    static int l_pob_cloudErrorPopup(lua_State* L);
+    static int l_pob_pathErrorPopup(lua_State* L);
+    // Part 1.4 (bullet 5): pob.toastsChanged() -- called from the pob_host.lua
+    // ToastNotification wrap after every Add/Update/Remove/Clear; emits
+    // toastsChanged() so QML re-fetches via getToasts().
+    static int l_pob_toastsChanged(lua_State* L);
     static LuaEngine* selfOf(lua_State* L);
 
     lua_State* m_L = nullptr;

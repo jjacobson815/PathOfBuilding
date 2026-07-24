@@ -9,19 +9,36 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**Phase 1 — QML Component Library & App Shell — IN PROGRESS** (started 2026-07-23,
-user-approved). Spec: `phases/PHASE-1-component-library.md`. Phase 0 is COMPLETE
-(implementation), local gate GREEN (pob-selftest 0, pob-qt --headless 0,
-`--capture` all 10).
+**Phase 1 — QML Component Library & App Shell — COMPLETE (2026-07-24).** Spec:
+`phases/PHASE-1-component-library.md` (all Parts 1.1-1.4 ticked, acceptance gate
+closed — see that file for full per-item evidence, and the Done log below for
+the summary). **Phase 2 (Calc Integration Layer) is next but NOT started —
+awaiting user approval before beginning**, per the standing stop-at-phase-
+boundaries rule ([[stop-at-phase-boundaries]]).
 
-**CI confirmation: DEFERRED (skipped by user 2026-07-23).** Pushed the branch to
-the personal fork `github.com/jjacobson815/PathOfBuilding` `dev` (`git push fork
+**CI confirmation: still DEFERRED (skipped by user 2026-07-23, unrelated to
+Phase 1).** Pushed the branch to the personal fork
+`github.com/jjacobson815/PathOfBuilding` `dev` (`git push fork
 phase-0-foundation:dev`, ff `92bc0df0`→`fa3cc1ea`); all workflows dispatched but
 GitHub refused to start any job — *"account is locked due to a billing issue"* on
 the `jjacobson815` account. So `test.yml`/`qt-selftest.yml` remain **unverified in
 CI** (config is valid; jobs never ran). Re-trigger once the billing lock clears
 (Actions page re-run, `workflow_dispatch`, or empty commit). `fork` remote is now
 configured locally.
+
+**Env gotcha (still true, applies to every future session):**
+`pob-selftest.exe` chdirs to its srcDir arg during init, so the host-file arg
+MUST be ABSOLUTE (`<repo>/src <repo>/runtime <repo>/app/lua/pob_host.lua`) — the
+relative form fails post-chdir with a silent "Host bootstrap error: cannot open
+...". Also: on this dev machine, `qDebug`/`qCritical` output from either binary
+is invisible under a plain Git-Bash/PowerShell redirect (no real Win32 console
+attached) — set `QT_FORCE_STDERR_LOGGING=1` in the environment to see it; the
+**exit code alone is still reliable** without it (confirmed by intentionally
+passing bogus paths and observing exit 1 vs 0), which is why the gate has always
+been checked by exit code first per invariant #5.
+
+User-data policy is RESOLVED (SHARE); see resolved decision below +
+[[solo-hobby-fork-poc-scope]].
 
 ---
 
@@ -60,10 +77,20 @@ Full detail in `reference/00-architecture.md`. The short list:
 - **Auto-update** (Phase 14) — distribution channel + updater mechanism (installer
   framework / GitHub releases / own server). Determines the replacement for the
   legacy Windows updater.
-- **User-data policy** (Phase 1) — SHARE the legacy `Documents/Path of Building`
-  dir (lossless round-trip + zero migration, but needs engine-version lockstep) vs
-  SEPARATE dir with first-run migration. Recommend SHARE for v1. (The temp-dir
-  path bug itself is fixed in Phase 0 regardless.)
+- **User-data policy** (Phase 1) — **RESOLVED 2026-07-24: SHARE.** Use the legacy
+  `Documents/Path of Building` dir (lossless round-trip + zero migration). This is
+  already the implemented behavior (`LuaEngine::init` → `QStandardPaths`
+  Documents). The SHARE risks (concurrent-run clobber, engine-version-lockstep key
+  stripping, port-bug blast radius on the user's only copy) are all
+  **out-of-scope for this project**: it's a solo hobby fork / proof-of-concept to
+  show upstream, with no shipped audience, no side-by-side production installs, and
+  no independent update cadence — every risk requires a second shipped/concurrent
+  consumer that doesn't exist here (see [[solo-hobby-fork-poc-scope]] framing).
+  Revisit ONLY if upstream adopts the port and it heads toward real distribution —
+  at which point SEPARATE-with-migration becomes the likely answer. The temp-dir
+  path bug was fixed in Phase 0 regardless. (Part 1.4's cloud-robustness code —
+  errorReadingSettings latch, GetCloudProvider, error popups — is still TODO
+  independent of this decision.)
 - **Fontin font licensing** (Phase 1) — **DECIDED 2026-07-23: DEFER.** Build the
   TextMetrics + color-code subsystem now against the VAR/FIXED fonts (Liberation
   Sans / mono); stub `fontFontinSC`/`fontFontin` → the VAR face. Revisit the real
@@ -78,6 +105,67 @@ Full detail in `reference/00-architecture.md`. The short list:
 ---
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
+
+**▶ Phase 1 — COMPLETE (started 2026-07-23, finished 2026-07-24).** Parts 1.1,
+1.2a, 1.2, 1.3 (summarized further down) plus **Part 1.4 (application shell)**
+and the **acceptance gate**, closed in the wrap-up session:
+- **Part 1.4 bullets 1-4** (mode manager, Settings round-trip, cloud
+  robustness, Options dialog) were already code-complete from the prior
+  Part 1.4 workflow; this session's Step 0 built the tree fresh (first build
+  since Stage 2) and ran the full gate cold — **it passed clean on the first
+  try**, including all three previously-unrun selftests
+  (`pob_selftestCloudRobustness`/`SettingsRoundTrip`/`Options`) and
+  `OptionsDialog.qml` loading with zero QML warnings despite being
+  instantiated unconditionally in `main.qml`. Options dialog end-to-end
+  verification (bullet 4) completed once bullet 6 supplied a real entry point
+  — see below.
+- **Part 1.4 bullet 5 (Toast)** — DONE. `pob_host.lua` wraps
+  `ToastNotification`'s Add/Update/Remove/Clear at host-bootstrap time (mirror
+  list + `pob.toastsChanged()` push, same pattern as `cloudErrorPopup`) →
+  `LuaEngine::toastsChanged()` → `getToasts()`/`dismissToast()`; new
+  `Toast.qml`/`ToastStack.qml`. **Gotcha (caught by a real test failure, not
+  silently):** the wrap must install AFTER `runCallback("OnInit")` —
+  `dofile(Launch.lua)` only *defines* `launch:OnInit`, it doesn't run it, so
+  `ToastNotification`/`main` don't exist as globals yet at that point.
+- **Part 1.4 bullet 6 (Bottom bar + About + F1)** — DONE. `BottomBar.qml` +
+  `AboutPopup.qml` (new `pob_getAboutContent()` Lua global re-parses
+  changelog.txt/help.txt verbatim per legacy's algorithm) + an F1 `Shortcut`
+  in `main.qml`. **Bug found & fixed in passing:** `Button.qml`/`Dragger.qml`/
+  `CheckBox.qml`'s disabled-content color (`theme.background`, per Part 1.3's
+  original rule) is nearly invisible against the disabled Chrome fill
+  (`theme.disabled`) — both are near-identical dark navies (`#0F172A` vs
+  `#141822`), not the "medium-grey" Part 1.3 assumed. Fixed by switching to
+  `theme.muted` (`#94A3B8`, documented in `Theme.cpp` as "readable on
+  #0F172A") across all three widgets — found via a real BottomBar screenshot,
+  not by inspection, which is the concrete reason to keep doing visual
+  captures even for "should be fine" widget reuse.
+- **Acceptance gate — CLOSED.** Tier 0-2 widget kit adopted in
+  `views/BuildListPage.qml` + `views/ImportView.qml` (the 2 required non-
+  main.qml/OptionsDialog.qml consumers); colour-code + VAR/FIXED-font evidence
+  captured (About popup changelog + ImportView's now-monospace share-code
+  field). **TextMetrics golden-parity vs legacy is the one item explicitly
+  DEFERRED, not faked**: `runtime/Path of Building.exe` is a real, launchable
+  PE32+ GUI binary, but SimpleGraphic is closed-source with no discoverable
+  headless/CLI mode (`DrawStringWidth` needs a live D3D/OpenGL `RenderInit`),
+  so there's no way to script a value dump without reverse-engineering its
+  undocumented embedding contract — judged disproportionate to this item.
+  Full rationale + what was tried: `phases/PHASE-1-component-library.md`
+  Acceptance gate section. Revisit whenever `EditControl`'s caret makes a
+  live legacy-vs-Qt comparison worth setting up properly.
+- **All 10 `app/tests/capture-baseline/` PNGs were re-baselined** in this
+  commit — the prior baseline predated essentially all of Phase 1 (fonts,
+  the widget kit, the app shell), so every view had already diverged from it
+  by the time this session started; each was reviewed by eye before
+  re-baselining and every difference traced to intended Phase 1 work.
+- **Observed, not caused by this work (flagged for a follow-up task, not
+  fixed):** `views/CalcsView.qml`'s stat rows visibly overlap in
+  `--capture` screenshots, and `views/ConfigView.qml` shows raw `^xRRGGBB`
+  escape codes as literal label text instead of parsed color — both
+  pre-existing (neither file was touched this session), both cosmetic-only,
+  both in scope for their respective later phases (Calcs = Phase 8,
+  Config = Phase 7).
+- Full per-item evidence for every Part 1.4 bullet and acceptance-gate line:
+  `phases/PHASE-1-component-library.md`.
 
 **▶ Phase 1 (started 2026-07-23):** **Part 1.3 Tier 1 + Tier 2 widgets
 COMPLETE (2026-07-24).** 11 new components in `app/qml/components/`

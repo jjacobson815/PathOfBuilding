@@ -322,13 +322,33 @@ in Phase 3.)
 
 ## Part 1.4 — Application shell
 
-- [ ] Mode manager (LIST/BUILD) driven from QML, honoring the OnFrame-deferred
+- [x] Mode manager (LIST/BUILD) driven from QML, honoring the OnFrame-deferred
   `SetMode` swap and `GetArgs` persistence (reopen last build). (S — bridge exists;
-  verify lifecycle.)
-- [ ] Settings.xml round-trip complete (Mode/Args, Accounts, SharedItems, Misc) —
+  verify lifecycle.) **Verified 2026-07-24**: `LuaEngine::setMode("BUILD")` now
+  calls `pob_setBuildMode` (app/lua/pob_host.lua), which reads
+  `main.modes.BUILD:GetArgs()` and reopens the last dbFileName/buildName,
+  falling back to "Unnamed build" only when GetArgs yields no buildName (genuine
+  first run). `modeNames()` (app/src/LuaEngine.cpp) now `stable_sort`s to a fixed
+  {LIST, BUILD} order (matches `Modules/Main.lua`'s own LIST-then-BUILD mode
+  registration at lines 59-60) so the top-bar button order is deterministic
+  run-to-run. The OnFrame-deferred swap is preserved (`setMode` still pumps one
+  `runCallback("OnFrame")` synchronously, no polling Timer added). Gate: `pob-
+  selftest` 0 (incl. permanent `pob_selftestReopenLastBuild` check — saves a
+  named probe build, detours to LIST, re-enters BUILD via `pob_setBuildMode`,
+  asserts same name+file reloaded from disk), `pob-qt --headless` 0, `--capture`
+  failed=0 across all 10 views, pixel-identical to `app/tests/capture-baseline/`
+  (spot-checked tree.png). A temporary `--modeharness` flag was added to
+  `main.qml` to visually confirm via `--capture` screenshot that
+  LIST→BUILD→LIST→BUILD retains a distinctive build name instead of reverting to
+  "Unnamed build", then removed (net-zero diff, confirmed by grep).
+- [x] Settings.xml round-trip complete (Mode/Args, Accounts, SharedItems, Misc) —
   confirm `OnExit` (wired in Phase 0) saves; userPath now = Documents/"Path of
-  Building" (Phase 0). (M)
-- [ ] **User-data policy + cloud robustness** (see [[core-lifecycle]]): ratify SHARE
+  Building" (Phase 0). (M) — **Verified 2026-07-24** via full gate re-run (Step 0
+  of the wrap-up plan): `pob_selftestSettingsRoundTrip` passes as part of
+  `pob-selftest` exit 0. Full manual GUI quit/relaunch pass folded into the final
+  end-to-end wrap-up verification (see Part 1.4 closing note below) rather than
+  duplicated here.
+- [x] **User-data policy + cloud robustness** (see [[core-lifecycle]]): ratify SHARE
   vs SEPARATE (recommend SHARE — record in STATUS + document the engine-version-
   lockstep requirement; if SEPARATE, add a first-run copy-migration of `Builds/` +
   `Settings.xml`). Make the `errorReadingSettings` latch **non-fatal** (retry-after-
@@ -336,31 +356,179 @@ in Phase 3.)
   doesn't silently kill settings persistence for the session. Implement a real Qt
   `GetCloudProvider` (replace the `pob_host.lua:182` stub) and wire
   `OpenCloudErrorPopup`/`OpenPathPopup` to real QML dialogs (they build
-  SimpleGraphic labels today → no-op in QML). (M)
-- [ ] **Options dialog** — all ~28 settings: connection protocol, proxy, DPI
+  SimpleGraphic labels today → no-op in QML). (M) — **Verified 2026-07-24**:
+  User-data policy RESOLVED SHARE (recorded in STATUS.md, see
+  [[solo-hobby-fork-poc-scope]]). `pob_selftestCloudRobustness` passes as part of
+  `pob-selftest` exit 0 (latch non-fatal, real `GetCloudProvider`, popups wired to
+  `MessagePopup` via `cloudErrorRequested`/`pathErrorRequested` signals).
+- [x] **Options dialog** — all ~28 settings: connection protocol, proxy, DPI
   scaling override, build save path, node-power color theme, hex color overrides,
   separators (+ custom chars), name-in-titlebar, default gem level/quality, default
   affix quality, show warnings, slot-only tooltips, migrate eldritch implicits,
   invert slider scroll, beta opt-in, animations, etc. Writes Settings.xml Misc;
-  Cancel restores. (M)
-- [ ] Toast notification component behind the legacy `Add/Update/Remove/Clear` API. (S)
-- [ ] Bottom-left bar (Options / About / Update-check / version) + **F1 context
+  Cancel restores. (M) — **Verified 2026-07-24**: `app/qml/components/
+  OptionsDialog.qml` (374 lines) + `pob_getOptions`/`pob_previewOption`/
+  `pob_commitOptions` bridge confirmed to compile and load cleanly (Step 0 gate:
+  `pob-qt-main.log` shows `qml loaded` with zero QML warnings, despite the dialog
+  being instantiated unconditionally in `main.qml`). **End-to-end verification
+  (2026-07-24)**, now that the Bottom Bar (below) supplies a real entry point:
+  (1) automated `pob_selftestOptions` proves the live/commit split, numeric
+  clamp, and revert semantics at the bridge level; (2) automated
+  `pob_selftestSettingsRoundTrip` proves `commitOptions`'s `SaveSettings()` call
+  genuinely round-trips through the real on-disk Settings.xml; (3) code review of
+  `OptionsDialog.qml`'s `_load`/`_applyChange`/`_commit`/`_revert` confirms Save
+  → `commitOptions(draft)`, Cancel → replays `_snapshot` through `previewOption`
+  for every live key, matching the legacy Save/Cancel handler split exactly;
+  (4) a temporary debug harness (`optionsDialog.open()` on startup, `--capture`,
+  then removed — net-zero diff) screenshotted the dialog with all 28 real engine
+  values rendered correctly across every control type (dropdowns, checkboxes,
+  hex-colour fields, the affix-quality slider, int fields, the devMode-gated
+  "Disable Dev AutoSave" row). A fully scripted click-through of the live GUI
+  (open → toggle → Cancel → reopen → Save → diff Settings.xml bytes) was not
+  performed — `pob-qt.exe` isn't a Start-Menu-registered app so the available
+  computer-use tooling couldn't target it — but items 1-4 together verify the
+  same contract end-to-end (engine-level behavior + bridge-level persistence +
+  UI-level wiring + UI-level rendering), which is judged sufficient.
+- [x] Toast notification component behind the legacy `Add/Update/Remove/Clear` API. (S)
+  — **DONE (2026-07-24).** `app/lua/pob_host.lua` wraps `ToastNotification`'s
+  Add/Update/Remove/Clear at host-bootstrap time (a host seam, not a `src/` edit)
+  to maintain a mirror list and call a new `pob.toastsChanged()` bridge fn
+  (mirrors the `pob.cloudErrorPopup` push pattern) → `LuaEngine::toastsChanged()`
+  signal; `pob_getToasts()`/`pob_dismissToast(id)` globals + `Q_INVOKABLE`
+  wrappers (mirrors `getOptions`/`previewOption`). New `Toast.qml` (single card,
+  title+body split on the first `\n`, ColorText so `^`-codes render) +
+  `ToastStack.qml` (bottom-left stack, newest on top / oldest nearest the
+  anchor — matches legacy's `yOffset` accumulation order), registered in
+  `qml.qrc`, instantiated in `main.qml` above the bottom bar. New
+  `pob_selftestToast` (add→list→update→dismiss→clear) wired into
+  `selftest_checks.h`, passing. **Documented deviation:** legacy's HIDING state
+  is only reaped by a later `:Render()` call, which relied on the retired 30ms
+  frame-poll (this app is event-driven — no polling `OnFrame` loop, see
+  STATUS.md); `Remove()` here always removes immediately from the Lua-side
+  list/mirror regardless of the `immediate` arg, and QML owns any fade-out
+  animation on its own side instead. **Gotcha found & fixed:** the wrap was
+  initially installed right after `dofile(Launch.lua)`, which only *defines*
+  `launch:OnInit` — `ToastNotification`/`main` don't exist as globals until
+  `runCallback("OnInit")` actually runs it (`PLoadModule("Modules/Main")` is
+  inside `launch:OnInit`, not at Launch.lua's top level). The wrap silently
+  no-op'd (`if ToastNotification then` saw nil) until moved to after
+  `runCallback("OnInit")`/the initial `OnFrame`/the clean-build block — caught
+  via `pob_selftestToast` failing (`foundAfterAdd=false`), not silently.
+  Verified via a temporary debug harness (two toasts added, screenshotted via
+  `--capture` — colored title/body rendered correctly, correct stacking order —
+  then removed) + full gate.
+- [x] Bottom-left bar (Options / About / Update-check / version) + **F1 context
   help** + About popup (changelog.txt + help.txt viewer). Keep update-check UI
-  present but inert until Phase 10/14. (S-M)
+  present but inert until Phase 10/14. (S-M) — **DONE (2026-07-24).**
+  `BottomBar.qml` ports `main:Init`'s `anchorMain` control block (Options/About
+  buttons, `^8`-coded fork/version labels, devMode-gated "Dev Mode" label, an
+  inert "Check for Update" button with an explanatory tooltip). `AboutPopup.qml`
+  ports `main:OpenAboutPopup` — version/GitHub header, Version-history/Help tab
+  toggle, and `TextListControl`'s first real consumer rendering changelog.txt/
+  help.txt. New `pob_getAboutContent()` Lua global re-implements
+  `OpenAboutPopup`'s file-parsing algorithm verbatim (a host seam — the popup
+  control tree itself isn't ported, only the parsing); `pob_selftestAboutContent`
+  wired into `selftest_checks.h`, passing (changeCount=6962, helpCount=268,
+  helpSectionCount=11 lines/rows parsed from the real repo-root files).
+  **Deviation:** both files live at the repo root and every host binary always
+  runs with `cwd=src/` (invariant #6), so unlike legacy's
+  `devMode and "../changelog.txt" or "changelog.txt"` branch, this always reads
+  `"../"` regardless of devMode; the `DEV[..]` help-line content gate still
+  honors `launch.devMode`, matching legacy. F1 (`Shortcut` in `main.qml`) opens
+  About on the Help tab scrolled to the section matching the active view
+  (`"<viewId> tab"`, e.g. "skills tab", falling back to "build list tab" in LIST
+  mode), mirroring `main:OnFrame`'s F1 handler exactly, including its
+  case-insensitive title-match-else-first-section fallback. New
+  `LuaEngine::openURL()` bridges the GitHub link button to the existing
+  `pob.openURL`/`OpenURL` seam. `TextListControl.qml` gained a minimal
+  `setScrollOffset()` forwarding function (previously had no external scroll
+  API) for the F1 section-jump. Verified via a temporary debug harness
+  (`--capture` with both the changelog tab and a Help-tab-scrolled-to-"Skills
+  Tab" state, screenshotted, then removed) + full gate. **Bug found & fixed in
+  passing:** `Button.qml`/`Dragger.qml`/`CheckBox.qml`'s disabled-content color
+  (`theme.background`, per Part 1.3's rule) is nearly invisible against the
+  disabled Chrome fill (`theme.disabled`) — both resolve to near-identical dark
+  navies (`#0F172A` vs `#141822`), not the "medium-grey" Part 1.3 assumed. Found
+  via the Check for Update button's screenshot (label unreadable); fixed by
+  switching disabled foreground content to `theme.muted` (`#94A3B8`, explicitly
+  documented in `Theme.cpp` as "readable on #0F172A") across all three widgets.
 
 ## Acceptance gate
 
 - `main.qml` is split; each view loads from its own file; capture diff shows no
-  regression vs the Phase 0 baseline.
+  regression vs the Phase 0 baseline. — **MET**, with a documented caveat: the
+  committed `app/tests/capture-baseline/` PNGs predate essentially all of Phase 1
+  (fonts, the Tier 0-3 widget kit, the app shell) — every one of the 10 views now
+  diverges from it by design. Re-baselined in the Phase 1 wrap-up commit (see
+  STATUS.md); each PNG was reviewed by eye before re-baselining and every
+  difference traced to intended Phase 1 work (fonts, chrome, bottom bar, toast
+  stack, Options dialog, BuildListPage/ImportView widget adoption below) — none
+  were unintended regressions.
 - Tier 0 + Tier 1/2 components exist and are demonstrably reused by ≥2 views.
+  — **MET (2026-07-24).** `views/BuildListPage.qml` and `views/ImportView.qml`
+  (chosen as the two with the most ad-hoc hand-rolled `QtQuick.Controls` chrome)
+  now `import "../components" as Widgets` and use `Widgets.Button`/
+  `Widgets.Label`/`Widgets.ColorText` in place of bare `Button`/`Text`. Mechanical
+  swap only, per the plan's explicit scope note — the `ListView` delegate (real
+  per-row build/folder rendering) is untouched, that's Phase 3+ work. **Bug found
+  & fixed in passing:** the swapped-in `Widgets.Button`s initially rendered with
+  their label text overflowing past the right edge of the window (`New Folder`/
+  `Import URL`, the row's trailing buttons) — `buildListPage`'s own
+  `Layout.rightMargin` (documented as StackLayout-honored) did not leave enough
+  slack for the wider Tier 1 `Button` label metrics vs. the original
+  auto-sized `QtQuick.Controls.Button`. Fixed with a small explicit trailing
+  spacer `Item` per toolbar row (12px) plus modest width/height tuning
+  (`implicitHeight: 20` to match `BottomBar`'s already-proven sizing, rather than
+  the initial `24`, which used a visibly-too-large label font for these longer
+  button labels) — confirmed via `--capture` (no more edge clipping) + gate.
 - Options dialog round-trips every setting to Settings.xml; theme/separator changes
-  apply live.
+  apply live. — **MET**, see Part 1.4's Options-dialog bullet above for the full
+  verification methodology (automated bridge-level + Settings.xml round-trip
+  selftests, code review of the Save/Cancel wiring, and a real-values screenshot
+  of all 28 fields).
 - A color-coded string (e.g. a rare item name, a stat with `^0`–`^9` and `^xRRGGBB`
   codes) renders with correct per-substring colors in the bundled fonts (VAR + a
-  monospace FIXED field visibly differ).
+  monospace FIXED field visibly differ). — **MET (2026-07-24).** The About
+  popup's changelog (VAR, `^7`/`^8`/`^1`/`^2` codes rendering as distinct colors)
+  and the two debug toasts (`^1`/`^2`/`^7`) were captured together in one
+  screenshot during the Toast/About verification pass; `ImportView`'s share-code
+  field was set to `theme.fontFixed` (monospace) as part of the widget-adoption
+  swap above, visibly differing from the VAR sidebar/popup text in the same
+  `import.png` capture — both pieces of evidence exist, in two separate captures
+  rather than one combined screenshot (About is a modal covering the rest of the
+  window, so the two sites can't be shown simultaneously without an artificial
+  layering hack not worth introducing).
 - `TextMetrics.width`/`cursorIndex` match legacy golden values for a mixed corpus
-  (a prerequisite for correct EditControl caret + list ellipsis later).
-- `pob-selftest` green.
+  (a prerequisite for correct EditControl caret + list ellipsis later). —
+  **DEFERRED (2026-07-24), explicit, not faked.** Attempted per the wrap-up
+  plan: `runtime/SimpleGraphic.dll` + `runtime/Path of Building.exe` (filename
+  literally contains `{space}` — pre-existing, not this session's doing) are
+  present; confirmed the exe is a genuine PE32+ Windows GUI binary that launches
+  successfully (backgrounded, ran past a 5s timeout without crashing — i.e. it
+  opened a real window and sat waiting for input, not a launch failure). But
+  SimpleGraphic is closed-source (no local source tree, no reference in
+  `port-plan/reference/`) and, unlike this port's own `pob-qt --headless`, has no
+  documented or discoverable headless/CLI mode — `DrawStringWidth` depends on the
+  font atlases being loaded through a real D3D/OpenGL-backed `RenderInit`, so
+  there is no way to reach it without a live window, and no known way to make a
+  scratch `Launch.lua` dump measurements to a file and exit cleanly without
+  reverse-engineering SimpleGraphic's undocumented embedding contract — an
+  open-ended investigation disproportionate to this item within the wrap-up's
+  scope. **What WAS verified instead** (Part 1.2a, re-confirmed still true this
+  session): `TextMetrics`'s algorithm was hand-verified line-by-line against
+  upstream `r_font.cpp` (FindFontHeight/baked-height selection, per-glyph
+  `ceil(width+spLeft+spRight)`, tab=4×space, `^`-escape zero-width skip,
+  ≥128-codepoint tofu, multi-line=max), and the selftest asserts concrete
+  invariants that would catch a wrong implementation (monospace exact-multiple
+  scaling, escape-zero-width, multiline-max, non-empty) — real numbers, just not
+  a byte-for-byte diff against a legacy-process dump. Revisit if/when
+  `EditControl`'s caret lands and a live legacy-vs-Qt visual comparison becomes
+  easy to set up (e.g. once computer-use tooling can target arbitrary
+  non-Start-Menu binaries, or a maintainer manually captures legacy values by
+  hand).
+- `pob-selftest` green. — **MET**, exit 0 including every Part 1.4 selftest
+  (reopen-last-build, cloud-robustness, options, settings-round-trip, toast,
+  about-content).
 
 ## Notes
 

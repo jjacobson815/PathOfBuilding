@@ -64,7 +64,10 @@ Item {
         visible: root.isGlyph
         anchors.fill: parent
 
-        property color glyphColor: root.controlEnabled ? theme.text : theme.background
+        // theme.muted, not theme.background — see Button.qml's glyphColor
+        // comment (disabled fill and theme.background are nearly identical
+        // dark navies; unreadable together).
+        property color glyphColor: root.controlEnabled ? theme.text : theme.muted
 
         onGlyphColorChanged: requestPaint()
         onVisibleChanged: if (visible) requestPaint()
@@ -109,7 +112,7 @@ Item {
         anchors.centerIn: parent
         label: root.label
         size: Math.max(8, root.height - 4)
-        defaultColor: root.controlEnabled ? theme.text : theme.background
+        defaultColor: root.controlEnabled ? theme.text : theme.muted
     }
 
     MouseArea {

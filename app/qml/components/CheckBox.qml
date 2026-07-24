@@ -47,7 +47,11 @@ Item {
         visible: root.state
         anchors.fill: parent
         anchors.margins: root.boxSize * 0.1
-        glyphColor: !root.controlEnabled ? theme.background : root.hovered ? theme.text : theme.muted
+        // theme.muted for the disabled case too (not theme.background — the
+        // disabled Chrome fill and theme.background are nearly identical dark
+        // navies and unreadable together; found via a real BottomBar Button
+        // screenshot during Part 1.4).
+        glyphColor: !root.controlEnabled ? theme.muted : root.hovered ? theme.text : theme.muted
     }
 
     Label {
@@ -58,9 +62,9 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         label: root.label
         size: Math.max(1, root.boxSize - 4)
-        // Unlike the box's own CheckMark glyph (drawn ON the disabled Chrome
-        // fill, where theme.background contrasts), this label sits on the
-        // ordinary page background — theme.muted reads correctly there.
+        // This label sits outside the box, on the ordinary page background;
+        // theme.muted reads correctly there (and, as of Part 1.4, is also what
+        // the box's own CheckMark glyph uses for its disabled state above).
         defaultColor: root.controlEnabled ? theme.text : theme.muted
     }
 

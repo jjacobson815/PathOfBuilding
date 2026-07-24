@@ -3,6 +3,10 @@ import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Controls
 import "views"
+// Namespaced import (avoids the components/Button.qml vs QtQuick.Controls.Button
+// ambiguity this file's top bar relies on): reach the component library as
+// Widgets.* — here for the real MessagePopup wired to the cloud/path error signals.
+import "components" as Widgets
 
 // Phase 1c/2a/3 MainWindow. The top bar is always present. The body swaps
 // between the BUILD page (collapsible sidebar + typed-model content) and the
@@ -247,6 +251,100 @@ Window {
 
             // ===== Page 1: LIST (build library browser) =====
             BuildListPage {}
+        }
+
+        // --- Bottom bar: Options / About / (inert) Check for Update + version ---
+        Rectangle {
+            id: bottomBarRow
+            Layout.fillWidth: true
+            Layout.preferredHeight: 28
+            color: theme.titleBar
+            Widgets.BottomBar {
+                id: bottomBar
+                anchors.fill: parent
+                onOptionsRequested: optionsDialog.open()
+                onAboutRequested: (section) => aboutPopup.openAtSection(section)
+            }
+        }
+    }
+
+    // Part 1.4: toast notification stack — bottom-left, floating just above
+    // the bottom bar (matches legacy anchorMain's BOTTOMLEFT anchor).
+    // Anchored to `parent` (this Item's actual parent, the Window's content
+    // item) rather than to bottomBarRow directly — QML anchors only allow
+    // targeting a parent or sibling, and bottomBarRow lives inside the
+    // ColumnLayout, several levels away. bottomBarRow.height is a plain
+    // property reference (not an anchor), so referencing it in the margin
+    // expression is unrestricted and keeps the stack pinned just above the
+    // bar regardless of its height.
+    Widgets.ToastStack {
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.leftMargin: theme.space2
+        anchors.bottomMargin: bottomBarRow.height + theme.space1
+    }
+
+    // Part 1.4: real cloud/path error dialogs. The engine's OpenCloudErrorPopup /
+    // OpenPathPopup build SimpleGraphic control trees that are inert under QML;
+    // they now hand off to LuaEngine (pob.cloudErrorPopup / pob.pathErrorPopup),
+    // which emits these signals. We open a real MessagePopup (Tier 0) in response.
+    Widgets.MessagePopup {
+        id: cloudErrorPopup
+        title: " Error "
+    }
+    Widgets.MessagePopup {
+        id: pathErrorPopup
+        title: " Settings Path Error "
+    }
+    // Part 1.4: the ~28-setting Options dialog (main:OpenOptionsPopup port). It is
+    // driven entirely by the luaEngine.getOptions/previewOption/commitOptions
+    // bridge and self-loads current engine state on open. Opened by the
+    // BottomBar's Options button via bottomBar.onOptionsRequested above.
+    Widgets.OptionsDialog {
+        id: optionsDialog
+    }
+
+    // Part 1.4: About popup (main:OpenAboutPopup port) — changelog.txt/help.txt
+    // viewer. Reuses BottomBar's already-fetched content (avoids re-parsing).
+    // Opened by the BottomBar's About button (Version History tab) or F1
+    // (Help tab, scrolled to the current view's section) below.
+    Widgets.AboutPopup {
+        id: aboutPopup
+        content: bottomBar.aboutContent
+    }
+
+    // Part 1.4: F1 context help, mirroring main:OnFrame's F1 handler
+    // (Modules/Main.lua:440): open About on the Help tab, scrolled to the
+    // section matching the active view ("<viewId> tab", e.g. "skills tab"),
+    // or "build list tab" in LIST mode / when no view is active.
+    Shortcut {
+        sequence: "F1"
+        onActivated: {
+            var section = (root.activeMode === "LIST" || !root.activeView)
+                ? "build list tab"
+                : root.activeView.toLowerCase() + " tab"
+            aboutPopup.openAtSection(section)
+        }
+    }
+
+    Connections {
+        target: luaEngine
+        function onCloudErrorRequested(path, provider, status) {
+            var prov = (provider && provider.length) ? provider : "your cloud provider"
+            cloudErrorPopup.message =
+                "^7Cannot read settings file.\n\n" +
+                "Make sure " + prov + " is running, then restart\n" +
+                "Path of Building and try again.\n\n" +
+                (path && path.length ? "^8'" + path + "'\n" : "") +
+                "^7status: " + status
+            cloudErrorPopup.open()
+        }
+        function onPathErrorRequested(invalidPath, errMsg) {
+            pathErrorPopup.message =
+                "^7User settings path cannot be loaded:\n" +
+                "^1" + errMsg + "\n\n" +
+                "^7Current path:\n^8'" + invalidPath + "'"
+            pathErrorPopup.open()
         }
     }
 }

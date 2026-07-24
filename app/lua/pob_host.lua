@@ -194,7 +194,45 @@ function SetProfiling(isEnabled) end
 function Restart() end
 function Exit() end
 function TakeScreenshot() end
-function GetCloudProvider(fullPath) return nil, nil, nil end
+-- Part 1.4: real cloud-provider detection (replaces the null stub). Two honest,
+-- dependency-free signals: (1) a path-prefix match against the OneDrive* env
+-- vars Windows sets for each synced root, which NAMES the provider; (2) the
+-- file's Win32 attributes via the pob.fileAttributes bridge, which reveals
+-- whether the target is a dehydrated cloud placeholder (FILE_ATTRIBUTE_OFFLINE /
+-- RECALL_ON_DATA_ACCESS / RECALL_ON_OPEN) — the exact condition that makes a
+-- read fail transiently and trip Main.lua's errorReadingSettings path. Returns
+-- (provider, providerRoot, status) matching the 3-value shape Main.lua's
+-- OpenCloudErrorPopup consumes as `local provider, _, status = ...`.
+function GetCloudProvider(fullPath)
+    if not fullPath or fullPath == "" then return nil, nil, nil end
+    local provider, providerRoot
+    local norm = tostring(fullPath):gsub("\\", "/"):lower()
+    for _, var in ipairs({ "OneDriveConsumer", "OneDriveCommercial", "OneDrive" }) do
+        local root = os.getenv(var)
+        if root and root ~= "" then
+            local nroot = root:gsub("\\", "/"):lower():gsub("/+$", "")
+            if nroot ~= "" and norm:sub(1, #nroot) == nroot then
+                provider = "OneDrive"
+                providerRoot = root
+                break
+            end
+        end
+    end
+    local status = "unknown"
+    if pob and pob.fileAttributes then
+        local a = pob.fileAttributes(fullPath)
+        if a then
+            if not a.exists then
+                status = "missing"
+            elseif a.offline or a.recallOnDataAccess or a.recallOnOpen then
+                status = "offline (cloud placeholder not hydrated)"
+            else
+                status = "online"
+            end
+        end
+    end
+    return provider, providerRoot, status
+end
 
 -- Helper for the headless selftest: return only the scalar calc-output values
 -- the test checks, avoiding conversion of the (possibly circular) full table.
@@ -334,6 +372,38 @@ function pob_createBuild()
     return true
 end
 
+-- setBuildMode: enter BUILD mode reopening the LAST build the user had open,
+-- honoring GetArgs persistence -- the same (dbFileName, buildName) pair the boot
+-- path replays from Settings.xml's <Mode> element (Main.lua:LoadSettings ->
+-- SetMode -> buildMode:Init). The BUILD mode object (main.modes.BUILD) retains
+-- self.dbFileName / self.buildName across a LIST detour, so buildMode:GetArgs()
+-- still names the last build after the user toggled LIST and came back. On a
+-- genuinely first-ever run (no build ever opened) GetArgs returns nils -> fall
+-- back to a fresh "Unnamed build", matching Launch.lua's own no-args boot
+-- fallback (Build.lua:84). Driven by LuaEngine::setMode for the BUILD case,
+-- which used to hardcode a fresh "Unnamed build" and thus force-discard the
+-- last build on every mode-bar toggle back to BUILD.
+function pob_setBuildMode()
+    if not main then return false end
+    local bm = main.modes and main.modes.BUILD
+    local dbFileName, buildName
+    if bm and bm.GetArgs then
+        dbFileName, buildName = bm:GetArgs()
+    end
+    if buildName then
+        -- Reopen the last build. dbFileName may be false for an unsaved build
+        -- (buildName set, never written to disk) -> Build:Init keeps it in
+        -- memory; a real path -> Build:LoadDBFile reloads it from disk, exactly
+        -- as the boot path does. The engine defers the actual swap to the next
+        -- OnFrame (SetMode only records self.newMode); LuaEngine::setMode pumps
+        -- one OnFrame synchronously after this returns.
+        main:SetMode("BUILD", dbFileName, buildName)
+    else
+        main:SetMode("BUILD", false, "Unnamed build")
+    end
+    return true
+end
+
 -- deleteBuild: remove a build .xml file, then refresh the LIST scan.
 function pob_deleteBuild(fullFileName)
     if not fullFileName or fullFileName == "" then return false end
@@ -469,6 +539,149 @@ function pob_selftestListFlow()
         mode = mode,
         buildName = buildName,
     }
+end
+
+-- Part 1.4 selftest: prove the mode bar's BUILD button reopens the LAST build
+-- via GetArgs persistence instead of forcing a fresh "Unnamed build" (the bug
+-- LuaEngine::setMode used to have). Establishes a distinctively-named build on
+-- disk as the "last build", detours to LIST (as the LIST button does), then
+-- re-enters BUILD via pob_setBuildMode -- the exact path LuaEngine::setMode
+-- ("BUILD") now drives -- and asserts the reopened build carries the same name
+-- AND file, reloaded from disk (not a blank Unnamed build). Cleans up the probe
+-- file and restores a fresh Unnamed build so later checks stay green. Uses the
+-- engine's own ~~sentinel~~ filename convention under buildPath.
+function pob_selftestReopenLastBuild()
+    if not main then return { ok = false, error = "no main" } end
+    local probePath = main.buildPath .. "~~reopen-probe~~.xml"
+    MakeDir(main.buildPath)  -- idempotent; buildPath normally already exists
+    -- Establish a distinctively-named, on-disk build as the "last build".
+    main:SetMode("BUILD", false, "Reopen Probe Build")
+    runCallback("OnFrame")
+    local bm = main.modes.BUILD
+    bm.dbFileName = probePath
+    local saved = pob_saveBuild(probePath)
+    local wantFile, wantName = bm:GetArgs()   -- GetArgs -> (dbFileName, buildName)
+    -- Detour to LIST (mode-bar LIST button).
+    main:SetMode("LIST")
+    runCallback("OnFrame")
+    local inList = main.mode
+    -- Re-enter BUILD (mode-bar BUILD button -> LuaEngine::setMode -> this global).
+    pob_setBuildMode()
+    runCallback("OnFrame")
+    local gotMode = main.mode
+    local gotName = main.modes.BUILD and main.modes.BUILD.buildName
+    local gotFile = main.modes.BUILD and main.modes.BUILD.dbFileName
+    -- Restore a clean unnamed build for subsequent checks, THEN delete the probe
+    -- file. Order matters: switching away from the probe build shuts it down, and
+    -- in devMode buildMode:Shutdown autosaves self.dbFileName (Build.lua:955-965),
+    -- which would re-create the probe file after an earlier os.remove. Removing
+    -- last guarantees the sandbox is left clean.
+    main:SetMode("BUILD", false, "Unnamed build")
+    runCallback("OnFrame")
+    os.remove(probePath)
+    return {
+        ok = (saved == true and inList == "LIST" and gotMode == "BUILD"
+              and gotName == wantName and gotFile == wantFile),
+        saved = saved, inList = inList, gotMode = gotMode,
+        wantName = wantName, gotName = gotName,
+        wantFile = wantFile, gotFile = gotFile,
+    }
+end
+
+-- Part 1.4 selftest: cloud robustness. Two assertions, both side-effect-free:
+--   (1) GetCloudProvider is a REAL fs-inspecting implementation (not the old
+--       null stub) — a missing path reports a different status than an existing
+--       one, and the pob.fileAttributes Win32 bridge is present.
+--   (2) The errorReadingSettings latch is non-fatal: forcing it, then running a
+--       natural LoadSettings against a KNOWN-nonexistent path, CLEARS it (the old
+--       one-strike latch early-returned and left it set forever). Uses a scratch
+--       userPath so nothing on disk is read/applied, then restores it.
+function pob_selftestCloudRobustness()
+    local res = { ok = false }
+    -- (1) GetCloudProvider real?
+    local _, _, statusMissing = GetCloudProvider(_USER_DIR .. "/__pob_no_such_file__.xml")
+    local _, _, statusExisting = GetCloudProvider(_SRC_DIR)
+    res.statusMissing = tostring(statusMissing)
+    res.statusExisting = tostring(statusExisting)
+    res.hasFileAttributes = (pob and pob.fileAttributes ~= nil) or false
+    res.providerReal = (statusMissing ~= nil and statusExisting ~= nil
+                        and statusMissing ~= statusExisting)
+    -- (2) latch non-fatal?
+    if main then
+        local origUserPath = main.userPath
+        local origFlag = main.errorReadingSettings
+        main.userPath = _USER_DIR .. "/__pob_selftest_missing_dir__/"
+        main.errorReadingSettings = true
+        main:LoadSettings(true)   -- ignoreBuild: never replays <Mode>
+        res.latchCleared = (main.errorReadingSettings == false)
+        -- Restore. LoadSettings against the missing scratch path applied nothing.
+        main.userPath = origUserPath
+        main.errorReadingSettings = origFlag or false
+    else
+        res.latchCleared = false
+    end
+    res.ok = not not (res.providerReal and res.hasFileAttributes and res.latchCleared)
+    return res
+end
+
+-- Part 1.4 selftest: genuine Settings.xml round-trip against the REAL userPath
+-- (not a scratch dir — pob_selftestCloudRobustness already covers the latch
+-- logic in isolation). Backs up the current on-disk Settings.xml bytes (or
+-- records "file did not exist"), writes a distinctive defaultCharLevel via the
+-- real main:SaveSettings(), clears the in-memory value (simulating a fresh
+-- process that hasn't loaded settings yet), re-reads it via the real
+-- main:LoadSettings(), and asserts the value survived the disk round trip.
+-- Always restores the exact original file bytes (or removes the file if it
+-- didn't exist before) in a pcall'd cleanup so a mid-test error can't leave the
+-- user's real settings file holding a test value.
+function pob_selftestSettingsRoundTrip()
+    local res = { ok = false }
+    if not main then res.error = "no main"; return res end
+    local path = main.userPath .. "Settings.xml"
+    -- Back up whatever is on disk right now (nil = file did not exist).
+    local origBytes
+    do
+        local f = io.open(path, "rb")
+        if f then
+            origBytes = f:read("*a")
+            f:close()
+        end
+    end
+    local origInMemory = main.defaultCharLevel
+    local ok, err = pcall(function()
+        -- Pick a distinctive value that can't collide with the real setting.
+        local probeVal = (origInMemory == 42) and 43 or 42
+        main.defaultCharLevel = probeVal
+        main:SaveSettings()
+        res.saveErrorLatched = main.errorReadingSettings
+        -- Simulate "haven't loaded settings yet in this process": clear memory,
+        -- then read back from disk via the real LoadSettings path.
+        main.defaultCharLevel = nil
+        main:LoadSettings(true) -- ignoreBuild: don't replay <Mode> mid-selftest
+        res.loadErrorLatched = main.errorReadingSettings
+        res.wantVal = probeVal
+        res.gotVal = main.defaultCharLevel
+        res.roundTripOk = (main.defaultCharLevel == probeVal)
+    end)
+    res.pcallOk = ok
+    if not ok then res.error = tostring(err) end
+    -- Cleanup: restore the exact original file bytes (or remove if none existed)
+    -- and reload so main's in-memory state matches the real file again.
+    pcall(function()
+        if origBytes then
+            local f = io.open(path, "wb")
+            if f then
+                f:write(origBytes)
+                f:close()
+            end
+        else
+            os.remove(path)
+        end
+        main.defaultCharLevel = origInMemory
+        main:LoadSettings(true)
+    end)
+    res.ok = not not (ok and res.roundTripOk and not res.saveErrorLatched and not res.loadErrorLatched)
+    return res
 end
 
 -- Phase 5a: ItemsTab (ITEMS view) bridge. Top-level globals (NOT pob.*) because
@@ -1201,6 +1414,140 @@ if main and main.modes and main.modes.BUILD then
     runCallback("OnFrame")
 end
 
+-- ===========================================================================
+-- Part 1.4 (bullet 5): Toast notification bridge.
+--
+-- ToastNotification (Modules/ToastNotification.lua) is a plain global table
+-- (Main.lua: `ToastNotification = LoadModule(...)`) whose :Render() method
+-- draws via stubbed SimpleGraphic globals -- a dead path under invariant #1
+-- (QML owns rendering). Per invariant #2 we don't edit that module; instead
+-- this wraps its Add/Update/Remove/Clear methods at host-bootstrap time (a
+-- host seam) so each mutation also updates a local mirror list and notifies
+-- Qt via pob.toastsChanged(), mirroring the pob.cloudErrorPopup pattern
+-- above (Lua-initiated push, C++ emits a Qt signal QML listens to).
+--
+-- MUST run after runCallback("OnInit") above: `ToastNotification` (and
+-- `main`) don't exist as globals until launch:OnInit() -> PLoadModule(
+-- "Modules/Main") runs, which OnInit triggers, not dofile(Launch.lua) itself
+-- (Launch.lua only DEFINES launch:OnInit at dofile time -- see Launch.lua:20
+-- vs :71). Installing this wrap any earlier silently no-ops (the `if
+-- ToastNotification then` guard below sees nil), which is exactly the bug
+-- this comment is here to prevent regressing.
+--
+-- Deviation from legacy timing (documented): legacy's HIDING state is only
+-- reaped by a later :Render() call, which relied on the old 30ms frame-poll.
+-- The Qt host is event-driven (no polling OnFrame loop -- see STATUS.md), so
+-- a deferred removal could sit forever with nothing to reap it. Remove()
+-- here always removes immediately from the Lua-side list/mirror regardless
+-- of the `immediate` arg; QML owns any fade-out animation on its own side
+-- (Toast.qml), which is purely presentational and doesn't need the Lua
+-- model to stay around mid-animation.
+local _toastMirror = { }   -- ordered list of {id=, message=}
+local _toastIndex = { }    -- id -> mirror entry
+local function _toastNotify()
+    if pob and pob.toastsChanged then pob.toastsChanged() end
+end
+
+if ToastNotification then
+    local origToastAdd = ToastNotification.Add
+    function ToastNotification:Add(message)
+        local id = origToastAdd(self, message)
+        local entry = { id = id, message = message }
+        _toastMirror[#_toastMirror + 1] = entry
+        _toastIndex[id] = entry
+        _toastNotify()
+        return id
+    end
+
+    local origToastUpdate = ToastNotification.Update
+    function ToastNotification:Update(id, message)
+        local ok = origToastUpdate(self, id, message)
+        local entry = _toastIndex[id]
+        if entry then entry.message = message end
+        _toastNotify()
+        return ok
+    end
+
+    local origToastRemove = ToastNotification.Remove
+    function ToastNotification:Remove(id, immediate)
+        local ok = origToastRemove(self, id, true)
+        local entry = _toastIndex[id]
+        if entry then
+            for i, e in ipairs(_toastMirror) do
+                if e.id == id then table.remove(_toastMirror, i); break end
+            end
+            _toastIndex[id] = nil
+        end
+        _toastNotify()
+        return ok
+    end
+
+    local origToastClear = ToastNotification.Clear
+    function ToastNotification:Clear(immediate)
+        origToastClear(self, true)
+        _toastMirror = { }
+        _toastIndex = { }
+        _toastNotify()
+    end
+end
+
+-- pob_getToasts() -> [{id, message}, ...] in display order (oldest first).
+-- Top-level global (NOT pob.*) because LuaEngine::callGlobal does a single
+-- lua_getglobal and cannot resolve dotted names.
+function pob_getToasts()
+    local out = { }
+    for i, e in ipairs(_toastMirror) do
+        out[i] = { id = e.id, message = e.message }
+    end
+    return out
+end
+
+-- pob_dismissToast(id) -> the QML dismiss-button handoff; mirrors the
+-- legacy dismiss callback (ToastNotification.lua:178-184) minus the
+-- dismissedIds bookkeeping (no legacy caller polls WasDismissed() from the
+-- QML toast stack; TreeTab's suggested-path toasts aren't ported yet).
+function pob_dismissToast(id)
+    if not id then return false end
+    return ToastNotification:Remove(id, true)
+end
+
+-- Part 1.4 selftest: add -> list -> update -> dismiss -> clear, asserting
+-- the mirror stays consistent with each mutation.
+function pob_selftestToast()
+    local res = { ok = false }
+    local id = ToastNotification:Add("Title\nBody line")
+    local afterAdd = pob_getToasts()
+    local foundAfterAdd, addedMessage = false, nil
+    for _, t in ipairs(afterAdd) do
+        if t.id == id then foundAfterAdd = true; addedMessage = t.message end
+    end
+    res.foundAfterAdd = foundAfterAdd and (addedMessage == "Title\nBody line")
+
+    ToastNotification:Update(id, "Title2\nBody2")
+    local afterUpdate = pob_getToasts()
+    local updatedOk = false
+    for _, t in ipairs(afterUpdate) do
+        if t.id == id and t.message == "Title2\nBody2" then updatedOk = true end
+    end
+    res.updatedOk = updatedOk
+
+    pob_dismissToast(id)
+    local afterDismiss = pob_getToasts()
+    local dismissedOk = true
+    for _, t in ipairs(afterDismiss) do
+        if t.id == id then dismissedOk = false end
+    end
+    res.dismissedOk = dismissedOk
+
+    ToastNotification:Add("Second")
+    ToastNotification:Add("Third")
+    ToastNotification:Clear()
+    res.clearOk = (#pob_getToasts() == 0)
+
+    res.ok = not not (res.foundAfterAdd and res.updatedOk and res.dismissedOk and res.clearOk)
+    return res
+end
+
 -- Phase 4a: passive-tree data bridge. Top-level globals (NOT pob.*) because
 -- Exposes the passive tree to QML as plain tables (nodes, groups, connectors,
 -- bounds, assets, assetBasePath). The tree GEOMETRY is global (main.tree[treeVersion])
@@ -1692,5 +2039,383 @@ function pob_selftestTreeInteract()
     pob_setTreeSearch("")
     res.searchClearOk = (#pob_getTreeSearchResults() == 0)
     res.ok = not not (res.allocOk and res.deallocOk and res.searchOk and res.searchClearOk)
+    return res
+end
+
+-- ===========================================================================
+-- Part 1.4 (bullet 4): Options dialog bridge.
+--
+-- Three-layer bridge mirroring main:OpenOptionsPopup (Modules/Main.lua ~865):
+--   pob_getOptions()    -> flat descriptor list (value + metadata) for every
+--                          ~28 setting, tagged `commit` (true = Save-only field,
+--                          false = live-preview field).
+--   pob_previewOption() -> LIVE-apply a field onto self.* (the fields legacy
+--                          mutates as the control changes; Cancel reverts them by
+--                          replaying the pre-open snapshot through this same fn).
+--   pob_commitOptions() -> the Save-button-only fields (connectionProtocol /
+--                          proxy / buildPath) + main:SaveSettings() (immediate
+--                          persist to Settings.xml, exactly like the legacy Save
+--                          button which called SaveSettings() explicitly).
+--
+-- The live-vs-commit split is exactly the legacy Save/Cancel handler split
+-- (Main.lua:1188 Save / :1213 Cancel): connectionProtocol, proxyType+proxyURL and
+-- buildPath are only read out of the controls on Save; everything else is written
+-- straight onto self.* by each control's callback (so e.g. the node-power theme
+-- previews live) and reverted to `savedState` on Cancel.
+-- Top-level globals (NOT pob.*) because LuaEngine::callGlobal does a single
+-- lua_getglobal and cannot resolve dotted names.
+
+local o_min = math.min
+local o_max = math.max
+local function o_round(v, p)
+    local mult = 10 ^ (p or 0)
+    return math.floor(v * mult + 0.5) / mult
+end
+
+-- Split launch.proxyURL "scheme://host:port" into its parts, mirroring the
+-- legacy `launch.proxyURL:match("(%w+)://(.+)")`. Defaults to the DropDown's
+-- first entry ("http") with an empty URL when no proxy is configured.
+local function pob_proxyParts()
+    if launch and launch.proxyURL then
+        local scheme, url = launch.proxyURL:match("(%w+)://(.+)")
+        if scheme then return scheme, url end
+    end
+    return "http", ""
+end
+
+function pob_getOptions()
+    if not main then return {} end
+    local self = main
+    local scheme, purl = pob_proxyParts()
+    local buildPathVal = (self.buildPath ~= self.defaultBuildPath) and self.buildPath or ""
+    -- Colours are stored on self as "^xRRGGBBAA" markup; the EditControls show
+    -- them as "0xRRGGBBAA" (the leading ^ swapped for 0), matching legacy
+    -- `tostring(self.colorPositive:gsub('^(^)', '0'))`.
+    local function hex(v) return tostring((v or ""):gsub('^(^)', '0')) end
+    local dc = defaultColorCodes or {}
+
+    local opts = {
+        -- ===== Application options =====
+        { key = "connectionProtocol", section = "Application options", type = "dropdown", commit = true,
+          label = "Connection Protocol:", value = (launch and launch.connectionProtocol) or 0,
+          tooltip = "Changes which protocol is used when downloading updates and importing builds.",
+          options = { { label = "Auto", val = 0 }, { label = "IPv4", val = 1 }, { label = "IPv6", val = 2 } } },
+        { key = "proxyScheme", section = "Application options", type = "dropdown", commit = true,
+          label = "Proxy server:", value = scheme,
+          options = { { label = "HTTP", val = "http" }, { label = "SOCKS", val = "socks5" }, { label = "SOCKS5H", val = "socks5h" } } },
+        { key = "proxyURL", section = "Application options", type = "text", commit = true,
+          label = "", value = purl, maxChars = 0, placeholder = "host:port" },
+        { key = "dpiScaleOverridePercent", section = "Application options", type = "dropdown", commit = false,
+          label = "UI scaling override:", value = self.dpiScaleOverridePercent or 0,
+          tooltip = "Overrides Windows DPI scaling inside Path of Building.\nChoose a percentage between 100% and 250% or revert to the system default.",
+          options = { { label = "Use system default", val = 0 }, { label = "100%", val = 100 }, { label = "125%", val = 125 },
+                      { label = "150%", val = 150 }, { label = "175%", val = 175 }, { label = "200%", val = 200 },
+                      { label = "225%", val = 225 }, { label = "250%", val = 250 } } },
+        { key = "buildPath", section = "Application options", type = "text", commit = true,
+          label = "Build save path:", value = buildPathVal,
+          tooltip = "Overrides the default save location for builds.\nThe default location is: '" .. tostring(self.defaultBuildPath) .. "'" },
+        { key = "nodePowerTheme", section = "Application options", type = "dropdown", commit = false,
+          label = "Node Power colours:", value = self.nodePowerTheme,
+          tooltip = "Changes the colour scheme used for the node power display on the passive tree.",
+          options = { { label = "Red & Blue", val = "RED/BLUE" }, { label = "Red & Green", val = "RED/GREEN" }, { label = "Green & Blue", val = "GREEN/BLUE" } } },
+        { key = "colorPositive", section = "Application options", type = "color", commit = false,
+          label = "Hex colour for positive values:", value = hex(self.colorPositive), maxChars = 8,
+          tooltip = "Overrides the default hex colour for positive values in breakdowns.\nExpected format is 0x000000. The default value is " .. hex(dc.POSITIVE) .. ".\nIf updating while inside a build, please re-load the build after saving." },
+        { key = "colorNegative", section = "Application options", type = "color", commit = false,
+          label = "Hex colour for negative values:", value = hex(self.colorNegative), maxChars = 8,
+          tooltip = "Overrides the default hex colour for negative values in breakdowns.\nExpected format is 0x000000. The default value is " .. hex(dc.NEGATIVE) .. ".\nIf updating while inside a build, please re-load the build after saving." },
+        { key = "colorHighlight", section = "Application options", type = "color", commit = false,
+          label = "Hex colour for highlight nodes:", value = hex(self.colorHighlight), maxChars = 8,
+          tooltip = "Overrides the default hex colour for highlighting nodes in passive tree search.\nExpected format is 0x000000. The default value is " .. hex(dc.HIGHLIGHT) .. "\nIf updating while inside a build, please re-load the build after saving." },
+        { key = "betaTest", section = "Application options", type = "check", commit = false,
+          label = "Opt-in to weekly beta test builds:", value = not not self.betaTest },
+        { key = "edgeSearchHighlight", section = "Application options", type = "check", commit = false,
+          label = "Show search circles at viewport edge", value = not not self.edgeSearchHighlight },
+        { key = "showPublicBuilds", section = "Application options", type = "check", commit = false,
+          label = "Show Latest/Trending builds:", value = not not self.showPublicBuilds },
+        { key = "showFlavourText", section = "Application options", type = "check", commit = false,
+          label = "Styled Tooltips with Flavour Text:", value = not not self.showFlavourText,
+          tooltip = "If updating while inside a build, please re-load the build after saving." },
+        { key = "showAnimations", section = "Application options", type = "check", commit = false,
+          label = "Show Animations:", value = not not self.showAnimations },
+        { key = "showAllItemAffixes", section = "Application options", type = "check", commit = false,
+          label = "Show all item affixes sliders:", value = not not self.showAllItemAffixes,
+          tooltip = "Display all item affix slots as a stacked list instead of hiding them in dropdowns" },
+        -- ===== Build-related options =====
+        { key = "showThousandsSeparators", section = "Build-related options", type = "check", commit = false,
+          label = "Show thousands separators:", value = not not self.showThousandsSeparators },
+        { key = "thousandsSeparator", section = "Build-related options", type = "text", commit = false,
+          label = "Thousands separator:", value = self.thousandsSeparator or "", maxChars = 1 },
+        { key = "decimalSeparator", section = "Build-related options", type = "text", commit = false,
+          label = "Decimal separator:", value = self.decimalSeparator or "", maxChars = 1 },
+        { key = "showTitlebarName", section = "Build-related options", type = "check", commit = false,
+          label = "Show build name in window title:", value = not not self.showTitlebarName },
+        { key = "defaultGemQuality", section = "Build-related options", type = "int", commit = false,
+          label = "Default gem quality:", value = self.defaultGemQuality or 0, min = 0, max = 23, maxChars = 2,
+          tooltip = "Set the default quality that can be overwritten by build-related quality settings in the skill panel." },
+        { key = "defaultCharLevel", section = "Build-related options", type = "int", commit = false,
+          label = "Default character level:", value = self.defaultCharLevel or 1, min = 1, max = 100, maxChars = 3,
+          tooltip = "Set the default level of your builds. If this is higher than 1, manual level mode will be enabled by default in new builds." },
+        { key = "defaultItemAffixQuality", section = "Build-related options", type = "slider", commit = false,
+          label = "Default item affix quality:", value = self.defaultItemAffixQuality or 0.5, min = 0, max = 1, step = 0.01 },
+        { key = "showWarnings", section = "Build-related options", type = "check", commit = false,
+          label = "Show build warnings:", value = not not self.showWarnings },
+        { key = "slotOnlyTooltips", section = "Build-related options", type = "check", commit = false,
+          label = "Show tooltips only for affected slots:", value = not not self.slotOnlyTooltips,
+          tooltip = "Shows comparisons in tooltips only for the slot you are currently placing the item in, instead of all slots." },
+        { key = "migrateEldritchImplicits", section = "Build-related options", type = "check", commit = false,
+          label = "Copy Eldritch Implicits onto Display Item:", value = not not self.migrateEldritchImplicits,
+          tooltip = "Apply Eldritch Implicits from current gear when comparing new gear, given the new item doesn't have any influence" },
+        { key = "notSupportedModTooltips", section = "Build-related options", type = "check", commit = false,
+          label = "Show tooltip for unsupported mods :", value = not not self.notSupportedModTooltips,
+          tooltip = "Show (Not supported in PoB yet) next to unsupported mods" },
+        { key = "invertSliderScrollDirection", section = "Build-related options", type = "check", commit = false,
+          label = "Invert slider scroll direction:", value = not not self.invertSliderScrollDirection,
+          tooltip = "Default scroll direction is:\nScroll Up = Move right\nScroll Down = Move left" },
+    }
+    -- Dev-only toggle (legacy gates this behind launch.devMode).
+    if launch and launch.devMode then
+        opts[#opts + 1] = { key = "disableDevAutoSave", section = "Build-related options", type = "check", commit = false,
+            label = "Disable Dev AutoSave:", value = not not self.disableDevAutoSave,
+            tooltip = "Do not Autosave builds while on Dev branch" }
+    end
+    return opts
+end
+
+-- Live-apply a single option onto self.* exactly as the matching legacy control
+-- callback does, then return the (possibly clamped/validated) stored value so the
+-- QML control can reflect any clamp. Cancel replays this with the snapshot values.
+function pob_previewOption(key, value)
+    if not main or not key then return value end
+    local self = main
+    if key == "colorPositive" or key == "colorNegative" or key == "colorHighlight" then
+        -- Mirror the EditControl callback: only apply a well-formed 0xRRGGBBAA hex
+        -- (string.match(buf, "0x%x+") with #match == 8), otherwise keep the old value.
+        local buf = tostring(value)
+        local m = buf:match("0x%x+")
+        if m and #m == 8 then
+            local code = (key == "colorPositive" and "POSITIVE")
+                      or (key == "colorNegative" and "NEGATIVE") or "HIGHLIGHT"
+            updateColorCode(code, buf)
+            self[key] = buf
+        end
+        return self[key]
+    elseif key == "defaultGemQuality" then
+        self.defaultGemQuality = o_min(tonumber(value) or 0, 23)
+        return self.defaultGemQuality
+    elseif key == "defaultCharLevel" then
+        self.defaultCharLevel = o_min(o_max(tonumber(value) or 1, 1), 100)
+        return self.defaultCharLevel
+    elseif key == "defaultItemAffixQuality" then
+        self.defaultItemAffixQuality = o_round(tonumber(value) or 0.5, 2)
+        return self.defaultItemAffixQuality
+    elseif key == "dpiScaleOverridePercent" then
+        self.dpiScaleOverridePercent = tonumber(value) or 0
+        -- SetDPIScaleOverridePercent is a SimpleGraphic stub under Qt (Qt owns DPI);
+        -- call it defensively so this stays faithful if it is ever wired.
+        pcall(function() SetDPIScaleOverridePercent(self.dpiScaleOverridePercent) end)
+        return self.dpiScaleOverridePercent
+    elseif key == "thousandsSeparator" or key == "decimalSeparator" or key == "nodePowerTheme" then
+        self[key] = value
+        return value
+    else
+        -- boolean checkbox fields
+        self[key] = value and true or false
+        return self[key]
+    end
+end
+
+-- Apply the Save-button-only fields and persist. `t` is a flat map
+-- { connectionProtocol, proxyScheme, proxyURL, buildPath }. Mirrors the legacy
+-- Save handler (Main.lua:1188) 1:1, minus ClosePopup (QML owns the popup).
+function pob_commitOptions(t)
+    if not main then return false end
+    local self = main
+    t = t or {}
+    if t.connectionProtocol ~= nil then
+        launch.connectionProtocol = tonumber(t.connectionProtocol)
+        self.connectionProtocol = launch.connectionProtocol
+    end
+    local purl = tostring(t.proxyURL or "")
+    if purl:match("%w") then
+        local scheme = tostring(t.proxyScheme or "http")
+        launch.proxyURL = scheme .. "://" .. purl
+    else
+        launch.proxyURL = nil
+    end
+    local bpath = tostring(t.buildPath or "")
+    if bpath:match("%S") then
+        self.buildPath = bpath
+        if not self.buildPath:match("[\\/]$") then
+            self.buildPath = self.buildPath .. "/"
+        end
+    else
+        self.buildPath = self.defaultBuildPath
+    end
+    if self.mode == "LIST" and self.modes and self.modes.LIST then
+        pcall(function() self.modes.LIST:BuildList() end)
+    end
+    if not (launch and launch.devMode) then
+        pcall(function() main:SetManifestBranch(self.betaTest and "beta" or "master") end)
+    end
+    pcall(function() SetDPIScaleOverridePercent(self.dpiScaleOverridePercent) end)
+    pcall(function() main:SaveSettings() end)
+    return true
+end
+
+-- Part 1.4 selftest: prove the Options bridge round-trips without touching
+-- Settings.xml (avoids clobbering the user's real settings). Asserts:
+--   * getOptions yields the full descriptor list with sane metadata;
+--   * a live boolean field flips on main via previewOption and reverts cleanly;
+--   * the defaultCharLevel numeric clamp [1,100] is enforced by previewOption.
+function pob_selftestOptions()
+    local res = { ok = false }
+    local opts = pob_getOptions()
+    if type(opts) ~= "table" or #opts == 0 then
+        res.error = "no options"
+        return res
+    end
+    res.count = #opts
+    -- sanity: every descriptor has key/type/section
+    for _, o in ipairs(opts) do
+        if not o.key or not o.type or not o.section then
+            res.error = "malformed descriptor"
+            return res
+        end
+    end
+    local boolOpt
+    for _, o in ipairs(opts) do
+        if o.type == "check" and o.commit == false then boolOpt = o; break end
+    end
+    if not boolOpt then res.error = "no live boolean option"; return res end
+    local before = main[boolOpt.key]
+    pob_previewOption(boolOpt.key, not before)
+    local flipped = main[boolOpt.key]
+    pob_previewOption(boolOpt.key, before)
+    local reverted = main[boolOpt.key]
+    res.boolKey = boolOpt.key
+    res.flipOk = (flipped == (not before)) and (reverted == before)
+    -- numeric clamp check on defaultCharLevel
+    local savedLvl = main.defaultCharLevel
+    local hi = pob_previewOption("defaultCharLevel", 9999)
+    local lo = pob_previewOption("defaultCharLevel", -5)
+    res.clampOk = (hi == 100) and (lo == 1)
+    pob_previewOption("defaultCharLevel", savedLvl or 1)
+    res.ok = not not (res.flipOk and res.clampOk)
+    return res
+end
+
+-- ===========================================================================
+-- Part 1.4 (bullet 6): About popup content bridge, mirroring
+-- main:OpenAboutPopup (Modules/Main.lua:1356)'s changelog.txt/help.txt
+-- parsing into TextListControl-shaped row lists ({height, [1]=col0text,
+-- [2]=col1text}). A host seam, not a src/ edit -- QML owns rendering
+-- (invariant #1), so only the file-parsing algorithm is ported, verbatim,
+-- not the popup control tree itself.
+--
+-- Deviation from legacy: both files live at the repo root and every host
+-- binary here always runs with cwd=src/ (invariant #6), so unlike legacy's
+-- `launch.devMode and "../changelog.txt" or "changelog.txt"` branch, we
+-- always read "../" regardless of devMode. The DEV[..] help-line content
+-- gate still honors launch.devMode, matching legacy exactly.
+function pob_getAboutContent()
+    local textSize, subTitleSize, titleSize, popupWidth = 16, 20, 24, 810
+    local changeList = { }
+    local changeVersionHeights = { }
+    local changelogFile = io.open("../changelog.txt", "r")
+    if changelogFile then
+        changelogFile:close()
+        for line in io.lines("../changelog.txt") do
+            local ver, date = line:match("^VERSION%[(.+)%]%[(.+)%]$")
+            if ver then
+                if #changeList > 0 then
+                    table.insert(changeList, { height = textSize / 2 })
+                end
+                table.insert(changeVersionHeights, #changeList * textSize)
+                table.insert(changeList, { height = titleSize, "^7Version " .. ver .. " (" .. date .. ")" })
+            elseif line:match("^---") then
+                table.insert(changeList, { height = subTitleSize, "^7" .. line })
+            else
+                table.insert(changeList, { height = textSize, "^7" .. line })
+            end
+        end
+    end
+
+    local helpList = { }
+    local helpSections = { }
+    local helpSectionHeights = { }
+    local helpFile = io.open("../help.txt", "r")
+    if helpFile then
+        helpFile:close()
+        for line in io.lines("../help.txt") do
+            local title = line:match("^---%[(.+)%]$")
+            if title then
+                if #helpList > 0 then
+                    table.insert(helpList, { height = textSize / 2 })
+                end
+                table.insert(helpSections, { title = title, height = #helpList })
+                table.insert(helpList, { height = titleSize, "^7" .. title .. " (" .. #helpSections .. ")" })
+            else
+                local dev = line:match("^DEV%[(.+)%]$")
+                if not (dev and not (launch and launch.devMode)) then
+                    line = (dev or line)
+                    local outdent, indent = line:match("(.*)\t+(.*)")
+                    if outdent then
+                        local indentLines = main:WrapString(indent, textSize, popupWidth - 190)
+                        if #indentLines > 1 then
+                            for i, indentLine in ipairs(indentLines) do
+                                table.insert(helpList, { height = textSize, (i == 1 and outdent or " "), (dev and "^x8888FF" or "^7") .. indentLine })
+                            end
+                        else
+                            table.insert(helpList, { height = textSize, (dev and "^x8888FF" or "^7") .. outdent, (dev and "^x8888FF" or "^7") .. indent })
+                        end
+                    else
+                        local wrapped = main:WrapString(line, textSize, popupWidth - 135)
+                        for i, line2 in ipairs(wrapped) do
+                            table.insert(helpList, { height = textSize, (dev and "^x8888FF" or "^7") .. (i > 1 and "    " or "") .. line2 })
+                        end
+                    end
+                end
+            end
+        end
+        local contentsDone = false
+        for sectionIndex, sectionValues in ipairs(helpSections) do
+            if sectionValues.title == "Contents" then
+                table.insert(helpList, (sectionValues.height + sectionIndex), { height = textSize, "^7 " })
+                for i, sectionValuesInner in ipairs(helpSections) do
+                    table.insert(helpList, (sectionValues.height + i + sectionIndex), { height = textSize, "^7" .. tostring(i) .. ". " .. sectionValuesInner.title })
+                end
+            end
+            helpSections[sectionIndex].height = helpSections[sectionIndex].height + (contentsDone and (#helpSections + 1) or 0)
+            helpSectionHeights[sectionIndex] = helpSections[sectionIndex].height * textSize
+            if sectionValues.title == "Contents" then
+                contentsDone = true
+            end
+        end
+    end
+
+    return {
+        changeList = changeList,
+        changeVersionHeights = changeVersionHeights,
+        helpList = helpList,
+        helpSectionHeights = helpSectionHeights,
+        helpSections = helpSections,
+        versionNumber = (launch and launch.versionNumber) or "",
+        versionBranch = (launch and launch.versionBranch) or "",
+        devMode = not not (launch and launch.devMode),
+    }
+end
+
+-- Part 1.4 selftest: assert the About content bridge yields a non-empty,
+-- well-formed changelog + help section list (changelog.txt/help.txt ship in
+-- the repo root, so this always has real content to parse in dev/CI).
+function pob_selftestAboutContent()
+    local res = { ok = false }
+    local c = pob_getAboutContent()
+    if type(c) ~= "table" then res.error = "no content"; return res end
+    res.changeCount = #(c.changeList or {})
+    res.helpCount = #(c.helpList or {})
+    res.helpSectionCount = #(c.helpSections or {})
+    res.ok = not not (res.changeCount > 0 and res.helpCount > 0 and res.helpSectionCount > 0)
     return res
 end

@@ -27,6 +27,11 @@
         <file>components/PathControl.qml</file>
         <file>components/TextListControl.qml</file>
         <file>components/SearchHost.qml</file>
+        <file>components/OptionsDialog.qml</file>
+        <file>components/Toast.qml</file>
+        <file>components/ToastStack.qml</file>
+        <file>components/BottomBar.qml</file>
+        <file>components/AboutPopup.qml</file>
         <file>views/TreeView.qml</file>
         <file>views/SkillsView.qml</file>
         <file>views/ItemsView.qml</file>
