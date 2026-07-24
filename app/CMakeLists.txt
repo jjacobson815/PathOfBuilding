@@ -23,6 +23,7 @@ add_executable(pob-qt
     src/LuaEngine.cpp
     src/TextMetrics.cpp
     src/Theme.cpp
+    src/ColorText.cpp
     src/BuildModel.cpp
     src/SocketGroupModel.cpp
     src/BuildListModel.cpp
@@ -87,15 +88,19 @@ target_compile_definitions(pob-selftest PRIVATE
 # the files the Qt/QML port needs at runtime. The legacy SimpleGraphic runtime
 # (SimpleGraphic.dll, Path of Building.exe, lua51.dll, Update.exe,
 # runtime/SimpleGraphic/) is deliberately NOT copied — the Qt app replaces that
-# engine entirely. The host bootstrap lands at dist/lua/pob_host.lua and the
-# engine sources at dist/src, matching the exe-relative resolution in main.cpp
-# (which also chdir's to dist/src so the engine's relative TreeData/ +
-# manifest.xml paths resolve).
+# engine entirely. EXCEPTION: runtime/SimpleGraphic/Fonts/ (the .tgf metrics +
+# .ttf render fonts TextMetrics/Theme load, Phase 1.2a) ships regardless — it's
+# data the Qt port owns now, not the legacy engine. The host bootstrap lands at
+# dist/lua/pob_host.lua and the engine sources at dist/src, matching the
+# exe-relative resolution in main.cpp (which also chdir's to dist/src so the
+# engine's relative TreeData/ + manifest.xml paths resolve).
 install(TARGETS pob-qt RUNTIME DESTINATION dist)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lua DESTINATION dist
         FILES_MATCHING PATTERN "*.lua")
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../src DESTINATION dist)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/lua DESTINATION dist/runtime)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/SimpleGraphic/Fonts
+        DESTINATION dist/runtime/SimpleGraphic)
 # Native Lua C module the engine require()s at boot. src/Modules/Common.lua does
 # require('lua-utf8'); pob_host.lua resolves it from _RUNTIME_DIR (dist/runtime),
 # so lua-utf8.dll (+ its lua51.dll Lua-API dependency) MUST ship there. Without

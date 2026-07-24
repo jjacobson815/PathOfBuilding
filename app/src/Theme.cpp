@@ -77,7 +77,17 @@ void Theme::init(LuaEngine* engine) {
     m_muted      = QColor(148, 163, 184); // #94A3B8 slate-400 (readable on #0F172A)
     m_mutedDark  = QColor(100, 116, 139); // #64748B slate-500
     m_controlSize = m_navButtonHeight > 0 ? m_navButtonHeight : 20;
-    m_fontFamily = "sans-serif";
+
+    // Bundled font families (Phase 1.2a) — the real TTFs backing these are
+    // registered in main.cpp via QFontDatabase::addApplicationFont, from the
+    // same runtime/SimpleGraphic/Fonts dir TextMetrics reads .tgf atlases
+    // from. fontFamily's old hardcoded "sans-serif" default is replaced with
+    // the bundled VAR face; UITheme.typography.fontFamily (below) can still
+    // override it.
+    m_fontVar     = "Liberation Sans";
+    m_fontVarBold = "Liberation Sans"; // same family; pair with font.bold: true
+    m_fontFixed   = "Bitstream Vera Sans Mono";
+    m_fontFamily = m_fontVar;
     m_fontSize   = 14;
 
     // --- Extended design-system tokens (Phase 1) ---
@@ -163,6 +173,31 @@ void Theme::init(LuaEngine* engine) {
         << "danger=" << m_danger.name()
         << "radiusCard=" << m_radiusCard
         << "space3=" << m_space3;
+}
+
+QVariantMap Theme::fontFor(const QString& legacyName) const {
+    const QString f = legacyName.trimmed().toUpper();
+    QVariantMap r;
+    r["bold"] = false;
+    r["italic"] = false;
+    if (f == "VAR") {
+        r["family"] = m_fontVar;
+    } else if (f == "VAR BOLD") {
+        r["family"] = m_fontVarBold;
+        r["bold"] = true;
+    } else if (f == "FONTIN") {
+        r["family"] = m_fontVar; // Fontin licensing deferred — see STATUS.md
+    } else if (f == "FONTIN ITALIC") {
+        r["family"] = m_fontVar;
+        r["italic"] = true;
+    } else if (f == "FONTIN SC" || f == "FONTIN SC ITALIC") {
+        r["family"] = m_fontVar; // no small-caps substitute yet
+        r["italic"] = (f == "FONTIN SC ITALIC");
+    } else {
+        // "FIXED" and anything unrecognised (including empty) — legacy default.
+        r["family"] = m_fontFixed;
+    }
+    return r;
 }
 
 bool Theme::contrastOk(const QColor& fg, const QColor& bg) const {

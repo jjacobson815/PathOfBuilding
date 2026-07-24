@@ -14,10 +14,12 @@
 #include <QEventLoop>
 #include <QThread>
 #include <QDateTime>
+#include <QFontDatabase>
 #include "LuaEngine.h"
 #include "selftest_checks.h"
 #include "Theme.h"
 #include "TextMetrics.h"
+#include "ColorText.h"
 #include "BuildModel.h"
 #include "SocketGroupModel.h"
 #include "SaveLoadModel.h"
@@ -315,6 +317,22 @@ int main(int argc, char** argv) {
     QDir::setCurrent(srcDir); // engine opens TreeData/ + manifest.xml relative to cwd
     mainLog("cwd=" + srcDir + " runtime=" + runtimeDir + " host=" + hostFile);
 
+    // Phase 1.2a: register the actual TTFs backing the VAR/FIXED font families
+    // (Liberation Sans [+ Bold] / Bitstream Vera Sans Mono) so QML renders the
+    // SAME families the .tgf atlases in TextMetrics measure against. QFont is
+    // used for RENDERING ONLY here — TextMetrics (never QFontMetrics) still
+    // owns all layout math. Fontin is licensing-deferred (see STATUS.md); those
+    // logical names fall back to the VAR face in Theme::fontFor.
+    {
+        const QString fontDir = runtimeDir + "/SimpleGraphic/Fonts";
+        for (const char* f : {"Liberation Sans.ttf", "Liberation Sans Bold.ttf",
+                               "Bitstream Vera Sans Mono.ttf"}) {
+            const QString path = fontDir + "/" + f;
+            if (QFontDatabase::addApplicationFont(path) < 0)
+                qWarning().noquote() << "[fonts] failed to register" << path;
+        }
+    }
+
     checkBinaryFreshness();
 
     LuaEngine engine;
@@ -353,6 +371,13 @@ int main(int argc, char** argv) {
     // caret, ellipsis) measures identically to the engine. Q_INVOKABLE
     // textMetrics.width(height, font, text) / cursorIndex(...).
     qml.rootContext()->setContextProperty("textMetrics", engine.textMetrics());
+
+    // Phase 1.2a: the shared ^0-^9/^xRRGGBB colour-markup parser (see
+    // ColorText.h). Every colour-coded string (item names, gem tooltips,
+    // stat lines, ...) should route through this rather than a bespoke
+    // per-component parser or Theme::parseColor (single-token only).
+    ColorText* colorText = new ColorText(&app);
+    qml.rootContext()->setContextProperty("colorText", colorText);
 
     // Phase 2a: typed build-state models. They are parented to the app so they
     // live for the process lifetime; the QML context properties keep references.
@@ -491,6 +516,12 @@ int main(int argc, char** argv) {
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { compareModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { partyModel->refresh(&engine); });
 
+    // GUI-subsystem binary: QML compile warnings/errors go to the debugger
+    // (OutputDebugString), never a visible console. Mirror them into mainLog
+    // so a load failure is diagnosable without an attached debugger.
+    QObject::connect(&qml, &QQmlApplicationEngine::warnings, [](const QList<QQmlError>& warnings) {
+        for (const QQmlError& w : warnings) mainLog("QML warning: " + w.toString());
+    });
     qml.load(QUrl("qrc:/qml/main.qml"));
     if (qml.rootObjects().isEmpty()) {
         mainLog("qml FAILED to load");

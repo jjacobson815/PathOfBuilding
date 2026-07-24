@@ -40,15 +40,26 @@ Full spec in [[text-rendering]]. This was missed in the first plan pass and is t
 most pervasive concern. The bitmap font atlases already ship in
 `runtime/SimpleGraphic/Fonts/`.
 
-- [ ] **Bundle + register fonts.** Add Liberation Sans (Regular+Bold) + Bitstream
-  Vera Sans Mono (or DejaVu Sans Mono) to a Qt resource; `QFontDatabase::
-  addApplicationFont()` in `main.cpp` before QML load. Decide the **Fontin
-  licensing** question (exljbris Extended License to bundle, reuse the bundled
-  atlases, or substitute an OFL small-caps face) — 104 item/gem/tree sites. (M)
-- [ ] **Extend `Theme`** (replace the single `m_fontFamily="sans-serif"` at
-  `Theme.cpp:80`): add `fontVar`/`fontVarBold`/`fontFixed` (+ `fontFontinSC`/
-  `fontFontin` if licensed) + a name→QFont resolver keyed by the 7 `fontMap`
-  strings. Wire QML widgets to the right family (monospace fields → `fontFixed`). (S-M)
+- [x] **Bundle + register fonts.** — **DONE (2026-07-24).** Fetched official
+  upstream TTFs (Liberation Sans Regular/Bold from `liberationfonts/liberation-
+  fonts` 2.1.5, OFL; Bitstream Vera Sans Mono from `download.gnome.org` 1.10,
+  permissive) into `runtime/SimpleGraphic/Fonts/` alongside the existing `.tgf`/
+  `.tga` atlases (+ `LICENSE-*.txt`). `QFontDatabase::addApplicationFont()` in
+  `main.cpp` (non-headless path, before `QQmlApplicationEngine` load). Added a
+  `dist/runtime/SimpleGraphic/Fonts` install rule (`app/CMakeLists.txt`) — this
+  dir was previously never installed at all (pre-existing gap predating this
+  phase; the `.tgf` atlases weren't shipping to `dist` either). Fontin TTFs NOT
+  fetched — licensing still DEFERRED (open decision below); Theme::fontFor()
+  stubs FONTIN* → the VAR face.
+- [x] **Extend `Theme`** — **DONE (2026-07-24).** Added `fontVar`/`fontVarBold`/
+  `fontFixed` Q_PROPERTYs (`"Liberation Sans"` ×2 + `"Bitstream Vera Sans Mono"`;
+  VAR/VAR BOLD share one family, paired with `font.bold` — that's how the
+  Liberation TTFs actually embed their family name) and a
+  `Q_INVOKABLE QVariantMap fontFor(legacyName)` resolver keyed by the 7
+  `fontMap` strings, returning `{family, bold, italic}`. Replaces the old
+  hardcoded `m_fontFamily="sans-serif"` default (now `m_fontVar`); UITheme
+  `typography.fontFamily` can still override. Not yet wired into any view
+  widgets (no Tier 1 widgets exist yet — Part 1.3).
 - [x] **`TextMetrics` engine** — a C++ class that loads `runtime/SimpleGraphic/
   Fonts/*.tgf` and reproduces `r_font_c` EXACTLY (per-glyph `ceil`, `width+spLeft+
   spRight`, atlas selection + scale, tab=4×space, tofu for ≥128, inline escape
@@ -71,45 +82,237 @@ most pervasive concern. The bitmap font atlases already ship in
   in 1.2a:** golden parity vs *legacy actual* values (needs legacy SimpleGraphic run
   — deferred); cursor hit-test uses a midpoint approximation for non-tab chars
   (refine when EditControl lands). See remaining 1.2a items (fonts+Theme, color parser).
-- [ ] **Color-code rich-text renderer** — one shared C++ parser: PoB string →
-  ordered `(QColor, text)` runs, honoring `^0`–`^9` (exact palette; `fromRgbF` for
-  ^8/^9), `^xRRGGBB`/`^XRRGGBB`, literal `^`, and carry-forward default (`^7` =
-  reset). Render via `Text.StyledText` spans or a `QQuickPaintedItem`. **Gates every
-  text component.** Do NOT reuse `Theme::parseColor` (single-token only). (M)
+- [x] **Color-code rich-text renderer** — **DONE (2026-07-24).** New
+  `app/src/ColorText.{h,cpp}` (QObject): `parse(text, defaultColor)` → ordered
+  `{color, text}` runs (`^0`–`^9` exact palette incl. `fromRgbF` for ^8/^9,
+  `^xRRGGBB`/`^XRRGGBB`, literal `^` for anything else incl. trailing `^`, no
+  `^^` escape, carry-forward default), `toStyledText(...)` → HTML-escaped
+  `Text.StyledText`-ready markup, `stripColorCodes(...)`. Exposed to QML as the
+  `colorText` context property (`main.cpp`). New Tier-0 widget
+  `app/qml/components/ColorText.qml` (registered in `qml.qrc`) wraps a
+  `Text{textFormat: Text.StyledText}` bound to `colorText.toStyledText(...)`.
+  Independent of `Theme::parseColor` (not reused, per spec) and of
+  `TextMetrics`/font state (own escape-length logic, verified against a
+  standalone compiled test: `^1Red^7 normal ^xFF8800orange^0 black^` → 4 runs
+  incl. correct literal-trailing-`^` handling). Not yet consumed by a real
+  view (no item/gem/tree text sites ported yet — later phases).
 
 ## Part 1.2 — Tier 0 infrastructure (build in this order)
-- [ ] **Theme/chrome kit** — border+fill chrome, hover/pressed/disabled palette,
-  arrow/checkmark glyphs, over the existing `Theme.cpp` tokens (`UITheme.lua`). (M)
-- [ ] **Tooltip framework** — programmatic `clear/addLine/addSeparator`, param-
-  memoized rebuild keyed on `outputRevision` (`CheckForUpdate` equiv), hover
-  placement with viewport flip, multi-column overflow, rarity header art (13
-  configs), child tooltips. Hover tooltips will later run calc compares (Phase 2
-  wires that). (L)
-- [ ] **Modal popup framework** — popup **stack**, dim overlay, centered dialog +
-  title plate, enter/escape wiring; generic Message / Confirm(2–3 button) /
-  TextInput / NewFolder dialogs. Provide a generic `openPopup(controlsModel, enter,
-  escape)` so the ~108 legacy call sites map onto one component rather than 108
-  bespoke dialogs. (L)
-- [ ] **Drag-and-drop framework** — typed payloads (Item / Build / MinionId /
-  SocketGroup), `canReceiveDrag`/`receiveDrag` protocol, 10 px threshold, target
-  highlight, insertion caret for reorder, cursor-following label. (L)
-- [ ] **UndoHandler equivalent** — generic undo/redo ring for edit fields + tab-
-  level state (`createUndoState`/`restoreUndoState`, sets `modFlag`). (S)
-- [ ] **Input/focus model** — Qt event handling that reproduces the needed legacy
-  semantics: TAB-order groups, RETURN/ESC in dialogs, wheel-on-hover, the
-  `OnHoverKeyUp` behaviors (wheel-scroll-without-focus, wiki hotkey on hovered row).
-  Document what is intentionally dropped. (M)
+- [x] **Theme/chrome kit** — **DONE (2026-07-24).** New
+  `app/qml/components/Chrome.qml` (border+fill Rectangle; `pressed`/`hovered`/
+  `locked`/`controlEnabled` state props, using the EXISTING `theme.border`/
+  `borderStrong`/`hover`/`active`/`disabled`/`radiusControl` tokens — deliberately
+  NOT literal legacy SimpleGraphic greyscale bevels, since the app shell
+  (sidebar/topbar) already committed to the flat "Cyber Citrus" design system;
+  see the token list in `Theme.h`). `Arrow.qml` (Canvas triangle, 4 directions,
+  geometry mirrors legacy `main:DrawArrow`) and `CheckMark.qml` (Canvas
+  checkmark, geometry mirrors legacy `main:DrawCheckMark`) — both verified
+  pixel-correct via a temporary debug overlay in `main.qml` (all 4 Chrome
+  states + 4 Arrow directions + CheckMark screenshotted via `--capture`, then
+  removed). Registered in `qml.qrc`. Not yet consumed by a real widget (Tier 1
+  Button/CheckBox/Slider land in Part 1.3 and will compose these).
+- [x] **Tooltip framework (core)** — **DONE (2026-07-24), partial scope.** New
+  `app/qml/components/Tooltip.qml`, ported from `src/Classes/Tooltip.lua`
+  (643 lines): programmatic `clear()`/`addLine(size,text,font)`/
+  `addSeparator(size)`; `checkForUpdate(params)` (the `CheckForUpdate` param-
+  memoization equivalent — array-diff instead of Lua varargs); word-wrap
+  ported from `main:WrapString` (greedy break-at-last-space, measured via
+  `textMetrics.width`, "VAR" font); `getSize()`; `showAt(x,y,w,h,viewport)`
+  hover placement ported from `Tooltip:Draw`'s `isHoverToolTip` branch
+  (right-of-hover by default, flips left/up on overflow, clamped to
+  viewport). Renders via `ColorText` lines (so `^`-codes work) + a border/fill
+  Rectangle. Verified via a temporary debug harness in `main.qml`: colored
+  stat line, separator, word-wrapped body text, AND the edge-flip case (hover
+  near the right edge correctly repositions left) — screenshotted via
+  `--capture`, then removed.
+  **Deliberately DEFERRED to when a real content view needs them** (no item/
+  gem/tree tooltip call site exists yet to validate exact asset paths/pixel
+  offsets against): multi-column overflow (`CalculateColumns`'s column-break
+  logic), the 13-config rarity header art + influence icons + RELIC foil
+  tints, the oil/recipe row (`SetRecipe`), child tooltips (item-granted-skill
+  sub-tooltips). The programmatic API (clear/addLine/addSeparator/
+  checkForUpdate/showAt) is stable — a future pass extends the component in
+  place without call-site changes. Hover tooltips running live calc compares
+  is Phase 2 (calc bridge) — out of scope here regardless.
+- [x] **Modal popup framework** — **DONE (2026-07-24).** Built on
+  `QtQuick.Controls.Dialog` rather than hand-rolled dim/centering/stacking —
+  `app/qml/components/PopupBase.qml` (the generic `openPopup`-equivalent
+  shell: themed background, title-plate header mirroring `PopupDialog:Draw`'s
+  title box, `Overlay.modal` dim rect, RETURN→`accept()`/ESCAPE→`reject()`
+  wiring, `Dialog`'s built-in stack/z-order via the window `Overlay` gives
+  the popup **stack** for free). `PopupButton.qml` — minimal Chrome-based
+  button (label + click only) so the canned dialogs don't hand-roll
+  Chrome+MouseArea+Text each; explicitly NOT the future Tier 1 ButtonControl.
+  Four canned dialogs, each porting the matching `Modules/Main.lua` function:
+  `MessagePopup.qml` (`OpenMessagePopup`), `ConfirmPopup.qml`
+  (`OpenConfirmPopup`, 2- or 3-button via `extraLabel`), `TextInputPopup.qml`
+  (generic prompt+field, plain `TextInput` — the real EditControl is Tier 3,
+  not built yet), `NewFolderPopup.qml` (`OpenNewFolderPopup`, adds the
+  illegal-filename-char guard on the confirm action; the actual `MakeDir`
+  call stays the caller's job, matching legacy). Verified via a temporary
+  debug harness (a 3-button `ConfirmPopup` stacked over a `MessagePopup`):
+  dim overlay, centering, title plate, colored (`^`-code) message text, and
+  stacking (`Message` visible dimmed behind `Confirm`) all confirmed via
+  `--capture`, then removed.
+  **Documented deviation:** legacy's popup stack draws ONLY the topmost
+  popup (covered ones are entirely un-drawn); `Dialog`-based stacking here
+  leaves lower popups visible-but-dimmed underneath instead of hidden
+  outright — functionally equivalent (only the topmost is interactive), not
+  pixel-identical, acceptable since 2+ simultaneously-open popups is a rare,
+  brief state.
+- [x] **Drag-and-drop framework (core)** — **DONE (2026-07-24), partial
+  scope.** `app/qml/components/DragSource.qml` + `DropTarget.qml`, built on
+  Qt Quick's own `Drag`/`DropArea` (legacy has no OS-level drag either — this
+  is the equivalent in-process mechanism) rather than hand-rolled hit-
+  testing. `DragSource`: wraps arbitrary content, 10px move threshold
+  (`drag.threshold: 10`, matches legacy's `dist² > 100`), typed payload via
+  `dragType`/`dragValue` properties readable off `Drag.source` by the target,
+  snaps back to its origin position on release. `DropTarget`: wraps content +
+  a `DropArea`; `canReceiveDrag(type,value)`/`receiveDrag(type,value,source)`
+  are caller-supplied JS function properties (mirrors the legacy control
+  methods exactly); `highlighted` (bind to `containsDrag`) mirrors the
+  legacy green target tint. Verified via a temporary debug harness — two
+  `DropTarget`s + one `DragSource` render correctly at rest, no QML errors —
+  screenshotted via `--capture`, then removed.
+  **Verification caveat:** the `--capture` harness only switches views and
+  screenshots; it cannot synthesize a mouse-drag gesture, so only REST-STATE
+  rendering was visually confirmed. The drag/drop interaction itself relies
+  on Qt Quick's own well-established `Drag`/`DropArea` mechanics (not custom
+  hit-testing code), reviewed but not live-exercised.
+  **Deliberately DEFERRED** (no ListControl/ItemSlotControl exists yet to
+  integrate against): the reorder insertion-caret (legacy `selDragIndex`, a
+  row-index computed from cursor Y inside a specific list — list-layout-
+  specific, belongs with the Tier 3 ListControl) and the cursor-following
+  TEXT label (`main.showDragText` — superseded here: since the source item
+  itself visually follows the cursor via `drag.target`, that IS the ghost;
+  a separate text label is redundant for the common case, revisit if a
+  future consumer needs the plain-text variant specifically). Also noted in-
+  file: dragging the SOURCE item itself (not a reparented proxy) fights a
+  Row/Column/Layout parent's own positioning — fine for anchor/x-y positioned
+  items (slots, tree nodes), but a future Layout-based ListControl row should
+  reparent to an overlay instead of using this as-is.
+- [x] **UndoHandler equivalent** — **DONE (2026-07-24).**
+  `app/qml/components/UndoHandler.qml` — a faithful line-by-line port of
+  `src/Classes/UndoHandler.lua`'s ring-buffer algorithm (101-state cap,
+  redo-clear-on-new-edit, the exact undo()/redo() pop/restore/re-snapshot
+  sequence), verified by hand-tracing the Lua against the JS before writing
+  it. Consumers supply `createState`/`restoreState` JS function properties
+  (the `CreateUndoState`/`RestoreUndoState` contract methods); `modFlag`
+  mirrors the dirty flag. Verified via a temporary debug harness: a 7-
+  assertion sequence (2 adds → 2 undos → boundary check → 2 redos →
+  boundary check) rendered as colored PASS/FAIL text and screenshotted via
+  `--capture` — all 7 passed — then removed.
+- [x] **Input/focus model** — **DONE (2026-07-24), decision + minimal
+  primitive.** Legacy's `ControlHost.lua` input router (capture-by-return
+  `selControl`, mouse-buttons-as-keys, manual `OnHoverKeyUp` dispatch) is
+  being replaced by Qt's native event/focus model, not reproduced 1:1:
+  - **TAB-order groups** → Qt's native `activeFocusOnTab` +
+    `KeyNavigation.tab`/`backtab` (or FocusScope's default chain). No custom
+    component needed; each Tier 1+ widget wires this itself when built
+    (Part 1.3+).
+  - **RETURN/ESC in dialogs** → already implemented per-dialog in
+    `PopupBase.qml` (`Keys.onReturnPressed`→`accept()`,
+    `closePolicy: Popup.CloseOnEscape`→`reject()`) — done as part of the
+    modal popup framework above, not duplicated here.
+  - **Wheel-on-hover** → needs NO special code. Legacy special-cased this
+    because its immediate-mode router defaulted most events to the focused
+    `selControl`; Qt/QML wheel events already route by cursor position
+    (`MouseArea`/`WheelHandler`), independent of focus, by default. This is
+    a straight win, not a gap.
+  - **`OnHoverKeyUp` (wiki hotkey on hovered row)** → new
+    `app/qml/components/HoverKeyArea.qml`, wrapping a `HoverHandler` +
+    exposing `hovered` (readonly) and an `onHoverKeyUp` JS-function property.
+    Verified via a temporary debug harness: instantiates and renders
+    correctly (idle state; hover interaction itself can't be exercised by
+    the static `--capture` harness, same caveat as DragSource/DropTarget).
+    **Deliberately deferred:** the actual window-level "route this keypress
+    to whatever's hovered, focus be damned" dispatcher — needs a real
+    multi-instance consumer (Phase 5/6: SkillListControl/ItemSlotControl) to
+    validate the registry shape against; building it blind risks guessing
+    wrong.
+  - **Intentionally dropped:** legacy's capture-by-return focus model itself
+    (a handler returns "the control to select") and mouse-buttons-as-keys
+    (`LEFTBUTTON`/`WHEELUP` as `event.key` strings) — both are artifacts of
+    SimpleGraphic's polled immediate-mode input loop with no Qt equivalent
+    needed; Qt's signal-based MouseArea/focus system supersedes them
+    entirely, not a like-for-like port.
 
 ## Part 1.3 — Tier 1 + Tier 2 widgets
 
-- [ ] Tier 1 (S each): Label (color-code), Section (group box), RectangleOutline,
+- [x] Tier 1 (S each): Label (color-code), Section (group box), RectangleOutline,
   **Button** (label/image/+,-,x glyphs, locked/hover/pressed, onHover, tooltip),
   **CheckBox** (left label in hit area, borderFunc, state-aware tooltip), Dragger,
   **Slider** (SHIFT/CTRL wheel speeds, detents, cursor-value tooltip, invert option).
-- [ ] Tier 2: ScrollBar behaviors (or ScrollView policy shim: hold-to-repeat accel,
+  — **DONE (2026-07-24).** All 7 built in `app/qml/components/`, each a faithful
+  port of its `src/Classes/*.lua` counterpart over the Tier 0 kit (Chrome/Arrow/
+  CheckMark/ColorText/Tooltip/UndoHandler). Verified via a temporary debug harness
+  in `main.qml` (every widget + state — locked/disabled/checked/detent/etc. —
+  screenshotted via `--capture`, then removed) + full gate (`pob-selftest` 0,
+  `pob-qt --headless` 0, `--capture` failed=0, no regression vs the Phase 0
+  baseline). **Bugs found & fixed during verification:** (1) `Text`-derived items'
+  `implicitWidth`/`implicitHeight` are READ-ONLY in Qt Quick (computed from content
+  via Qt's own font metrics) — `Label.qml` was assigning them directly, which threw
+  "Invalid property assignment" and silently failed the whole QML load; fixed by
+  assigning the real (assignable) `width`/`height` instead, driven by
+  `textMetrics.width()` (never `QFontMetrics`, per invariant). Any consumer reading
+  a `Label`'s size must use `.width`/`.height`, not `.implicitWidth/Height` (fixed
+  one such site in `Section.qml`). (2) `controlEnabled: false` foreground content
+  (button/checkbox label text, checkbox checkmark glyph) was invisible — it used
+  the SAME `theme.disabled` token as Chrome's own disabled FILL color, so text and
+  background painted identically. Fixed with two distinct contrast pairings:
+  content drawn ON TOP of the disabled Chrome fill (Button/Dragger labels+glyphs,
+  CheckBox's CheckMark) uses `theme.background` (dark navy, contrasts against the
+  medium-grey `theme.disabled` fill); a CheckBox's LABEL sits OUTSIDE the box, on
+  the ordinary page background, so it uses `theme.muted` instead (contrasts against
+  the dark navy, would have been invisible using `theme.background` there). Any
+  future Tier 1+ widget with a disabled state must pick per this same rule — don't
+  reuse `theme.disabled` for foreground content. **Added in passing:** `main.cpp`
+  now mirrors `QQmlApplicationEngine::warnings` into the existing `mainLog` file
+  (GUI-subsystem binary — QML compile errors otherwise vanish into
+  `OutputDebugString` with zero observable diagnostic, which is exactly how bug
+  (1) above was invisible until this was added). **Naming collision noted for
+  future phases:** our `components/Button.qml` shares its name with
+  `QtQuick.Controls.Button` (already used unqualified in `main.qml`'s top bar) —
+  a bare `import "components"` in any file that also does
+  `import QtQuick.Controls` unqualified will be an AMBIGUOUS TYPE error. Views
+  adopting the component library's `Button` must either qualify the import
+  (`import "components" as Widgets` → `Widgets.Button`) or stop importing
+  `QtQuick.Controls`'s unqualified `Button`. Relevant starting Phase 3 (Build
+  Shell) and Part 1.4 (top bar rework).
+- [x] Tier 2: ScrollBar behaviors (or ScrollView policy shim: hold-to-repeat accel,
   page-jump, ScrollIntoView, autoHide, wheel-key mapping), PathControl breadcrumb,
   TextListControl (multi-column rich-text scroll + SHIFT-wheel section jumps),
   ResizableEditControl, SearchHost (type-to-filter + highlight ranges).
+  — **DONE (2026-07-24), ResizableEditControl DEFERRED.** Built `ScrollBar.qml`
+  (bespoke faithful port, not a QML ScrollView policy shim — hold-to-repeat is the
+  exact legacy timing: 500ms initial delay then a 50ms-interval repeat via two
+  `Timer`s; `offsetMax` is a REACTIVE computed property, not imperatively set like
+  legacy's `SetContentDimension`, so a consumer can just bind `contentDim`/
+  `viewDim` declaratively — `setContentDimension()` still exists as an imperative
+  convenience wrapper), `PathControl.qml` (breadcrumb of `Button`s + `Arrow`
+  separators, `UndoHandler`-backed subpath history; drag-drop-onto-a-segment
+  highlight DEFERRED — no real consumer (`BuildListControl`/`FolderListControl`
+  are Tier 4) to validate the drag-payload shape against yet), `TextListControl.qml`
+  (multi-column color-coded scroll block over `ScrollBar`, `sectionHeights`
+  SHIFT+wheel jump; documented simplification: column `align` affects
+  text-box-relative alignment only, not legacy's anchor-POINT semantics for
+  RIGHT_X/CENTER_X — revisit if a real consumer needs pixel-exact anchoring),
+  `SearchHost.qml` (non-visual `QtObject`; word-order caseless substring match +
+  highlight ranges, verified against a hand-traced example in the debug harness —
+  `["Kaom's Heart","Kaom's Roots","Tabula Rasa","Karui Ward"]` searched for
+  `"ka h"` correctly matched only "Kaom's Heart", matchCount=1). **
+  ResizableEditControl deferred**, consistent with the Tier 3 deferral below: it
+  legacy-subclasses `EditControl` (751 lines, Tier 3, not built), so
+  "ResizableEditControl" can't be built as a small increment here — it needs
+  `EditControl` first, at whichever point (here vs. Phase 3) that gets built.
+  Verified via a temporary debug harness (all 4 widgets + `SearchHost` reflected
+  into a `ColorText` line, screenshotted via `--capture`, then removed) + full gate,
+  same as Tier 1. **Observed, not caused by this work:** a capture-vs-baseline diff
+  pass showed the top-bar BUILD/LIST button ORDER differs run-to-run — `luaEngine.
+  modeNames()` iterates a Lua table without a guaranteed stable order. Cosmetic
+  today (single-mode-bar labels), but Part 1.4's mode manager should sort
+  `modeNames()` or otherwise pin an explicit order before relying on positional
+  UI (e.g. "the active mode button is always first").
 
 Defer the Tier 3 deep widgets (EditControl, DropDownControl, ListControl base,
 GemSelectControl, ItemSlotControl, CalcSection/Breakdown) to the phases that first

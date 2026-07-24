@@ -79,7 +79,118 @@ Full detail in `reference/00-architecture.md`. The short list:
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
 
-**▶ Phase 1 (started 2026-07-23):** **Part 1.2a TextMetrics DONE** — `.tgf`-backed
+**▶ Phase 1 (started 2026-07-23):** **Part 1.3 Tier 1 + Tier 2 widgets
+COMPLETE (2026-07-24).** 11 new components in `app/qml/components/`
+(Label/Section/RectangleOutline/Button/CheckBox/Dragger/Slider = Tier 1;
+ScrollBar/PathControl/TextListControl/SearchHost = Tier 2), each a faithful
+port of its `src/Classes/*.lua` counterpart over the Tier 0 kit. Verified via
+temporary debug harnesses in `main.qml` (one per tier — every widget + state
+screenshotted via `--capture`, then removed) + full gate (`pob-selftest` 0,
+`pob-qt --headless` 0, `--capture` failed=0, no regression vs the Phase 0
+baseline) after each tier. Full detail (bugs found, deviations, deferrals) is
+in `phases/PHASE-1-component-library.md` Part 1.3; the two load-bearing
+gotchas for future sessions:
+- **`Text`-derived items' `implicitWidth`/`implicitHeight` are READ-ONLY in Qt
+  Quick** (computed from content via Qt's own font metrics — NOT
+  `TextMetrics`). Any custom `Text`/`ColorText`-based widget (like `Label.qml`)
+  must size itself via the real `width`/`height` properties instead; assigning
+  `implicitWidth`/`implicitHeight` directly throws "Invalid property
+  assignment" at QML-load time and silently kills the WHOLE window (`qml.
+  rootObjects()` comes back empty, no visible error — see the `main.cpp`
+  QML-warnings-to-`mainLog` addition below). Consumers must read a `Label`'s
+  size via `.width`/`.height`, never `.implicitWidth/Height`.
+- **A disabled control's foreground content (text/glyph) must NOT reuse
+  `theme.disabled`** — that token is Chrome's own disabled FILL color, so
+  text painted in it over that fill is invisible (same color as its
+  background). Content drawn ON the disabled Chrome fill uses
+  `theme.background` for contrast; content drawn OUTSIDE the control (e.g.
+  CheckBox's label, which sits beside the box on the ordinary page
+  background) uses `theme.muted` instead. Pick per-context, not by rote.
+
+**Diagnostic added in passing:** `main.cpp` now mirrors `QQmlApplicationEngine::
+warnings` into the existing `mainLog` file — `pob-qt` is a GUI-subsystem binary
+so QML compile errors otherwise vanish into `OutputDebugString` with zero
+observable output (exactly how the `implicitWidth` bug above was invisible
+until this was added). Check `%TEMP%/pob-qt-main.log` first whenever `pob-qt`
+loads a blank/nonexistent window.
+
+**Naming collision flagged for Phase 3 / Part 1.4:** `components/Button.qml`
+shares its name with `QtQuick.Controls.Button` (already used unqualified in
+`main.qml`'s top bar). A bare `import "components"` in any file that also does
+`import QtQuick.Controls` unqualified is an AMBIGUOUS TYPE error. Views
+adopting the component library must qualify it (`import "components" as
+Widgets` → `Widgets.Button`) or drop the unqualified `QtQuick.Controls`
+import.
+
+**Observed, not caused by this work:** a capture-vs-baseline diff pass showed
+the top-bar BUILD/LIST button ORDER differs run-to-run — `luaEngine.
+modeNames()` iterates a Lua table without a guaranteed stable order. Cosmetic
+today; Part 1.4's mode manager should sort/pin an explicit order before any
+UI relies on position (e.g. "the active mode button is always first").
+
+**ResizableEditControl DEFERRED** (Tier 2 item, but legacy-subclasses
+`EditControl`, Tier 3/751 lines, not built) — revisit whenever `EditControl`
+gets built (here-or-Phase-3, per the existing Tier 3 deferral note).
+
+Next: Part 1.4 (app shell: mode manager, Settings round-trip, Options
+dialog) — see phase file. Tier 3 deep widgets (EditControl, DropDownControl,
+ListControl base, etc.) remain backlogged per-phase-first-need.
+
+**Part 1.2 Tier 0 infrastructure
+COMPLETE (2026-07-24).** All 6 items done, each verified via a temporary
+debug harness in `main.qml` (screenshotted via `--capture`, then removed)
++ full gate (`pob-selftest` 0 / `pob-qt --headless` 0 / `--capture` failed=0)
+green after every item:
+- **Theme/chrome kit** — `Chrome.qml`/`Arrow.qml`/`CheckMark.qml`, built over
+  the EXISTING `theme.border/borderStrong/hover/active/disabled/
+  radiusControl` tokens — NOT legacy greyscale; the app shell already
+  committed to the flat "Cyber Citrus" design system.
+- **Tooltip framework (core)** — `Tooltip.qml`: clear/addLine/addSeparator/
+  checkForUpdate/showAt with viewport-flip, word-wrap, ColorText integration.
+  Multi-column overflow, 13-config rarity header art, oil/recipe row, child
+  tooltips DEFERRED (no real item/gem/tree call site to validate against).
+- **Modal popup framework** — built on `QtQuick.Controls.Dialog` (not hand-
+  rolled — gives dim overlay/centering/stack-via-Overlay for free):
+  `PopupBase.qml` + `PopupButton.qml` (minimal, NOT the future Tier 1
+  ButtonControl) + 4 canned dialogs (Message/Confirm/TextInput/NewFolder).
+  Documented deviation: stacked popups stay visible-but-dimmed underneath
+  the topmost instead of un-drawn like legacy (functionally equivalent).
+- **Drag-and-drop framework (core)** — `DragSource.qml`/`DropTarget.qml` on
+  Qt Quick's own `Drag`/`DropArea`: typed payload, 10px threshold, target
+  highlight. Reorder insertion-caret + text drag-label DEFERRED (no
+  ListControl consumer yet). Verified rest-state rendering only — `--capture`
+  can't synthesize a mouse-drag gesture.
+- **UndoHandler** — `UndoHandler.qml`, a hand-traced faithful port of the
+  101-state ring-buffer algorithm; a 7-assertion self-test (add/undo/undo/
+  redo/redo + boundary flags) passed via a colored-text debug capture.
+- **Input/focus model** — a DECISION more than a component: TAB-order →
+  Qt's native `KeyNavigation`; RETURN/ESC → already in `PopupBase`;
+  wheel-on-hover → free in Qt (routes by cursor position, not focus, unlike
+  legacy); `OnHoverKeyUp` → new `HoverKeyArea.qml` (HoverHandler wrapper).
+  The actual "route keypress to whatever's hovered" dispatcher is deferred
+  to the first real consumer (Phase 5/6). Legacy's capture-by-return focus
+  model + mouse-as-key are intentionally NOT reproduced — Qt's native
+  signal/focus system supersedes them.
+
+**Part 1.2a COMPLETE (2026-07-24)** — fonts
+bundled (Liberation Sans Regular/Bold + Bitstream Vera Sans Mono TTFs, official
+upstream sources, into `runtime/SimpleGraphic/Fonts/` alongside the `.tgf`
+atlases) + registered via `QFontDatabase::addApplicationFont` in `main.cpp`;
+`Theme` extended with `fontVar`/`fontVarBold`/`fontFixed` + a `fontFor(name)`
+resolver over the 7 `fontMap` names (FONTIN* stub → VAR face, licensing still
+deferred); new shared `ColorText` parser (`app/src/ColorText.{h,cpp}`, QML
+`colorText` context property + `app/qml/components/ColorText.qml`) for
+`^0`–`^9`/`^xRRGGBB` markup, independent of `Theme::parseColor`. **Found &
+fixed in passing:** `runtime/SimpleGraphic/Fonts/` was never in the `dist/`
+install rules at all (pre-existing gap since the `.tgf` atlases were added —
+TextMetrics would have shipped broken in a packaged build); added an explicit
+install rule as an exception to the "legacy SimpleGraphic not copied" policy.
+Verified: build clean, `pob-selftest` 0, `pob-qt --headless` 0, `--capture`
+failed=0 (render-identical, no visible regression). Fonts/color-parser not yet
+consumed by any real widget — that starts with Part 1.2 Tier 0 (Theme/chrome
+kit) and Part 1.3 Tier 1 widgets (Label etc.), which are next in Phase 1.
+
+**Part 1.2a TextMetrics DONE** — `.tgf`-backed
 `app/src/TextMetrics.{h,cpp}` reproduces legacy `r_font_c` (verified vs upstream
 `r_font.cpp`): real `DrawStringWidth`/`DrawStringCursorIndex` now wired Lua→C++ via
 `pob.stringWidth`/`pob.stringCursorIndex` (replacing the 1/0 stubs), also exposed to

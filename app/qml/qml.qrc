@@ -1,6 +1,32 @@
 <RCC>
     <qresource prefix="/qml">
         <file>main.qml</file>
+        <file>components/ColorText.qml</file>
+        <file>components/Chrome.qml</file>
+        <file>components/Arrow.qml</file>
+        <file>components/CheckMark.qml</file>
+        <file>components/Tooltip.qml</file>
+        <file>components/PopupBase.qml</file>
+        <file>components/PopupButton.qml</file>
+        <file>components/MessagePopup.qml</file>
+        <file>components/ConfirmPopup.qml</file>
+        <file>components/TextInputPopup.qml</file>
+        <file>components/NewFolderPopup.qml</file>
+        <file>components/DragSource.qml</file>
+        <file>components/DropTarget.qml</file>
+        <file>components/UndoHandler.qml</file>
+        <file>components/HoverKeyArea.qml</file>
+        <file>components/Label.qml</file>
+        <file>components/Section.qml</file>
+        <file>components/RectangleOutline.qml</file>
+        <file>components/Button.qml</file>
+        <file>components/CheckBox.qml</file>
+        <file>components/Dragger.qml</file>
+        <file>components/Slider.qml</file>
+        <file>components/ScrollBar.qml</file>
+        <file>components/PathControl.qml</file>
+        <file>components/TextListControl.qml</file>
+        <file>components/SearchHost.qml</file>
         <file>views/TreeView.qml</file>
         <file>views/SkillsView.qml</file>
         <file>views/ItemsView.qml</file>
