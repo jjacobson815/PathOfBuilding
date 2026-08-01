@@ -9,12 +9,18 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**Phase 1 — QML Component Library & App Shell — COMPLETE (2026-07-24).** Spec:
-`phases/PHASE-1-component-library.md` (all Parts 1.1-1.4 ticked, acceptance gate
-closed — see that file for full per-item evidence, and the Done log below for
-the summary). **Phase 2 (Calc Integration Layer) is next but NOT started —
-awaiting user approval before beginning**, per the standing stop-at-phase-
-boundaries rule ([[stop-at-phase-boundaries]]).
+**Phase 2 — Calc Integration Layer — IN PROGRESS (started 2026-07-25).** Spec:
+`phases/PHASE-2-calc-integration.md`. **Part 2.1 (threading/latency spike) and
+Part 2.2 (recalc orchestration service) are DONE** — see "Threading/latency
+model" below and the Done log for evidence. Next: Part 2.3 (output
+marshalling). Per the standing stop-at-phase-boundaries rule
+([[stop-at-phase-boundaries]]), stop and get explicit approval before starting
+Phase 3 once Phase 2's acceptance gate closes — Parts within Phase 2 proceed
+without re-asking unless something forces a scope decision.
+
+Phase 1 (QML Component Library & App Shell) is COMPLETE (2026-07-24) — see the
+Done log below for the summary; `phases/PHASE-1-component-library.md` has full
+per-item evidence.
 
 **CI confirmation: still DEFERRED (skipped by user 2026-07-23, unrelated to
 Phase 1).** Pushed the branch to the personal fork
@@ -66,8 +72,48 @@ Full detail in `reference/00-architecture.md`. The short list:
 
 ## ❓ Open decisions (resolve when the relevant phase is reached; then record here)
 
-- **Threading/latency model** (Phase 2) — sync-on-UI-thread vs engine-thread+
-  message-passing vs frame-slicing. A mutex/snapshot guard is mandatory regardless.
+- **Threading/latency model** (Phase 2) — **RESOLVED 2026-07-25: (a) SYNCHRONOUS
+  on the UI thread**, with the existing PowerBuilder coroutine kept as the sole
+  frame-sliced exception. Measured via `tools/qt_calc_latency.lua` (new, committed)
+  against all 5 `spec/TestBuilds/3.13` builds through the real `pob_host` bridge:
+  - **Per-edit recalc** (`buildFlag`→`OnFrame`, the real edit path): min 25-118ms,
+    max up to 308ms, scaling with build complexity (cluster-jewel/trigger builds
+    costliest). This is the same order of magnitude legacy already pays per
+    keystroke (6-10+ synchronous passes) — users already tolerate it; no
+    perceptible regression from going Qt.
+  - **Hover-compare calls** (`calcFunc` — the "hovering this gives you:" path,
+    node/item/flask compares): 2-6.7ms/call across all builds. Cheap enough for
+    synchronous UI-thread execution during hover/draw with zero visible lag.
+  - **PowerBuilder full sweep (tree heat map) is the one workload that's NOT
+    tolerable synchronously**: 4.1s-13.8s wall time (42-131 coroutine resumes).
+    MUST stay frame-sliced via its existing coroutine, driven by a Qt timer/idle
+    hook (never the tree draw), never run to completion in one call, never
+    concurrent with a rebuild.
+  - No GlobalCache/heap leak signal over 5 repeated recalcs (heap delta -6.0MB to
+    +0.2MB after GC) — current `wipeGlobalCache` cadence looks fine as-is.
+  - **Two marshalling hot spots found, logged as Part 2.3 follow-ups (not a
+    threading concern, but will silently re-introduce the same latency if called
+    unconditionally on every UI refresh):** `pob_getActiveSkills()` costs
+    61-470ms (runs ONE BuildOutput PER displayed skill) and `pob_getTreeData()`
+    costs ~110ms/call (already flagged in `00-architecture.md` as re-resolving
+    sprites every call). Both must be memoized behind `outputRevision` /
+    explicit invalidation, never re-fetched on every QML binding update.
+  - **Why (a) over (b)/(c) in general:** a dedicated engine thread with
+    message-passing adds real engineering cost (Lua state has thread affinity,
+    every entry point needs marshalling + cancellation semantics) that the
+    measured latencies don't justify — discrete user actions (node click,
+    checkbox toggle) at 25-190ms are within normal desktop "click and it
+    responds" tolerance, and this is a solo hobby-fork POC
+    ([[solo-hobby-fork-poc-scope]]), not a product needing a buttery-smooth
+    guarantee. **The mutex/snapshot invariant is satisfied trivially today**:
+    only the UI thread ever touches the Lua state, so there's no concurrent
+    access to guard against yet. Revisit ONLY if Phase 10's async HTTP work
+    puts a second thread anywhere near the Lua state — that seam alone would
+    need marshalling back onto the UI thread before any Lua call, not a
+    rearchitecture of the whole calc layer.
+  - **Follow-up for Part 2.2:** consider a short debounce (~150-200ms) ONLY on
+    continuously-editable inputs that would otherwise recalc per keystroke
+    (numeric config fields) — discrete actions (clicks/toggles) don't need one.
 - **Network strategy** (Phase 10) — real sub-script protocol vs targeted async
   `pob.http` shim of `launch:DownloadPage`.
 - **Compare tab** (Phase 13) — in scope? It's fork-specific, session-only, 4986
@@ -105,6 +151,47 @@ Full detail in `reference/00-architecture.md`. The short list:
 ---
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
+
+**▶ Phase 2 (started 2026-07-25):** **Part 2.2 (recalc orchestration service)
+COMPLETE (2026-08-01).** One canonical host-callable recalc path now exists:
+`pob_recalculate()` (new, `app/lua/pob_host.lua`) runs the legacy
+`wipeGlobalCache → outputRevision++ → BuildOutput → RefreshStatList` sequence,
+gated on `build.buildFlag` (idempotent no-op when clean); `pob_getOutputRevision()`
+reads the counter without forcing a recalc; both surfaced to C++/QML as
+`LuaEngine::recalculate()`/`outputRevision()` (`recalculate()` emits
+`calcsChanged()` only on an actual recalc). `pob_getCalcOutput()` now returns
+`outputRevision` inline too. **Every existing mutation seam migrated** off the
+old per-call-site `bm.buildFlag = true; pcall(runCallback, "OnFrame")` (a full
+app-frame re-run, not just a recalc) onto `pob_recalculate()`:
+`allocNode`/`deallocNode`, `setActiveSkill`, `setConfigOption`,
+`addSocketGroupWithGem`. Real mode-transition sites (open/create/load build,
+import, LIST↔BUILD) intentionally kept on full `OnFrame` — out of scope, they
+need real mode init. **Bug found & fixed in passing:** `pob_addItemFromRaw`/
+`pob_deleteItem` dirtied `buildFlag` only indirectly (via the engine's own
+`ItemsTab` methods) and never consumed it, so `pob_getCalcOutput`'s lazy
+rebuild-if-`mainOutput`-nil check silently never fired after the first calc —
+calc output went **stale after every item add/delete** until an unrelated
+mutator happened to trigger a real recalc. Both now call `pob_recalculate()`.
+Debounce (the Part 2.2 follow-up) is **deferred, not built**: no
+continuously-editable QML input exists yet to fire rapid recalcs (Config tab UI
+is Phase 7), and the buildFlag gate already makes redundant `recalculate()`
+calls free — revisit when Phase 7 lands a live numeric field. New
+`pob_selftestRecalc` (wired into `selftest_checks.h`) verified: `pob-selftest`
+exit 0 (`recalc ok = true r0 = 4 r1 = 5`), `pob-qt --headless` exit 0, both
+binaries build clean. Full detail: `phases/PHASE-2-calc-integration.md` Part 2.2.
+
+**Part 2.1 (threading/latency spike)
+COMPLETE.** `tools/qt_calc_latency.lua` (new, committed — reusable regression
+tool, not one-shot) measures every calc-engine entry point the Qt host drives
+(recalc, calculators, hover-compares, PowerBuilder sweep, marshalling, memory)
+against all 5 `spec/TestBuilds/3.13` builds through the real `pob_host` bridge.
+Ran clean (`pob-selftest` exit 0, all 5 builds loaded+measured). **Decision:
+synchronous Lua calc on the UI thread**, PowerBuilder kept frame-sliced via its
+existing coroutine as the sole exception — full numbers + rationale in the
+"Threading/latency model" open-decision entry above (now resolved). Two
+marshalling hot spots found in passing (`pob_getActiveSkills` 1-BuildOutput-
+per-skill, `pob_getTreeData` re-resolves sprites every call) — logged as Part
+2.3 follow-ups, not fixed here (out of scope for the spike).
 
 **▶ Phase 1 — COMPLETE (started 2026-07-23, finished 2026-07-24).** Parts 1.1,
 1.2a, 1.2, 1.3 (summarized further down) plus **Part 1.4 (application shell)**

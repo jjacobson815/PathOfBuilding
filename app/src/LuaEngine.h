@@ -145,13 +145,28 @@ public:
     Q_INVOKABLE int addSocketGroupWithGem(const QString& label, const QString& gemName);
     Q_INVOKABLE void setActiveSkill(int socketGroupId, int index);
 
+    // Part 2.2: single recalc-orchestration entry point. Delegates to the
+    // top-level Lua global pob_recalculate, which runs the legacy dirty-flag
+    // sequence (wipeGlobalCache -> outputRevision++ -> BuildOutput ->
+    // RefreshStatList) only when build.buildFlag is set -- a no-op otherwise.
+    // Returns { ok, recalculated, outputRevision } (error instead of
+    // recalculated/outputRevision on failure). Emits calcsChanged() only when
+    // a recalc actually happened. outputRevision() is a cheap read of the
+    // same counter (pob_getOutputRevision) without forcing a recalc -- the
+    // legacy tooltip:CheckForUpdate(obj, outputRevision) cache-invalidation
+    // key, for callers (e.g. tooltip memoization) that just need to know if
+    // anything changed.
+    Q_INVOKABLE QVariant recalculate();
+    Q_INVOKABLE qint64 outputRevision();
+
     // Phase 5c: CalcsTab (CALCS view) bridge. Each delegates to a top-level
     // Lua global in app/lua/pob_host.lua (callGlobal does a single
     // lua_getglobal, so the helpers MUST be top-level globals, not dotted
     // names). getCalcOutput returns the full calc output table (summary +
-    // sections) or an invalid QVariant when the calcs tab is unavailable;
-    // getCalcBreakdown returns the breakdown lines (QVariantList of strings)
-    // for the given stat's breakdown key, or an empty list when none exists.
+    // sections, plus an outputRevision field mirroring the counter above) or
+    // an invalid QVariant when the calcs tab is unavailable; getCalcBreakdown
+    // returns the breakdown lines (QVariantList of strings) for the given
+    // stat's breakdown key, or an empty list when none exists.
     Q_INVOKABLE QVariant getCalcOutput();
     Q_INVOKABLE QVariantList getCalcBreakdown(const QString& section, const QString& stat);
 

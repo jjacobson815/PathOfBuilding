@@ -780,6 +780,10 @@ function pob_addItemFromRaw(raw)
     if not item or not item.base then return nil end
     it:AddItem(item, true)
     it:PopulateSlots()
+    -- AddItem sets build.buildFlag = true internally but nothing consumed it
+    -- before this returned; without this, calc output goes stale (mainOutput
+    -- is already non-nil so pob_getCalcOutput's lazy rebuild never fires).
+    pob_recalculate()
     return item.id
 end
 
@@ -790,6 +794,7 @@ function pob_deleteItem(id)
     if item then
         it:DeleteItem(item)
         it:PopulateSlots()
+        pob_recalculate()
     end
     return true
 end
@@ -932,7 +937,7 @@ function pob_addSocketGroupWithGem(label, gemName)
     })
     st:ProcessSocketGroup(group)
     bm.buildFlag = true
-    pcall(runCallback, "OnFrame")
+    pob_recalculate()
     return #st.socketGroupList
 end
 
@@ -950,7 +955,7 @@ function pob_setActiveSkill(socketGroupId, index)
     group.mainActiveSkillCalcs = index
     bm.modFlag = true
     bm.buildFlag = true
-    pcall(runCallback, "OnFrame")
+    pob_recalculate()
     return true
 end
 
@@ -973,6 +978,73 @@ function pob_selftestSkills()
         id = id,
         gemOk = gemOk,
     }
+end
+
+-- Part 2.2: single recalc-orchestration entry point. Runs the exact legacy
+-- dirty-flag sequence buildMode:OnFrame executes when build.buildFlag is set
+-- (src/Modules/Build.lua: wipeGlobalCache -> outputRevision++ -> buildFlag =
+-- false -> CalcsTab:BuildOutput() -> RefreshStatList). Every mutation seam
+-- (tree alloc, item add/delete, config write, skill select, ...) should call
+-- this instead of running a full runCallback("OnFrame") (which also
+-- reprocesses input events and dropdown state that have nothing to do with
+-- recalculating). Idempotent: a no-op fast path when nothing is dirty, so
+-- callers can invoke it freely (e.g. after every hover) without paying for
+-- redundant BuildOutput passes.
+function pob_recalculate()
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm then return { ok = false, error = "no build" } end
+    if not bm.buildFlag then
+        return { ok = true, recalculated = false, outputRevision = bm.outputRevision or 0 }
+    end
+    wipeGlobalCache()
+    bm.outputRevision = (bm.outputRevision or 0) + 1
+    bm.buildFlag = false
+    local ok, err = pcall(function() bm.calcsTab:BuildOutput() end)
+    if not ok then
+        return { ok = false, error = tostring(err), outputRevision = bm.outputRevision }
+    end
+    pcall(function() bm:RefreshStatList() end)
+    return { ok = true, recalculated = true, outputRevision = bm.outputRevision }
+end
+
+-- Lightweight read of the cache-invalidation signal (legacy
+-- tooltip:CheckForUpdate(obj, outputRevision) key) without forcing a recalc.
+function pob_getOutputRevision()
+    local bm = main and main.modes and main.modes.BUILD
+    return bm and (bm.outputRevision or 0) or 0
+end
+
+-- Part 2.2 selftest: prove pob_recalculate() is a true no-op when nothing is
+-- dirty, and does exactly one wipeGlobalCache -> outputRevision++ ->
+-- BuildOutput pass when build.buildFlag is set. Only touches the buildFlag
+-- dirty bit (normal engine bookkeeping), never the build itself, so nothing
+-- needs cleanup afterward.
+function pob_selftestRecalc()
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm then return { ok = false, error = "no build" } end
+
+    local r0 = pob_getOutputRevision()
+
+    local noop = pob_recalculate()
+    if not noop.ok or noop.recalculated or noop.outputRevision ~= r0 then
+        return { ok = false, error = "expected no-op when clean", r0 = r0, noop = noop }
+    end
+
+    bm.buildFlag = true
+    local did = pob_recalculate()
+    if not did.ok or not did.recalculated or did.outputRevision ~= r0 + 1 then
+        return { ok = false, error = "expected a real recalc", r0 = r0, did = did }
+    end
+    if bm.buildFlag then
+        return { ok = false, error = "buildFlag not cleared after recalc" }
+    end
+
+    local noop2 = pob_recalculate()
+    if not noop2.ok or noop2.recalculated or noop2.outputRevision ~= r0 + 1 then
+        return { ok = false, error = "expected second no-op", r0 = r0, noop2 = noop2 }
+    end
+
+    return { ok = true, r0 = r0, r1 = did.outputRevision }
 end
 
 -- Phase 5c: CalcsTab (CALCS view) bridge. Top-level globals (NOT pob.*) because
@@ -1055,7 +1127,7 @@ function pob_getCalcOutput()
         end
     end
 
-    return { summary = summary, sections = sections }
+    return { summary = summary, sections = sections, outputRevision = bm.outputRevision or 0 }
 end
 
 -- Return the breakdown lines for a stat, addressed by its breakdown key (the
@@ -1214,7 +1286,7 @@ function pob_setConfigOption(name, value)
         pcall(function() bm.configTab:BuildModList() end)
     end
     if bm then bm.buildFlag = true end
-    pcall(runCallback, "OnFrame")
+    pob_recalculate()
     return true
 end
 
@@ -1881,8 +1953,8 @@ end
 
 -- Phase 4b: passive-tree interaction bridge. Top-level globals (NOT pob.*) because
 -- LuaEngine::callGlobal does a single lua_getglobal and cannot resolve dotted names.
--- These wrap spec:AllocNode / spec:DeallocNode and trigger a recalc via the engine's
--- buildFlag + OnFrame path (the same path the real UI uses), so calcsTab.mainOutput
+-- These wrap spec:AllocNode / spec:DeallocNode and trigger a recalc via
+-- pob_recalculate() (Part 2.2's canonical buildFlag-consumer), so calcsTab.mainOutput
 -- (Life/Mana/DPS) stays in sync with the allocated tree.
 
 -- Module-level store for the current search-match ids (filled by pob_setTreeSearch).
@@ -1899,10 +1971,11 @@ function pob_allocNode(id)
         return { ok = true, alreadyAlloc = true, used = select(1, spec:CountAllocNodes()) }
     end
     spec:AllocNode(node)
-    -- Trigger a recalc through the engine's canonical dirty-flag path. Wrapped in
-    -- pcall so a recalc hiccup can never mask the (already applied) allocation.
+    -- Trigger a recalc through the engine's canonical dirty-flag path. pob_recalculate
+    -- itself pcalls BuildOutput, so a recalc hiccup can never mask the (already
+    -- applied) allocation.
     bm.buildFlag = true
-    pcall(runCallback, "OnFrame")
+    pob_recalculate()
     return { ok = true, used = select(1, spec:CountAllocNodes()), alloc = node.alloc }
 end
 
@@ -1917,7 +1990,7 @@ function pob_deallocNode(id)
     end
     spec:DeallocNode(node)
     bm.buildFlag = true
-    pcall(runCallback, "OnFrame")
+    pob_recalculate()
     return { ok = true, used = select(1, spec:CountAllocNodes()), alloc = node.alloc }
 end
 

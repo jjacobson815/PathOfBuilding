@@ -1001,6 +1001,20 @@ void LuaEngine::setActiveSkill(int socketGroupId, int index) {
     emit calcsChanged();
 }
 
+// Part 2.2: recalc orchestration bridge. Delegates to the top-level Lua
+// globals pob_recalculate / pob_getOutputRevision.
+QVariant LuaEngine::recalculate() {
+    QVariant r = callGlobal("pob_recalculate");
+    if (r.typeId() == QMetaType::QVariantMap && r.toMap().value("recalculated").toBool()) {
+        emit calcsChanged();
+    }
+    return r;
+}
+
+qint64 LuaEngine::outputRevision() {
+    return callGlobal("pob_getOutputRevision").toLongLong();
+}
+
 // Phase 5c: CalcsTab (CALCS view) bridge. Delegates to the top-level Lua
 // globals pob_getCalcOutput / pob_getCalcBreakdown (callGlobal does a single
 // lua_getglobal, so the helpers MUST be top-level globals, not dotted names).

@@ -260,6 +260,26 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         }
     }
 
+    // Part 2.2: prove the single recalc-orchestration entry (recalculate())
+    // is idempotent when clean and does exactly one pass when buildFlag is set.
+    QVariant rcCheck = engine.callGlobal("pob_selftestRecalc");
+    if (rcCheck.typeId() != QMetaType::QVariantMap) {
+        qCritical() << "pob_selftestRecalc missing or wrong type:" << rcCheck.typeName();
+        return false;
+    }
+    {
+        const QVariantMap rc = rcCheck.toMap();
+        const bool ok = rc.value("ok").toBool();
+        qDebug().noquote() << "recalc ok =" << ok
+                 << " r0 =" << rc.value("r0").toLongLong()
+                 << " r1 =" << rc.value("r1").toLongLong();
+        if (!ok) {
+            qCritical() << "recalc check FAILED:"
+                        << rc.value("error").toString();
+            return false;
+        }
+    }
+
     // Phase 5c: prove the CalcsTab (CALCS view) bridge works end-to-end.
     QVariant ccCheck = engine.callGlobal("pob_selftestCalcs");
     if (ccCheck.typeId() != QMetaType::QVariantMap) {
