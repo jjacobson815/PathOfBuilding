@@ -170,6 +170,35 @@ public:
     Q_INVOKABLE QVariant getCalcOutput();
     Q_INVOKABLE QVariantList getCalcBreakdown(const QString& section, const QString& stat);
 
+    // Part 2.3: sidebar output bridge. Delegates to the top-level Lua global
+    // pob_getOutput, which serializes env.player.output (+ env.minion.output)
+    // against the build.displayStats/minionDisplayStats schema (the same
+    // schema legacy uses for both the sidebar AND node/item compare tooltips),
+    // reusing buildMode:FormatStat verbatim so values are byte-for-byte legacy.
+    // Returns { player = {stats, skillDPS}, minion?, warnings, outputRevision,
+    // disableReason? } or an invalid QVariant when no build is loaded.
+    Q_INVOKABLE QVariant getOutput();
+
+    // Part 2.4: comparison-calculator bridge. compareOverride delegates to
+    // pob_compareOverride (the whole "hovering this gives you:" surface: node
+    // add/remove by id, item slot replacement by raw text, flask/tincture
+    // toggle by item id) and compareNodes to pob_compareNodes (the fast
+    // add-only path used by the tree heat map). Both reuse calcsTab's
+    // persistent miscCalculator/nodeCalculator closures (kept fresh by every
+    // recalculate()) rather than rebuilding a calculator per call. Return
+    // { ok, stats, minionStats?, outputRevision } (error instead of stats on
+    // failure) or an invalid QVariant when no build is loaded.
+    Q_INVOKABLE QVariant compareOverride(const QVariantMap& override);
+    Q_INVOKABLE QVariant compareNodes(const QVariantList& nodeIds);
+
+    // Part 2.5: Config usage-set export. Delegates to pob_getConfigUsageSets,
+    // which reduces env.conditionsUsed/enemyConditionsUsed/minionConditionsUsed/
+    // multipliersUsed/enemyMultipliersUsed/perStatsUsed/enemyPerStatsUsed/
+    // tagTypesUsed/modsUsed (varName -> array-of-mod-refs, not serializable) to
+    // plain varName->true boolean sets, alongside skillsUsed/keystonesAdded
+    // (already boolean sets). Drives Config option visibility (Phase 7).
+    Q_INVOKABLE QVariant getConfigUsageSets();
+
     // full list of config option descriptors (QVariantList of QVariantMap with
     // name/label/type/value/options/section/tooltip); setConfigOption writes a
     // value back into the active config set and triggers a rebuild.

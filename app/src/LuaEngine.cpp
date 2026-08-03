@@ -1032,6 +1032,31 @@ QVariantList LuaEngine::getCalcBreakdown(const QString& section, const QString& 
     return { };
 }
 
+// Part 2.3: sidebar output bridge. Delegates to the top-level Lua global
+// pob_getOutput (callGlobal does a single lua_getglobal, so the helper MUST be
+// a top-level global, not a dotted name).
+QVariant LuaEngine::getOutput() {
+    return callGlobal("pob_getOutput");
+}
+
+// Part 2.4: comparison-calculator bridge. Delegates to the top-level Lua
+// globals pob_compareOverride / pob_compareNodes (callGlobal does a single
+// lua_getglobal, so the helpers MUST be top-level globals, not dotted names).
+QVariant LuaEngine::compareOverride(const QVariantMap& override) {
+    return callGlobal("pob_compareOverride", { override });
+}
+
+QVariant LuaEngine::compareNodes(const QVariantList& nodeIds) {
+    return callGlobal("pob_compareNodes", { nodeIds });
+}
+
+// Part 2.5: Config usage-set export bridge. Delegates to the top-level Lua
+// global pob_getConfigUsageSets (callGlobal does a single lua_getglobal, so
+// the helper MUST be a top-level global, not a dotted name).
+QVariant LuaEngine::getConfigUsageSets() {
+    return callGlobal("pob_getConfigUsageSets");
+}
+
 // Phase 5d: ConfigTab (CONFIG view) bridge. Delegates to the top-level Lua
 // globals pob_getConfigOptions / pob_setConfigOption (callGlobal does a single
 // lua_getglobal, so the helpers MUST be top-level globals, not dotted names).

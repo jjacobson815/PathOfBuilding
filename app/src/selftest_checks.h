@@ -280,6 +280,86 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         }
     }
 
+    // Part 2.3: prove the sidebar output bridge (pob_getOutput) works
+    // end-to-end -- non-empty stat list, revision matches the live counter.
+    QVariant outCheck = engine.callGlobal("pob_selftestOutput");
+    if (outCheck.typeId() != QMetaType::QVariantMap) {
+        qCritical() << "pob_selftestOutput missing or wrong type:" << outCheck.typeName();
+        return false;
+    }
+    {
+        const QVariantMap oc = outCheck.toMap();
+        const bool ok = oc.value("ok").toBool();
+        qDebug().noquote() << "output ok =" << ok
+                 << " statCount =" << oc.value("statCount").toInt()
+                 << " warningCount =" << oc.value("warningCount").toInt()
+                 << " outputRevision =" << oc.value("outputRevision").toLongLong();
+        if (!ok) {
+            qCritical() << "output check FAILED:" << oc.value("error").toString();
+            return false;
+        }
+    }
+
+    // Part 2.4: prove the comparison-calculator bridge (pob_compareNodes /
+    // pob_compareOverride) works end-to-end against the persistent
+    // calcsTab.nodeCalculator/miscCalculator closures.
+    QVariant cmpCheck = engine.callGlobal("pob_selftestCompare");
+    if (cmpCheck.typeId() != QMetaType::QVariantMap) {
+        qCritical() << "pob_selftestCompare missing or wrong type:" << cmpCheck.typeName();
+        return false;
+    }
+    {
+        const QVariantMap cc = cmpCheck.toMap();
+        const bool ok = cc.value("ok").toBool();
+        qDebug().noquote() << "compare ok =" << ok
+                 << " candidateId =" << cc.value("candidateId").toInt()
+                 << " nodeDiffCount =" << cc.value("nodeDiffCount").toInt()
+                 << " overrideDiffCount =" << cc.value("overrideDiffCount").toInt();
+        if (!ok) {
+            qCritical() << "compare check FAILED:" << cc.value("error").toString();
+            return false;
+        }
+    }
+
+    // Part 2.5: prove the Config usage-set export (pob_getConfigUsageSets)
+    // yields plain name->bool sets, not mod object refs.
+    QVariant cuCheck = engine.callGlobal("pob_selftestConfigUsage");
+    if (cuCheck.typeId() != QMetaType::QVariantMap) {
+        qCritical() << "pob_selftestConfigUsage missing or wrong type:" << cuCheck.typeName();
+        return false;
+    }
+    {
+        const QVariantMap cu = cuCheck.toMap();
+        const bool ok = cu.value("ok").toBool();
+        qDebug().noquote() << "config-usage ok =" << ok
+                 << " skillCount =" << cu.value("skillCount").toInt()
+                 << " outputRevision =" << cu.value("outputRevision").toLongLong();
+        if (!ok) {
+            qCritical() << "config-usage check FAILED:" << cu.value("error").toString();
+            return false;
+        }
+    }
+
+    // Part 2.6: prove the party/buffExports seam (read: enemyModList consumed
+    // at CalcSetup.lua:565; write-back: setBuffExports at CalcPerform.lua:3640)
+    // still functions end-to-end under the Qt host.
+    QVariant ptCheck = engine.callGlobal("pob_selftestParty");
+    if (ptCheck.typeId() != QMetaType::QVariantMap) {
+        qCritical() << "pob_selftestParty missing or wrong type:" << ptCheck.typeName();
+        return false;
+    }
+    {
+        const QVariantMap pc = ptCheck.toMap();
+        const bool ok = pc.value("ok").toBool();
+        qDebug().noquote() << "party ok =" << ok
+                 << " readOk =" << pc.value("readOk").toBool()
+                 << " writeOk =" << pc.value("writeOk").toBool();
+        if (!ok) {
+            qCritical() << "party check FAILED:" << pc.value("error").toString();
+            return false;
+        }
+    }
+
     // Phase 5c: prove the CalcsTab (CALCS view) bridge works end-to-end.
     QVariant ccCheck = engine.callGlobal("pob_selftestCalcs");
     if (ccCheck.typeId() != QMetaType::QVariantMap) {

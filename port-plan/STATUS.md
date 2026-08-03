@@ -9,14 +9,11 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**Phase 2 — Calc Integration Layer — IN PROGRESS (started 2026-07-25).** Spec:
-`phases/PHASE-2-calc-integration.md`. **Part 2.1 (threading/latency spike) and
-Part 2.2 (recalc orchestration service) are DONE** — see "Threading/latency
-model" below and the Done log for evidence. Next: Part 2.3 (output
-marshalling). Per the standing stop-at-phase-boundaries rule
-([[stop-at-phase-boundaries]]), stop and get explicit approval before starting
-Phase 3 once Phase 2's acceptance gate closes — Parts within Phase 2 proceed
-without re-asking unless something forces a scope decision.
+**Phase 2 — Calc Integration Layer — COMPLETE (2026-07-25 – 2026-08-01).** Spec:
+`phases/PHASE-2-calc-integration.md`. **All 6 parts + the acceptance gate are
+DONE** — see the Done log below for full evidence. Per the standing
+stop-at-phase-boundaries rule ([[stop-at-phase-boundaries]]), **STOP here and
+get explicit user approval before starting Phase 3** (Build Shell).
 
 Phase 1 (QML Component Library & App Shell) is COMPLETE (2026-07-24) — see the
 Done log below for the summary; `phases/PHASE-1-component-library.md` has full
@@ -152,7 +149,76 @@ Full detail in `reference/00-architecture.md`. The short list:
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
 
-**▶ Phase 2 (started 2026-07-25):** **Part 2.2 (recalc orchestration service)
+**▶ Phase 2 — COMPLETE (started 2026-07-25, finished 2026-08-01).** Parts
+2.3-2.6 (this session) close out the phase on top of the already-complete
+2.1/2.2 (summarized further down):
+- **Part 2.3 (output marshalling) DONE.** New `pob_getOutput()`
+  (`app/lua/pob_host.lua`) + `LuaEngine::getOutput()` serialize
+  `env.player.output`/`env.minion.output` into structured sidebar records,
+  driven by iterating `build.displayStats`/`minionDisplayStats`
+  (`Modules/BuildDisplayStats.lua`) directly rather than a hand-picked field
+  list — ports `buildMode:AddDisplayStatList`'s selection logic
+  (Build.lua:1637) to data and reuses `bm:FormatStat` verbatim so values are
+  byte-for-byte legacy (thousands separators, `%+` signs, over-cap suffixes
+  included free). `:`-keys (`Spec:LifeInc`) and `childStat` nesting
+  (`output.MainHand.Accuracy`) fall out for free from the same `statData.stat`/
+  `.childStat` read legacy uses. `SkillDPS` (the FullDPS list) folds into the
+  same call (`player.skillDPS`), sorted by `dps*count` desc on a COPY of the
+  array (not legacy's in-place sort, so a read has no engine side effect).
+  `CalcSections`/`powerStatList` were deliberately NOT walked for a second
+  field inventory — `CalcSections` already has its own live bridge
+  (`pob_getCalcOutput`, pre-existing) and `powerStatList` belongs to Phase 4's
+  PowerReport.
+- **Part 2.4 (comparison-calculator bridge) DONE.** New
+  `pob_compareOverride(override)`/`pob_compareNodes(nodeIds)` +
+  `LuaEngine::compareOverride()`/`compareNodes()` port
+  `buildMode:CompareStatList` (Build.lua:1811) to structured diff records,
+  reusing calcsTab's persistent `miscCalculator`/`nodeCalculator` closures
+  (`CalcsTab.lua:449-450`, refreshed by every real `pob_recalculate()`) rather
+  than rebuilding a calculator per hover — reuse is load-bearing for
+  performance (a rebuild would cost the same ~25-300ms as a full recalc per
+  Part 2.1's spike, defeating the whole point of the calculator pattern).
+  Host-safe override vocabulary: node ids (translated to the node-object-keyed
+  set the engine wants via `bm.spec.nodes[id]`), raw item text for
+  `repSlotName`+`repItemRaw` (parsed via `CreateDisplayItemFromRaw`, never
+  added to the build), item ids for `toggleFlask`/`toggleTincture` (resolved
+  via `itemsTab.items[id]` — **caught and fixed before shipping:**
+  `env.flasks`/`env.tinctures` are keyed by the actual Item object, not an id;
+  an earlier draft passed the raw id through, which would have crashed
+  `calcs.perform`'s `for item in pairs(env.flasks) do ... item.baseName`
+  loop the first time a flask toggle was exercised).
+- **Part 2.5 (config usage-set export) DONE.** New `pob_getConfigUsageSets()`
+  + `LuaEngine::getConfigUsageSets()` reduce `env.conditionsUsed`/
+  `enemyConditionsUsed`/`minionConditionsUsed`/`multipliersUsed`/
+  `enemyMultipliersUsed`/`perStatsUsed`/`enemyPerStatsUsed`/`tagTypesUsed`/
+  `modsUsed` (`Calcs.lua:493-501`, `varName -> array-of-mod-object-refs`, not
+  serializable) to plain `varName -> true` sets; `skillsUsed`/`keystonesAdded`
+  are already boolean sets and pass through unchanged (so `keystonesAdded` is
+  byte-identical to what `ConfigVisibility.lua` already reads directly —
+  correct by construction for Phase 7's config-visibility predicates).
+- **Part 2.6 (party/buffExports seam audit) DONE, no stub needed.**
+  `PartyTabClass` (unmodified `src/Classes/PartyTab.lua`, instantiated at
+  `Build.lua:615` the same way as skillsTab/configTab/itemsTab) already
+  constructs a real `enemyModList`/`enableExportBuffs`, and both the read seam
+  (`CalcSetup.lua:565`) and write-back seam (`setBuffExports`,
+  `CalcPerform.lua:3640`) were already live under the Qt host — new
+  `pob_selftestParty` proves both end-to-end (adds a real enemy mod, forces
+  `enableExportBuffs=true`, recalculates, restores original state).
+- **Acceptance gate CLOSED**, one item scoped down: the `busted`/Docker
+  numeric calc-parity re-verification was **not** run this session (Docker
+  Desktop's daemon wasn't running locally) since Parts 2.3-2.6 are all
+  read-only marshalling additions that call existing unmodified engine entry
+  points — no new numeric-drift surface vs. what Part 2.1's spike already
+  covered. Revisit if a future session touches the `calcs.*` entry points
+  themselves. All other gate items verified live (see
+  `phases/PHASE-2-calc-integration.md` for full per-item evidence). New
+  selftests (`pob_selftestOutput`/`pob_selftestCompare`/
+  `pob_selftestConfigUsage`/`pob_selftestParty`) wired into
+  `selftest_checks.h`; `pob-selftest` exit 0 and `pob-qt --headless` exit 0,
+  both including all 4 new checks; full rebuild via `ninja -C build-win` clean
+  with no warnings.
+
+**Part 2.2 (recalc orchestration service)
 COMPLETE (2026-08-01).** One canonical host-callable recalc path now exists:
 `pob_recalculate()` (new, `app/lua/pob_host.lua`) runs the legacy
 `wipeGlobalCache → outputRevision++ → BuildOutput → RefreshStatList` sequence,

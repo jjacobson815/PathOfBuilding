@@ -1047,6 +1047,519 @@ function pob_selftestRecalc()
     return { ok = true, r0 = r0, r1 = did.outputRevision }
 end
 
+-- ============================================================================
+-- Part 2.3-2.6 shared helper: matchFlags is a PRIVATE local in Modules/Build.lua
+-- (not reachable from here), so replicate its small body verbatim. Used by both
+-- the sidebar stat serializer (2.3) and the compare-diff serializer (2.4) --
+-- both walk the exact same build.displayStats/minionDisplayStats schema
+-- (Modules/BuildDisplayStats.lua) that legacy uses for both purposes, per its
+-- own header comment ("defines the stats in the side bar, and also which stats
+-- show in node/item comparisons"). CalcSections/powerStatList are NOT walked
+-- here: CalcSections already has its own live bridge (pob_getCalcOutput, the
+-- CALCS-tab section grid), and powerStatList/node-power belongs to Phase 4's
+-- PowerReport, not Phase 2.
+-- ============================================================================
+local function pob_matchFlags(reqFlags, notFlags, flags)
+    if type(reqFlags) == "string" then reqFlags = { reqFlags } end
+    if reqFlags then
+        for _, flag in ipairs(reqFlags) do
+            if not flags[flag] then return false end
+        end
+    end
+    if type(notFlags) == "string" then notFlags = { notFlags } end
+    if notFlags then
+        for _, flag in ipairs(notFlags) do
+            if flags[flag] then return false end
+        end
+    end
+    return true
+end
+
+-- Part 2.3: Output marshalling. Ports buildMode:AddDisplayStatList's selection
+-- logic (Build.lua:1637) to structured data instead of an immediate-mode draw
+-- list, reusing bm:FormatStat (Build.lua:1611) verbatim for the value string so
+-- sidebar numbers are byte-for-byte legacy (thousands separators, %+ signs,
+-- trailing-zero trimming, over-cap suffixes all included). Handles the
+-- `childStat` one-level-deep indirection generically, which is how
+-- output.MainHand/.OffHand (childStat="Accuracy") and any future nested stat
+-- naturally fall out without special-casing them.
+local function pob_buildStatRecords(bm, statList, actor)
+    local stats = { }
+    local skillDPS = nil
+    for _, statData in ipairs(statList) do
+        if statData.stat and pob_matchFlags(statData.flag, statData.notFlag, actor.mainSkill.skillFlags) then
+            local statVal = actor.output[statData.stat]
+            if statVal and statData.childStat then
+                statVal = statVal[statData.childStat]
+            end
+            if statVal and ((statData.condFunc and statData.condFunc(statVal, actor.output)) or (not statData.condFunc and statVal ~= 0)) then
+                local overCapStatVal = actor.output[statData.overCapStat] or nil
+                if statData.stat == "SkillDPS" then
+                    skillDPS = { }
+                    local sorted = { }
+                    for i, sd in ipairs(actor.output.SkillDPS) do sorted[i] = sd end
+                    table.sort(sorted, function(a, b) return (a.dps * a.count) > (b.dps * b.count) end)
+                    for _, skillData in ipairs(sorted) do
+                        skillDPS[#skillDPS + 1] = {
+                            name = skillData.name,
+                            dps = skillData.dps,
+                            count = skillData.count,
+                            trigger = skillData.trigger or "",
+                            skillPart = skillData.skillPart or "",
+                            source = skillData.source or "",
+                            dpsStr = bm:FormatStat({ fmt = "1.f" }, skillData.dps * skillData.count, overCapStatVal),
+                        }
+                    end
+                elseif not statData.hideStat then
+                    local colorOverride = nil
+                    if actor.output[statData.stat.."Warning"] or (statData.warnFunc and statData.warnFunc(statVal, actor.output) and statData.warnColor) then
+                        colorOverride = colorCodes.NEGATIVE
+                    end
+                    stats[#stats + 1] = {
+                        stat = statData.stat .. (statData.childStat or ""),
+                        label = statData.label,
+                        color = statData.color or "",
+                        value = type(statVal) == "table" and "" or statVal,
+                        valueStr = bm:FormatStat(statData, statVal, overCapStatVal, colorOverride),
+                        warning = colorOverride ~= nil,
+                    }
+                end
+            end
+        elseif not statData.stat and statData.label and statData.condFunc and statData.condFunc(actor.output) then
+            -- The one "labelStat" style entry in displayStats (Chaos Resistance ->
+            -- "Immune" under Chaos Inoculation). Mirrors Build.lua:1704-1707.
+            stats[#stats + 1] = {
+                stat = statData.labelStat or statData.label,
+                label = statData.label,
+                color = "",
+                value = statData.val,
+                valueStr = "^7" .. tostring(actor.output[statData.labelStat]) .. "%^x808080 (" .. tostring(statData.val) .. ")",
+                warning = false,
+            }
+        end
+    end
+    return stats, skillDPS
+end
+
+-- Collect the same warning strings buildMode:AddDisplayStatList/InsertItemWarnings
+-- feed into self.controls.warnings.lines (Build.lua:1698-1765), as plain data
+-- instead of a control's mutable .lines array.
+local function pob_collectWarnings(bm, actor)
+    local warnings = { }
+    local function add(v)
+        if not v then return end
+        for _, existing in ipairs(warnings) do
+            if existing == v then return end
+        end
+        warnings[#warnings + 1] = v
+    end
+    for _, statData in ipairs(bm.displayStats) do
+        if statData.stat and statData.warnFunc then
+            local statVal = actor.output[statData.stat]
+            if statVal and ((statData.condFunc and statData.condFunc(statVal, actor.output)) or not statData.condFunc) then
+                add(statData.warnFunc(statVal, actor.output))
+            end
+        end
+    end
+    for pool, warningFlag in pairs({ ["Life"] = "LifeCostWarningList", ["Mana"] = "ManaCostWarningList", ["Rage"] = "RageCostWarningList", ["Energy Shield"] = "ESCostWarningList" }) do
+        if actor.output[warningFlag] then
+            local line = "You do not have enough " .. (actor.output.EnergyShieldProtectsMana and pool == "Mana" and "Energy Shield and Mana" or pool) .. " to use: "
+            for _, skill in ipairs(actor.output[warningFlag]) do line = line .. skill .. ", " end
+            add(line:sub(1, -3))
+        end
+    end
+    for pool, warningFlag in pairs({ ["Unreserved life"] = "LifePercentCostPercentCostWarningList", ["Unreserved Mana"] = "ManaPercentCostPercentCostWarningList" }) do
+        if actor.output[warningFlag] then
+            local line = "You do not have enough " .. pool .. "% to use: "
+            for _, skill in ipairs(actor.output[warningFlag]) do line = line .. skill .. ", " end
+            add(line:sub(1, -3))
+        end
+    end
+    if bm.calcsTab.mainEnv.itemWarnings then
+        local iw = bm.calcsTab.mainEnv.itemWarnings
+        if iw.jewelLimitWarning then
+            for _, w in ipairs(iw.jewelLimitWarning) do add("You are exceeding jewel limit with the jewel " .. w) end
+        end
+        if iw.socketLimitWarning then
+            for _, w in ipairs(iw.socketLimitWarning) do add("You have too many gems in your " .. w .. " slot") end
+        end
+        if iw.missingAnointWarning then
+            add("You have eligible items missing an anoint: " .. table.concat(iw.missingAnointWarning, ", "))
+        end
+    end
+    return warnings
+end
+
+-- Host-callable entry: the sidebar's data source. Forces a recalc (idempotent
+-- no-op if clean) then serializes env.player.output (+ env.minion.output when a
+-- minion is active) against the displayStats/minionDisplayStats schema.
+function pob_getOutput()
+    local bm = main and main.modes and main.modes.BUILD
+    local ct = bm and bm.calcsTab
+    if not bm or not ct then return nil end
+    pob_recalculate()
+    if not ct.mainEnv or not ct.mainOutput then return nil end
+
+    local playerStats, playerSkillDPS = pob_buildStatRecords(bm, bm.displayStats, ct.mainEnv.player)
+    local result = {
+        player = { stats = playerStats, skillDPS = playerSkillDPS or { } },
+        warnings = pob_collectWarnings(bm, ct.mainEnv.player),
+        outputRevision = bm.outputRevision or 0,
+    }
+    if ct.mainEnv.minion then
+        local minionStats = pob_buildStatRecords(bm, bm.minionDisplayStats, ct.mainEnv.minion)
+        result.minion = { stats = minionStats }
+    end
+    if ct.mainEnv.player.mainSkill and ct.mainEnv.player.mainSkill.skillFlags and ct.mainEnv.player.mainSkill.skillFlags.disable then
+        result.disableReason = ct.mainEnv.player.mainSkill.disableReason
+    end
+    return result
+end
+
+-- Part 2.3 selftest: read the sidebar output and assert it has at least one
+-- stat and the outputRevision matches the live counter. ADDITIVE.
+function pob_selftestOutput()
+    local d = pob_getOutput()
+    if not d then return { ok = false, error = "no output" } end
+    local ok = d.player and d.player.stats and #d.player.stats > 0
+    return {
+        ok = ok,
+        statCount = d.player and #d.player.stats or 0,
+        warningCount = d.warnings and #d.warnings or 0,
+        outputRevision = d.outputRevision,
+    }
+end
+
+-- ============================================================================
+-- Part 2.4: Comparison-calculator bridge. calcsTab.miscCalculator/.nodeCalculator
+-- (CalcsTab.lua:449-450, `{calcFunc, baseOutput}`) are already rebuilt fresh by
+-- every CalcsTabClass:BuildOutput() call -- i.e. every pob_recalculate() that
+-- actually recalculates (Part 2.2). Reuse those persistent closures directly:
+-- re-running calcs.getMiscCalculator/getNodeCalculator per call would pay a
+-- full initEnv+perform cost per hover (the SAME cost as a full recalc, ~25-
+-- 300ms per Part 2.1's spike) and defeat the entire point of the calculator
+-- pattern, whose measured 2-6.7ms/call cost assumes the persistent closure.
+--
+-- Host-safe override vocabulary (node ids instead of node object refs,
+-- raw item text instead of a live Item object -- see calc-engine-contract.md):
+--   { addNodes = {id,...}, removeNodes = {id,...},
+--     repSlotName = "Weapon 1", repItemRaw = "<raw item text>",
+--     toggleFlask = <flaskItemId>, toggleTincture = <tinctureItemId>,
+--     useFullDPS = bool }
+-- ============================================================================
+
+-- Port of buildMode:CompareStatList (Build.lua:1811) to structured diff
+-- records instead of tooltip lines.
+local function pob_diffStatList(statList, actor, baseOutput, compareOutput)
+    local diffs = { }
+    for _, statData in ipairs(statList) do
+        if statData.stat and pob_matchFlags(statData.flag, statData.notFlag, actor.mainSkill.skillFlags)
+           and not statData.childStat and statData.stat ~= "SkillDPS" then
+            local statVal1 = compareOutput[statData.stat] or 0
+            local statVal2 = baseOutput[statData.stat] or 0
+            local diff = statVal1 - statVal2
+            if statData.stat == "FullDPS" and not compareOutput[statData.stat] then
+                diff = 0
+            end
+            if (diff > 0.001 or diff < -0.001) and (not statData.condFunc or statData.condFunc(statVal1, compareOutput) or statData.condFunc(statVal2, baseOutput)) then
+                local positive = (statData.lowerIsBetter and diff < 0) or (not statData.lowerIsBetter and diff > 0)
+                local val = diff * ((statData.pc or statData.mod) and 100 or 1)
+                local valStr = string.format("%+" .. statData.fmt, val)
+                local number, suffix = valStr:match("^([%+%-]?%d+%.%d+)(%D*)$")
+                if number then
+                    valStr = number:gsub("0+$", ""):gsub("%.$", "") .. suffix
+                end
+                valStr = formatNumSep(valStr)
+                local percent = nil
+                if statData.compPercent and statVal1 ~= 0 and statVal2 ~= 0 then
+                    percent = statVal1 / statVal2 * 100 - 100
+                end
+                diffs[#diffs + 1] = {
+                    stat = statData.stat,
+                    label = statData.label,
+                    diff = diff,
+                    diffStr = valStr,
+                    positive = positive,
+                    percent = percent,
+                }
+            end
+        end
+    end
+    return diffs
+end
+
+-- Translate a host id list into the node-object set/array the engine expects
+-- (CalcSetup.lua:594-630: addNodes is `for node in pairs(t)` object-keyed,
+-- removeNodes is checked the same way against env.spec.allocNodes' object keys).
+local function pob_nodeSetFromIds(spec, idList)
+    local set = { }
+    if not idList then return set, false end
+    local any = false
+    for _, id in ipairs(idList) do
+        local node = spec.nodes[tonumber(id) or id]
+        if node then
+            set[node] = true
+            any = true
+        end
+    end
+    return set, any
+end
+
+-- The whole comparison surface (calc-engine-contract.md): node hover, item/
+-- anoint tooltips, flask/tincture toggles, spec compares. Returns a diffed
+-- stat list (player + minion) against the misc calculator's baseline.
+function pob_compareOverride(override)
+    local bm = main and main.modes and main.modes.BUILD
+    local ct = bm and bm.calcsTab
+    if not bm or not ct then return nil end
+    pob_recalculate()
+    if not ct.miscCalculator or not ct.miscCalculator[1] then
+        return { ok = false, error = "no misc calculator" }
+    end
+    local calcFunc, baseOutput = ct.miscCalculator[1], ct.miscCalculator[2]
+
+    override = override or { }
+    local luaOverride = { }
+    local addSet, hasAdd = pob_nodeSetFromIds(bm.spec, override.addNodes)
+    local removeSet, hasRemove = pob_nodeSetFromIds(bm.spec, override.removeNodes)
+    if hasAdd then luaOverride.addNodes = addSet end
+    if hasRemove then luaOverride.removeNodes = removeSet end
+
+    if override.repSlotName and override.repItemRaw and override.repItemRaw ~= "" then
+        bm.itemsTab:CreateDisplayItemFromRaw(override.repItemRaw)
+        local item = bm.itemsTab.displayItem
+        if item and item.base then
+            luaOverride.repSlotName = override.repSlotName
+            luaOverride.repItem = item
+        end
+    elseif override.repSlotName then
+        -- No repItemRaw: compare "what if this slot were empty".
+        luaOverride.repSlotName = override.repSlotName
+    end
+    -- env.flasks/env.tinctures (CalcSetup.lua:422-423,911,927) are keyed by the
+    -- actual flask/tincture Item OBJECT (env.flasks[item] = true), not an id --
+    -- resolve the host-safe item id through itemsTab.items before handing it to
+    -- the calculator, else this silently inserts a garbage non-object key that
+    -- calcs.perform's `for item in pairs(env.flasks) do ... item.baseName ...`
+    -- loop would crash on.
+    if override.toggleFlask then
+        local flaskItem = bm.itemsTab.items[tonumber(override.toggleFlask) or override.toggleFlask]
+        if flaskItem then luaOverride.toggleFlask = flaskItem end
+    end
+    if override.toggleTincture then
+        local tinctureItem = bm.itemsTab.items[tonumber(override.toggleTincture) or override.toggleTincture]
+        if tinctureItem then luaOverride.toggleTincture = tinctureItem end
+    end
+
+    local ok, compareOutput = pcall(calcFunc, luaOverride, override.useFullDPS)
+    if not ok or not compareOutput then
+        return { ok = false, error = tostring(compareOutput) }
+    end
+
+    local diffs = pob_diffStatList(bm.displayStats, ct.mainEnv.player, baseOutput, compareOutput)
+    local minionDiffs = nil
+    if ct.mainEnv.player.mainSkill and ct.mainEnv.player.mainSkill.minion and baseOutput.Minion and compareOutput.Minion then
+        minionDiffs = pob_diffStatList(bm.minionDisplayStats, ct.mainEnv.minion, baseOutput.Minion, compareOutput.Minion)
+    end
+    return { ok = true, stats = diffs, minionStats = minionDiffs, outputRevision = bm.outputRevision or 0 }
+end
+
+-- Node-hover compare (tree heat-map path): a fast add-only calculator, matching
+-- calcs.getNodeCalculator's modFunc signature (Calcs.lua:115-120).
+function pob_compareNodes(nodeIds)
+    local bm = main and main.modes and main.modes.BUILD
+    local ct = bm and bm.calcsTab
+    if not bm or not ct or not nodeIds or #nodeIds == 0 then return nil end
+    pob_recalculate()
+    if not ct.nodeCalculator or not ct.nodeCalculator[1] then
+        return { ok = false, error = "no node calculator" }
+    end
+    local calcFunc, baseOutput = ct.nodeCalculator[1], ct.nodeCalculator[2]
+
+    local nodeList = { }
+    for _, id in ipairs(nodeIds) do
+        local node = bm.spec.nodes[tonumber(id) or id]
+        if node then nodeList[#nodeList + 1] = node end
+    end
+    if #nodeList == 0 then return { ok = false, error = "no valid nodes" } end
+
+    local ok, compareOutput = pcall(calcFunc, nodeList)
+    if not ok or not compareOutput then
+        return { ok = false, error = tostring(compareOutput) }
+    end
+
+    local diffs = pob_diffStatList(bm.displayStats, ct.mainEnv.player, baseOutput, compareOutput)
+    return { ok = true, stats = diffs, outputRevision = bm.outputRevision or 0 }
+end
+
+-- Part 2.4 selftest: allocate a real allocatable node (found live off the tree,
+-- not hardcoded -- ids differ across tree versions), compare it via
+-- pob_compareNodes, and assert we get back a non-empty diffed stat list. Then
+-- exercise pob_compareOverride's item-replacement path against slot "Weapon 1"
+-- with no repItemRaw (the "unequip" comparison), which must simply not crash
+-- (empty diff is a legal result when nothing is equipped there). Side-effect-
+-- free: never allocates for real, never adds an item.
+function pob_selftestCompare()
+    local bm = main and main.modes and main.modes.BUILD
+    local spec = bm and bm.spec
+    if not bm or not spec then return { ok = false, error = "no build" } end
+
+    -- Find an unallocated Normal node directly linked to an allocated one (same
+    -- selection rule as pob_selftestTreeInteract, Phase 4b) -- excludes Mastery/
+    -- Keystone/ascendancy nodes, which have extra allocation preconditions the
+    -- node calculator's plain addNodes path doesn't need to handle here.
+    local candidateId = nil
+    for id, node in pairs(spec.nodes) do
+        if node.type == "Normal" and node.path and not node.alloc and not node.ascendancyName then
+            for _, linked in ipairs(node.linked) do
+                if linked.alloc then
+                    candidateId = id
+                    break
+                end
+            end
+        end
+        if candidateId then break end
+    end
+    if not candidateId then
+        return { ok = false, error = "no candidate node found" }
+    end
+
+    local nodeResult = pob_compareNodes({ candidateId })
+    if not nodeResult or not nodeResult.ok then
+        return { ok = false, error = "compareNodes failed", detail = nodeResult }
+    end
+
+    local overrideResult = pob_compareOverride({ repSlotName = "Weapon 1" })
+    if not overrideResult or not overrideResult.ok then
+        return { ok = false, error = "compareOverride failed", detail = overrideResult }
+    end
+
+    return {
+        ok = true,
+        candidateId = candidateId,
+        nodeDiffCount = #nodeResult.stats,
+        overrideDiffCount = #overrideResult.stats,
+    }
+end
+
+-- ============================================================================
+-- Part 2.5: Config usage-set export. env.conditionsUsed/enemyConditionsUsed/
+-- minionConditionsUsed/multipliersUsed/enemyMultipliersUsed/perStatsUsed/
+-- enemyPerStatsUsed/tagTypesUsed/modsUsed (Calcs.lua:493-501, populated only in
+-- MAIN mode) map varName -> array-of-mod-object-refs; the objects are not
+-- serializable (Combine/Tabulate closures + item/mod cross-refs) and per
+-- calc-engine-contract.md the export is "names only, drop mod refs". skillsUsed
+-- (Calcs.lua:481-491) and keystonesAdded (CalcPerform.lua:1103) are already
+-- plain varName->true boolean sets, so they pass through unchanged. This drives
+-- Config option visibility predicates (ConfigVisibility.lua's ifCond/ifStat/...
+-- read mainEnv.conditionsUsed[var] etc. as a simple truthy check) -- Phase 7.
+-- ============================================================================
+local function pob_namesOnly(setOfArrays)
+    local out = { }
+    if not setOfArrays then return out end
+    for name in pairs(setOfArrays) do
+        out[name] = true
+    end
+    return out
+end
+
+function pob_getConfigUsageSets()
+    local bm = main and main.modes and main.modes.BUILD
+    local env = bm and bm.calcsTab and bm.calcsTab.mainEnv
+    if not env then return nil end
+    return {
+        conditionsUsed = pob_namesOnly(env.conditionsUsed),
+        enemyConditionsUsed = pob_namesOnly(env.enemyConditionsUsed),
+        minionConditionsUsed = pob_namesOnly(env.minionConditionsUsed),
+        multipliersUsed = pob_namesOnly(env.multipliersUsed),
+        enemyMultipliersUsed = pob_namesOnly(env.enemyMultipliersUsed),
+        perStatsUsed = pob_namesOnly(env.perStatsUsed),
+        enemyPerStatsUsed = pob_namesOnly(env.enemyPerStatsUsed),
+        tagTypesUsed = pob_namesOnly(env.tagTypesUsed),
+        modsUsed = pob_namesOnly(env.modsUsed),
+        skillsUsed = env.skillsUsed or { },
+        keystonesAdded = env.keystonesAdded or { },
+        outputRevision = bm.outputRevision or 0,
+    }
+end
+
+-- Part 2.5 selftest: force a recalc so mainEnv is fresh, then assert the usage
+-- sets are non-empty tables of plain booleans (every build allocates at least
+-- one skill/condition) and that a known-always-true condition survived the
+-- names-only conversion.
+function pob_selftestConfigUsage()
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm then return { ok = false, error = "no build" } end
+    bm.buildFlag = true
+    pob_recalculate()
+    local sets = pob_getConfigUsageSets()
+    if not sets then return { ok = false, error = "no usage sets" } end
+    local skillCount = 0
+    for _ in pairs(sets.skillsUsed) do skillCount = skillCount + 1 end
+    for name, v in pairs(sets.conditionsUsed) do
+        if type(name) ~= "string" or type(v) ~= "boolean" then
+            return { ok = false, error = "conditionsUsed not a plain name->bool set", key = tostring(name) }
+        end
+    end
+    return {
+        ok = skillCount > 0,
+        skillCount = skillCount,
+        outputRevision = sets.outputRevision,
+    }
+end
+
+-- ============================================================================
+-- Part 2.6: Party/buffExports seam audit. PartyTabClass (Classes/PartyTab.lua,
+-- unmodified src/) already constructs a real self.enemyModList = new("ModList")
+-- and self.enableExportBuffs = false at init (same construction pattern as
+-- skillsTab/configTab/itemsTab), consumed unconditionally every calc pass at
+-- CalcSetup.lua:565 (env.enemyDB:AddList(build.partyTab.enemyModList)) and
+-- written back at CalcPerform.lua:3640 (env.build.partyTab:setBuffExports(...),
+-- itself gated on enableExportBuffs, PartyTab.lua:977). No Qt-host stub is
+-- needed -- this selftest exercises both the read seam (a real enemy mod
+-- affecting output) and the write-back seam (enableExportBuffs=true forcing
+-- setBuffExports to actually run) end-to-end, then restores party state.
+-- ============================================================================
+function pob_selftestParty()
+    local bm = main and main.modes and main.modes.BUILD
+    local pt = bm and bm.partyTab
+    if not pt or not pt.enemyModList or not pt.setBuffExports then
+        return { ok = false, error = "partyTab missing expected seam (enemyModList/setBuffExports)" }
+    end
+
+    local savedEnable = pt.enableExportBuffs
+
+    -- Read seam: add a real enemy mod and confirm a recalc completes cleanly
+    -- with it applied (CalcSetup.lua:565 consumes it unconditionally).
+    pt.enemyModList:NewMod("Accuracy", "BASE", 500, "PartySelftest")
+    bm.buildFlag = true
+    local readResult = pob_recalculate()
+
+    -- Write-back seam: enable export and force perform to actually call
+    -- setBuffExports (gated on enableExportBuffs, PartyTab.lua:977).
+    pt.enableExportBuffs = true
+    bm.buildFlag = true
+    local writeResult = pob_recalculate()
+
+    -- Clean up: remove the probe mod and restore enableExportBuffs so later
+    -- phases/selftests see an unmodified party state. Matches PartyTabClass's
+    -- own reset pattern (PartyTab.lua:337-338) -- wipe AND replace, not just
+    -- wipe, since ModList carries internal lookup-cache state alongside the
+    -- mod array.
+    wipeTable(pt.enemyModList)
+    pt.enemyModList = new("ModList")
+    pt.enableExportBuffs = savedEnable
+    bm.buildFlag = true
+    pob_recalculate()
+
+    return {
+        ok = readResult.ok and writeResult.ok,
+        readOk = readResult.ok,
+        writeOk = writeResult.ok,
+        error = (not readResult.ok and readResult.error) or (not writeResult.ok and writeResult.error) or nil,
+    }
+end
+
 -- Phase 5c: CalcsTab (CALCS view) bridge. Top-level globals (NOT pob.*) because
 -- LuaEngine::callGlobal does a single lua_getglobal and cannot resolve dotted
 -- names. Exposes main.modes.BUILD.calcsTab's computed output (summary numbers +
