@@ -9,11 +9,56 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**Phase 2 — Calc Integration Layer — COMPLETE (2026-07-25 – 2026-08-01).** Spec:
-`phases/PHASE-2-calc-integration.md`. **All 6 parts + the acceptance gate are
-DONE** — see the Done log below for full evidence. Per the standing
-stop-at-phase-boundaries rule ([[stop-at-phase-boundaries]]), **STOP here and
-get explicit user approval before starting Phase 3** (Build Shell).
+**Phase 3 — Build Shell — IN PROGRESS (started 2026-08-18).** Spec:
+`phases/PHASE-3-build-shell.md`; that file's "Session log — 2026-08-18" and
+"Session log — 2026-08-19" sections have full per-item evidence. The MVP core
+is landed and gated: top bar (Back / Save / Save As / build name / points /
+Auto-Manual / level / class / ascendancy / secondary ascendancy), the live
+stat panel and warnings row over Phase 2's output marshalling, the
+version-conversion popup (a HANG FIX — an old build previously left BUILD mode
+dead with no way out), a recalc-gated save that actually emits the
+denormalized `<PlayerStat>` rows, a truthful unsaved flag, and the Ctrl+1..9 /
+Ctrl+S / Ctrl+W hotkeys, and the **main-skill selector stack**
+(`pob_getMainSkillControls` + 7 setters + `MainSkillPanel.qml`, parameterised on
+legacy's `suffix` so Phase 8 reuses it for the Calcs tab's independent
+selection). **Part 3.3 is now fully DONE too:** the savers registry +
+Tree-deferred load order + PostLoad, and the `<Build>` attribs / denormalized
+`<PlayerStat>/<FullDPSSkill>`/`<TimelessData>`, are all genuinely
+round-trip-verified (not just save-side) by new `pob_selftestSaveLoadRoundTrip`
+— see invariant #7's caveat below for a real bug this uncovered (auto-level
+drift via the still-live legacy Control tree). **Still open in Phase 3:**
+Loadouts (needs the Phase 5/6/7 set UIs), the Spectre Library popup, and the
+full Save-As folder browser — all explicit long tail; Phase 3's acceptance
+gate is otherwise clear to close whenever those are judged in/out of scope.
+
+**Phase 4 — RECON DONE (2026-08-19), one fix landed.** Full findings are at the
+bottom of `phases/PHASE-4-tree-tab.md`. Headline: **`NewImageHandle():ImageSize()`
+is stubbed to `1,1`**, which makes `PassiveTree.lua:956` compute every orbit
+arc's size as 2.66 tree units — *that* is why the port draws straight-line
+connectors instead of legacy's textured arc quads. Fixing it needs a
+`pob.imageSize()` C++ primitive AND a simultaneous change to the sprite-UV
+consumption (which currently depends on the broken value). Do it first.
+**Part 4.1 — 3 of 5 items DONE (2026-08-19), independent of the ImageSize fix**
+(evidence: the "Session log — 2026-08-19" section of the phase file): group
+backgrounds now resolve for **39/39** tree versions instead of 1 (`_gbByVersion`
+generalized to shipped sprite data + the standalone root PNGs); the renderer
+rebuild throttle keys off an engine-sourced `revision` instead of
+`allocCount*1000003 + nodeCount`, which was blind to allocation SWAPS and to
+search state entirely; WebP decoding works (**439/439** max-zoom sprite sheets
+across all 39 versions decode). The real `ImageSize()` + coherent sprite-UV
+conversion is now gated (`5537` sampled sprites, `0` out of bounds), and tree
+interactions use a C++ spatial hit index with each node's legacy `rsq` radius,
+proxy rejection, and bridge-side undo snapshots (the selftest exercises
+alloc→undo→redo→dealloc). Still open in 4.1: the renderer-strategy decision and
+the embeddable tree component.
+Already fixed: `pob_getTreeData` rendered `latestTreeVersion` regardless of the
+spec's actual tree version (the spec fallback was dead code).
+
+**Phase 2 — Calc Integration Layer — COMPLETE (2026-07-25 – 2026-08-01)**, with
+one post-close bug fix on 2026-08-18 (see the Part 2.4 entry in the Done log:
+the compare bridge was grafting the equipped amulet's anoint onto every compared
+item and clobbering `itemsTab.displayItem`). Spec:
+`phases/PHASE-2-calc-integration.md`. All 6 parts + the acceptance gate are DONE.
 
 Phase 1 (QML Component Library & App Shell) is COMPLETE (2026-07-24) — see the
 Done log below for the summary; `phases/PHASE-1-component-library.md` has full
@@ -40,6 +85,14 @@ attached) — set `QT_FORCE_STDERR_LOGGING=1` in the environment to see it; the
 passing bogus paths and observing exit 1 vs 0), which is why the gate has always
 been checked by exit code first per invariant #5.
 
+**Env gotcha (NEW 2026-08-19):** the msys2 package
+`mingw-w64-x86_64-qt6-imageformats` is a REQUIRED build/runtime dependency —
+msys2 ships the webp decoder separately from `qt6-base`. Without it
+`QImageReader` returns a null `QImage` for every `.webp`, so the 3_27+/3_28+
+ascendancy/bloodline tree art renders **blank with no error logged anywhere**.
+`deploy-win-standalone.sh` now hard-fails if `imageformats/qwebp.dll` did not
+deploy, so this cannot silently ship again.
+
 User-data policy is RESOLVED (SHARE); see resolved decision below +
 [[solo-hobby-fork-poc-scope]].
 
@@ -64,6 +117,37 @@ Full detail in `reference/00-architecture.md`. The short list:
 5. **Every phase boundary: `pob-selftest` exit 0 + no view regresses** vs the
    committed capture baseline.
 6. **Binaries run with cwd = `src/`** (engine reads data dirs relative to CWD).
+7. **There is NO frame loop.** Everything `buildMode:OnFrame` (`Build.lua:1162`)
+   recomputed per frame is dead code under Qt — `unsaved` (`:1254`),
+   `RefreshSkillSelectControls` (`:1237`), the class/ascend dropdown resync
+   (`:1207`), the Ctrl-key hotkey handler (`:1173`). Port each to an explicit
+   bridge call or a QML `Shortcut`. **Never reintroduce a frame pump** to "fix"
+   one — that re-creates the GUI freeze Phase 0 removed. **Caveat found in
+   Phase 3 Part 3.3:** `OnFrame` itself is NOT dead — bridge calls that end in
+   `runCallback("OnFrame")` (mode switches, `pob_loadBuildXML`) still run it
+   once, and `ProcessControlsInput` (`:1205`) still walks the full legacy
+   Control tree every such call even though Qt never draws it. A control
+   closure with a side effect (e.g. the point-display control's `width`
+   function calling `EstimatePlayerProgress()`, which mutates `characterLevel`
+   in auto-level mode — `Build.lua:198,890`) still fires, silently, with no
+   rendering symptom to notice it by. Don't assume the Control tree is inert
+   just because Qt doesn't draw it; a selftest snapshotting state across an
+   `OnFrame`-triggering call should account for this.
+9. **Never name a QML component property `data`.** It is QtObject's DEFAULT
+   property — the children list — so shadowing it silently swallows every
+   declared child. The component still occupies its layout slot and renders
+   nothing, with ZERO QML warnings. (Cost real debugging time in
+   `MainSkillPanel.qml`.) Related: an EMPTY Lua table crosses the bridge as a
+   QVariantMap, not a QVariantList, so `model.length` is `undefined` not `0`;
+   guard `int` bindings accordingly. And `parent` is null while a component is
+   being constructed inside a Layout.
+8. **Measure with TextMetrics; position Qt-painted text with Qt.** The `.tgf`
+   atlas is the right source for reproducing legacy *measurements* (column
+   widths, ellipsis points). But Qt paints with the bundled TTF, whose extents
+   differ slightly, so any `x: anchor - measuredWidth` arithmetic lets glyphs
+   overrun the anchor. Give the element a real box and use
+   `horizontalAlignment` / Qt's own layout. (Cost a real column collision in the
+   Phase 3 stat panel before it was understood.)
 
 ---
 
@@ -169,6 +253,23 @@ Full detail in `reference/00-architecture.md`. The short list:
   field inventory — `CalcSections` already has its own live bridge
   (`pob_getCalcOutput`, pre-existing) and `powerStatList` belongs to Phase 4's
   PowerReport.
+- **Part 2.4 BUG FOUND & FIXED (2026-08-18, after the phase was closed).**
+  `pob_compareOverride`'s `repItemRaw` path routed through
+  `itemsTab:CreateDisplayItemFromRaw` (`ItemsTab.lua:1658`), which is the
+  *editor* entry point and was wrong here on two counts: (a) it runs
+  `CopyAnointsAndEldritchImplicits` first (`ItemsTab.lua:1661`), so the item
+  being compared silently inherited the **equipped amulet's anoint and the
+  equipped Eater/Exarch implicits** — the hover diff described an item the user
+  never asked about; (b) it ends in `SetDisplayItem` (`ItemsTab.lua:1666`), so a
+  mere hover-compare **clobbers `itemsTab.displayItem`** — harmless only because
+  no display-item editor exists yet, and silent data loss the moment Phase 6
+  builds one. Now builds the candidate directly with `new("Item", raw)`, which
+  also (correctly) skips `NormaliseQuality()` on the compare path. Added
+  `repItemId` alongside `repItemRaw` so an in-build item can be compared without
+  a lossy raw-text round-trip. `pob_selftestCompare` extended with a sentinel
+  assertion that `itemsTab.displayItem` survives a raw compare byte-identical —
+  **verified to have teeth** by reintroducing the bug and confirming
+  `pob-selftest` exits 1 with `compareOverride clobbered itemsTab.displayItem`.
 - **Part 2.4 (comparison-calculator bridge) DONE.** New
   `pob_compareOverride(override)`/`pob_compareNodes(nodeIds)` +
   `LuaEngine::compareOverride()`/`compareNodes()` port

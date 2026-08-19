@@ -41,6 +41,7 @@ add_executable(pob-qt
     src/NotesController.cpp
     src/CompareModel.cpp
     src/PartyModel.cpp
+    src/TreeScene.cpp
     src/luabridge.cpp
     qml/qml.qrc
 )
@@ -74,6 +75,11 @@ target_include_directories(pob-selftest PRIVATE
 )
 target_link_libraries(pob-selftest PRIVATE
     Qt6::Core
+    # Qt6::Gui is needed HEADLESS: pob.imageSize (Phase 4) reads image
+    # headers via QImageReader, which lives in QtGui. It needs no display
+    # and no QGuiApplication -- QCoreApplication is enough -- but it does
+    # need the library, and the imageformats plugins (qwebp) on the path.
+    Qt6::Gui
     ${LUAJIT_LIBRARIES}
     ZLIB::ZLIB
     ${CURL_LIBRARIES}

@@ -1,9 +1,10 @@
-
-#pragma once
+﻿#pragma once
 #include <QObject>
 #include <QVariantMap>
 #include <QVariantList>
 #include <QString>
+#include <QHash>
+#include <QVector>
 
 class LuaEngine;
 class TreeModel;
@@ -12,8 +13,8 @@ class TreeConnectorModel;
 
 // Phase 4a/4b: owns the passive-tree view state (zoom/pan) and the three tree
 // data models, and repopulates them from the Lua bridge (pob_getTreeData) on
-// demand. refresh() is throttled: it only rebuilds the models when the allocation
-// signature changes (or on first load), so calling it every frame is cheap.
+// demand. refresh() is throttled: it only rebuilds the models when the engine's
+// tree revision changes (or on first load), so calling it every frame is cheap.
 // Phase 4b adds hit-testing (screen->node id), allocation toggles that flow
 // through the Lua bridge and repaint the canvas, and a search-match id list.
 class TreeViewController : public QObject {
@@ -45,6 +46,12 @@ public:
     // Wire the Lua engine so the Q_INVOKABLE interaction wrappers can reach it.
     void setEngine(LuaEngine* engine) { m_engine = engine; }
 
+    TreeModel* nodesModel() const { return m_nodes; }
+    TreeGroupModel* groupsModel() const { return m_groups; }
+    TreeConnectorModel* connectorsModel() const { return m_connectors; }
+    LuaEngine* engine() const { return m_engine; }
+    QString lastRevision() const { return m_lastRevision; }
+
     double zoomLevel() const { return m_zoomLevel; }
     double zoom() const;
     double zoomX() const { return m_zoomX; }
@@ -71,7 +78,6 @@ public:
     // must be kept current for the clamp bounds to track the viewport.
     Q_INVOKABLE void setViewport(qreal w, qreal h);
 
-
     // Phase 4b: invert the treeToScreen transform to find the nearest node id
     // under a screen point (screenX/screenY in the viewport's local pixels;
     // vpW/vpH are the viewport size). Returns the node id, or -1 if none within
@@ -97,8 +103,6 @@ private:
     // viewport size is known. Returns true if either value changed.
     bool clampPan();
 
-public:
-
 signals:
     void viewChanged();       // data/allocation changed -> canvas must repaint
     void transformChanged();  // zoom/pan changed -> only the Scale/Translate updates
@@ -107,6 +111,19 @@ signals:
     void assetsInitialized();     // asset metadata ready (fires once)
 
 private:
+    // Hit-test rows are kept separately from TreeModel so mouse movement does
+    // not repeatedly materialise QVariantMaps for every node. The grid stores
+    // each node in every cell its legacy rsq circle reaches; lookup is then one
+    // cell plus exact circle tests, rather than a linear scan of the whole tree.
+    struct HitNode {
+        int id = -1;
+        double x = 0.0;
+        double y = 0.0;
+        double radiusSquared = 0.0;
+    };
+    void rebuildHitIndex(const QVariantList& nodes);
+    static qint64 hitCellKey(int x, int y);
+
     TreeModel* m_nodes = nullptr;
     TreeGroupModel* m_groups = nullptr;
     TreeConnectorModel* m_connectors = nullptr;
@@ -125,7 +142,9 @@ private:
     QString m_assetBasePath;
     QString m_backgroundUrl;
     QVariantList m_searchResults;
-    int m_lastSig = -1;
+    QVector<HitNode> m_hitNodes;
+    QHash<qint64, QVector<int>> m_hitCells;
+    QString m_lastRevision;
     bool m_loaded = false;
     bool m_boundsValid = false;        // guards boundsValidChanged single emission
     bool m_assetsInitialized = false;  // guards assetsInitialized single emission

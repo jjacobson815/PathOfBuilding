@@ -5,12 +5,20 @@
 #include "TreeConnectorModel.h"
 
 #include <cmath>
+#include <limits>
 #include <QDebug>
 #include <QFile>
 #include <QTextStream>
 #include <QDir>
 #include <QImage>
 #include <QMap>
+
+namespace {
+// Tree-space units. Most node hit circles span only one or two cells; storing
+// circles in all touched cells keeps lookup O(candidates at cursor), including
+// at any zoom level because the test is performed in tree coordinates.
+constexpr double kHitCellSize = 96.0;
+}
 
 TreeViewController::TreeViewController(QObject* parent) : QObject(parent) {}
 
@@ -128,6 +136,50 @@ void TreeViewController::resetView() {
     emit transformChanged();
 }
 
+qint64 TreeViewController::hitCellKey(int x, int y) {
+    // Do not shift a negative signed integer (undefined behaviour). The high
+    // and low halves remain a one-to-one pair for practical tree-grid indices.
+    return static_cast<qint64>(x) * 0x100000000LL
+           + static_cast<quint32>(y);
+}
+
+void TreeViewController::rebuildHitIndex(const QVariantList& nodes) {
+    m_hitNodes.clear();
+    m_hitCells.clear();
+    m_hitNodes.reserve(nodes.size());
+
+    for (const QVariant& row : nodes) {
+        const QVariantMap node = row.toMap();
+        // Legacy PassiveTreeView only considers nodes that have artwork sized
+        // by rsq, belong to a non-proxy group, and are not proxy nodes. The
+        // bridge filters proxies too; retaining these checks here makes a
+        // malformed/future payload safely non-interactive rather than clickable.
+        const double rsq = node.value("rsq").toDouble();
+        if (node.value("isProxy").toBool() || !node.value("hasGroup").toBool()
+            || node.value("groupIsProxy").toBool() || rsq <= 0.0) {
+            continue;
+        }
+
+        HitNode hit;
+        hit.id = node.value("id").toInt();
+        hit.x = node.value("x").toDouble();
+        hit.y = node.value("y").toDouble();
+        hit.radiusSquared = rsq;
+        const int index = m_hitNodes.size();
+        m_hitNodes.append(hit);
+
+        const double radius = std::sqrt(rsq);
+        const int minX = static_cast<int>(std::floor((hit.x - radius) / kHitCellSize));
+        const int maxX = static_cast<int>(std::floor((hit.x + radius) / kHitCellSize));
+        const int minY = static_cast<int>(std::floor((hit.y - radius) / kHitCellSize));
+        const int maxY = static_cast<int>(std::floor((hit.y + radius) / kHitCellSize));
+        for (int cellX = minX; cellX <= maxX; ++cellX) {
+            for (int cellY = minY; cellY <= maxY; ++cellY)
+                m_hitCells[hitCellKey(cellX, cellY)].append(index);
+        }
+    }
+}
+
 void TreeViewController::refresh(LuaEngine* engine) {
     if (!engine)
         return;
@@ -140,18 +192,25 @@ void TreeViewController::refresh(LuaEngine* engine) {
     }
     const QVariantMap d = data.toMap();
 
-    // Throttle: only rebuild when the allocation signature changes (or first load).
-    const int nodeCount = d.value("nodeCount").toInt();
-    const int allocCount = d.value("allocCount").toInt();
-    const int sig = allocCount * 1000003 + nodeCount;
-    if (m_loaded && sig == m_lastSig) {
+    // Throttle: only rebuild when the engine's tree revision changes (or first load).
+    // This was `allocCount * 1000003 + nodeCount`, which was blind to two real cases:
+    // an allocation SWAP (dealloc one node, alloc another -> identical counts, so the
+    // canvas kept the stale allocation) and any change to the search highlight, which
+    // the signature did not sample at all. pob_getTreeData now folds the tree version,
+    // both counts, an order-independent checksum of the allocated ids and a search
+    // serial into one opaque string. Empty means the host predates the field: fall
+    // through and rebuild rather than throttle on a value we cannot trust.
+    const QString revision = d.value("revision").toString();
+    if (m_loaded && !revision.isEmpty() && revision == m_lastRevision) {
         return;
     }
-    m_lastSig = sig;
+    m_lastRevision = revision;
     m_loaded = true;
 
+    const QVariantList nodeRows = d.value("nodes").toList();
     if (m_nodes)
-        m_nodes->setNodes(d.value("nodes").toList());
+        m_nodes->setNodes(nodeRows);
+    rebuildHitIndex(nodeRows);
     if (m_groups)
         m_groups->setGroups(d.value("groups").toList());
     if (m_connectors)
@@ -175,13 +234,9 @@ void TreeViewController::refresh(LuaEngine* engine) {
         emit assetsInitialized();
     }
 
-    const int nNodes = d.value("nodes").toList().size();
-    const int nGroups = d.value("groups").toList().size();
-    const int nConn = d.value("connectors").toList().size();
-
     emit viewChanged();
     qDebug().noquote() << "[TreeViewController] refresh -> nodes="
-             << d.value("nodes").toList().size()
+             << nodeRows.size()
              << " groups=" << d.value("groups").toList().size()
              << " connectors=" << d.value("connectors").toList().size();
 }
@@ -189,9 +244,11 @@ void TreeViewController::refresh(LuaEngine* engine) {
 // Phase 4b: invert the treeToScreen transform to find the nearest node id.
 // Screen = vpW/2 + zoomX + scale * treeX  (and likewise for y), where
 // scale = min(vpW,vpH)/bounds.size * zoom. We solve for treeX/treeY and pick the
-// closest node within a ~25px hit radius (in tree units: 25/scale).
+// closest node inside its LEGACY hit circle (`node.rsq`). The bridge builds a
+// spatial grid at refresh time, so a mouse move no longer deep-copies and scans
+// every QVariantMap in TreeModel.
 int TreeViewController::hitTest(qreal screenX, qreal screenY, qreal vpW, qreal vpH) {
-    if (!m_loaded || !m_nodes)
+    if (!m_loaded || m_hitNodes.isEmpty())
         return -1;
     const double size = m_bounds.value("size").toDouble();
     if (size <= 0 || vpW <= 0 || vpH <= 0)
@@ -204,20 +261,21 @@ int TreeViewController::hitTest(qreal screenX, qreal screenY, qreal vpW, qreal v
     const double offsetY = m_zoomY + vpH / 2.0;
     const double treeX = (screenX - offsetX) / scale;
     const double treeY = (screenY - offsetY) / scale;
-    const double threshold = 25.0 / scale; // ~25px hit radius
-    double bestDist = threshold * threshold;
+    const int cellX = static_cast<int>(std::floor(treeX / kHitCellSize));
+    const int cellY = static_cast<int>(std::floor(treeY / kHitCellSize));
+    const auto candidates = m_hitCells.constFind(hitCellKey(cellX, cellY));
+    if (candidates == m_hitCells.constEnd())
+        return -1;
+    double bestDist = std::numeric_limits<double>::infinity();
     int bestId = -1;
-    const int n = m_nodes->count();
-    for (int i = 0; i < n; i++) {
-        const QVariantMap m = m_nodes->get(i).toMap();
-        const double nx = m.value("x").toDouble();
-        const double ny = m.value("y").toDouble();
-        const double dx = nx - treeX;
-        const double dy = ny - treeY;
+    for (const int index : candidates.value()) {
+        const HitNode& node = m_hitNodes.at(index);
+        const double dx = node.x - treeX;
+        const double dy = node.y - treeY;
         const double d2 = dx * dx + dy * dy;
-        if (d2 <= bestDist) {
+        if (d2 <= node.radiusSquared && d2 < bestDist) {
             bestDist = d2;
-            bestId = m.value("id").toInt();
+            bestId = node.id;
         }
     }
     return bestId;

@@ -185,9 +185,28 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         qDebug().noquote() << "tree-render ok =" << ok
                  << " nodeCount =" << nodeCount
                  << " groupCount =" << groupCount
-                 << " connectorCount =" << connectorCount;
+                 << " connectorCount =" << connectorCount
+                 // Phase 4 ImageSize()/UV evidence. spriteBad must read 0 AND
+                 // spriteChecked must be large: a seam that resolved no sprites
+                 // at all would also report 0 bad ones. spriteMinW is the tell
+                 // for the failure this change exists to prevent -- reading
+                 // normalised UVs as raw pixels puts every sub-rect width far
+                 // below 1, so a min width >= 1 is what says it did not.
+                 << " spriteChecked =" << tr.value("spriteChecked").toInt()
+                 << " spriteBad =" << tr.value("spriteBad").toInt()
+                 << " spriteIcons =" << tr.value("spriteIcons").toInt()
+                 << " spriteFrames =" << tr.value("spriteFrames").toInt()
+                 << " spriteGroupBgs =" << tr.value("spriteGroupBgs").toInt()
+                 << " arcCount =" << tr.value("arcCount").toInt()
+                 << " lineCount =" << tr.value("lineCount").toInt()
+                 << " badConnectors =" << tr.value("badConnectors").toInt()
+                 << " spriteMinW =" << tr.value("spriteMinW").toDouble()
+                 << " spriteMaxW =" << tr.value("spriteMaxW").toDouble();
         if (!ok) {
-            qCritical() << "tree-render check FAILED: tree data seam returned empty/invalid tree";
+            qCritical() << "tree-render check FAILED: tree data seam returned empty/invalid tree"
+                        << " spriteBad =" << tr.value("spriteBad").toInt()
+                        << " badConnectors =" << tr.value("badConnectors").toInt()
+                        << " firstBadSprite =" << tr.value("spriteBadSample").toString();
             return false;
         }
         if (nodeCount <= 0 || groupCount <= 0 || connectorCount <= 0) {
@@ -212,7 +231,33 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
                  << " allocOk =" << ti.value("allocOk").toBool()
                  << " deallocOk =" << ti.value("deallocOk").toBool()
                  << " searchOk =" << ti.value("searchOk").toBool()
-                 << " searchClearOk =" << ti.value("searchClearOk").toBool();
+                 << " searchClearOk =" << ti.value("searchClearOk").toBool()
+                 << " undoAllocSnapshotOk =" << ti.value("undoAllocSnapshotOk").toBool()
+                 << " undoAllocRestoresOk =" << ti.value("undoAllocRestoresOk").toBool()
+                 << " redoAllocRestoresOk =" << ti.value("redoAllocRestoresOk").toBool()
+                 << " undoDeallocSnapshotOk =" << ti.value("undoDeallocSnapshotOk").toBool()
+                 // Part 4.1 rebuild-throttle evidence. swapSkipped must read false,
+                 // or revSwapOk passed only because the fixture found no second
+                 // allocatable node and the swap case never actually ran.
+                 << " revAllocOk =" << ti.value("revAllocOk").toBool()
+                 << " revRestoreOk =" << ti.value("revRestoreOk").toBool()
+                 << " revSwapOk =" << ti.value("revSwapOk").toBool()
+                 << " swapCountsEqual =" << ti.value("swapCountsEqual").toBool()
+                 << " swapSkipped =" << ti.value("swapSkipped").toBool()
+                 << " revSearchOk =" << ti.value("revSearchOk").toBool()
+                 // The two-node SUM-PRESERVING swap. A single-node swap only
+                 // needs the checksum to be id-sensitive; this one needs it to
+                 // be NON-LINEAR, which the scattered-sum version was not.
+                 // swap2Skipped reading true means the live tree could not
+                 // construct the case -- the fixture-independent
+                 // checksumNonLinearOk still covers it.
+                 << " swap2Ok =" << ti.value("swap2Ok").toBool()
+                 << " swap2SumsEqual =" << ti.value("swap2SumsEqual").toBool()
+                 << " swap2CountsEqual =" << ti.value("swap2CountsEqual").toBool()
+                 << " swap2Restored =" << ti.value("swap2Restored").toBool()
+                 << " swap2Skipped =" << ti.value("swap2Skipped").toBool()
+                 << " checksumNonLinearOk =" << ti.value("checksumNonLinearOk").toBool()
+                 << " checksumCommutativeOk =" << ti.value("checksumCommutativeOk").toBool();
         if (!ok) {
             qCritical() << "tree-interact check FAILED:"
                         << ti.value("error").toString();
@@ -590,6 +635,176 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
                  << "helpSectionCount=" << m.value("helpSectionCount").toInt();
         if (!m.value("ok").toBool()) {
             qCritical() << "about-content check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // ---- Phase 3 (Build Shell) ------------------------------------------
+    // Each of these restores whatever it mutates; the suite is one ordered run
+    // over a single shared engine, so a check that leaks state breaks the next.
+
+    // Chunk 0: the unsaved flag. Legacy ORs the ten modFlags once per frame into
+    // bm.unsaved (Build.lua:1254) -- with no frame loop that field is stale, so
+    // SaveLoadModel's isDirty was always wrong. This asserts the on-demand
+    // computation is right AND that the old field would have lied.
+    {
+        QVariant us = engine.callGlobal("pob_selftestUnsaved");
+        if (us.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestUnsaved missing or wrong type:" << us.typeName();
+            return false;
+        }
+        const QVariantMap m = us.toMap();
+        qDebug().noquote() << "unsaved:"
+                 << "clean=" << m.value("clean").toBool()
+                 << "dirty=" << m.value("dirty").toBool();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "unsaved check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Chunk 2/3 read side: the top-bar payload + class/ascendancy lists.
+    {
+        QVariant ss = engine.callGlobal("pob_selftestShellState");
+        if (ss.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestShellState missing or wrong type:" << ss.typeName();
+            return false;
+        }
+        const QVariantMap m = ss.toMap();
+        qDebug().noquote() << "shell-state:"
+                 << "level=" << m.value("level").toInt()
+                 << "classCount=" << m.value("classCount").toInt()
+                 << "secondaryCount=" << m.value("secondaryCount").toInt()
+                 << "points=" << m.value("pointsStr").toString();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "shell-state check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Chunk 3 write side: class change must honour the confirm gate (never
+    // silently reset an allocated tree), force must actually switch, and the
+    // level edit must clamp to 1..100.
+    {
+        QVariant sc = engine.callGlobal("pob_selftestShellClass");
+        if (sc.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestShellClass missing or wrong type:" << sc.typeName();
+            return false;
+        }
+        const QVariantMap m = sc.toMap();
+        qDebug().noquote() << "shell-class:"
+                 << "needsConfirm=" << m.value("needsConfirm").toBool()
+                 << "confirmExpected=" << m.value("confirmExpected").toBool()
+                 << "switched=" << m.value("switched").toBool()
+                 << "clampOk=" << m.value("clampOk").toBool()
+                 << "restoredClassId=" << m.value("restoredClassId").toInt();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "shell-class check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Chunk 2 write side: a save must follow a completed calc pass and must
+    // emit the denormalized <PlayerStat> rows third-party sites read.
+    {
+        QVariant sv = engine.callGlobal("pob_selftestSaveDBFile");
+        if (sv.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestSaveDBFile missing or wrong type:" << sv.typeName();
+            return false;
+        }
+        const QVariantMap m = sv.toMap();
+        qDebug().noquote() << "save-db:"
+                 << "bytes=" << m.value("bytes").toInt()
+                 << "playerStatCount=" << m.value("playerStatCount").toInt()
+                 << "fullDPSSkillCount=" << m.value("fullDPSSkillCount").toInt()
+                 << "cleanAfterSave=" << m.value("cleanAfterSave").toBool();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "save-db check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Part 3.3: the savers registry + Tree-deferred load order round-trip real
+    // per-tab state (tree alloc, item, active-skill socket group, config
+    // option) through SaveDB -> XML text -> LoadDB, and the save carries the
+    // denormalized <PlayerStat>/<FullDPSSkill>/<TimelessData> sections.
+    {
+        QVariant rt = engine.callGlobal("pob_selftestSaveLoadRoundTrip");
+        if (rt.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestSaveLoadRoundTrip missing or wrong type:" << rt.typeName();
+            return false;
+        }
+        const QVariantMap m = rt.toMap();
+        qDebug().noquote() << "save-load-roundtrip:"
+                 << "sectionsOk=" << m.value("sectionsOk").toBool()
+                 << "hasPlayerStat=" << m.value("hasPlayerStat").toBool()
+                 << "hasFullDPSSkill=" << m.value("hasFullDPSSkill").toBool()
+                 << "hasTimelessData=" << m.value("hasTimelessData").toBool()
+                 << "xmlLen=" << m.value("xmlLen").toInt();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "save-load-roundtrip check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Chunk 6: sidebar collapse must reach BOTH main.sideBarCollapsed (what
+    // Settings.xml persists) and buildMode.sideBarCollapsed (what layout reads).
+    {
+        QVariant sb = engine.callGlobal("pob_selftestSideBar");
+        if (sb.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestSideBar missing or wrong type:" << sb.typeName();
+            return false;
+        }
+        const QVariantMap m = sb.toMap();
+        qDebug().noquote() << "sidebar:"
+                 << "bothFlipped=" << m.value("bothFlipped").toBool()
+                 << "restored=" << m.value("restored").toBool();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "sidebar check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Part 3.2: the main-skill selector stack. Guards the two traps that make
+    // this data port easy to get subtly wrong: reading `label` instead of the
+    // engine's `displayLabel` write-back (which would show the wrong text on
+    // every socket group), and collapsing the side bar's selection into the
+    // Calcs tab's — they are deliberately independent.
+    {
+        QVariant ms = engine.callGlobal("pob_selftestMainSkill");
+        if (ms.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestMainSkill missing or wrong type:" << ms.typeName();
+            return false;
+        }
+        const QVariantMap m = ms.toMap();
+        qDebug().noquote() << "main-skill:"
+                 << "groups=" << m.value("groupCount").toInt()
+                 << "skills=" << m.value("skillCount").toInt()
+                 << "labelsMatch=" << m.value("labelsMatch").toBool()
+                 << "independent=" << m.value("independent").toBool()
+                 << "setterOk=" << m.value("setterOk").toBool()
+                 << "noSkills=" << m.value("noSkills").toBool();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "main-skill check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Phase 4: the renderer must be handed the SPEC's tree, not whatever the
+    // latest installed tree version happens to be.
+    {
+        QVariant tv = engine.callGlobal("pob_selftestTreeVersion");
+        if (tv.typeId() != QMetaType::QVariantMap) {
+            qCritical() << "pob_selftestTreeVersion missing or wrong type:" << tv.typeName();
+            return false;
+        }
+        const QVariantMap m = tv.toMap();
+        qDebug().noquote() << "tree-version:"
+                 << "spec=" << m.value("specVersion").toString()
+                 << "data=" << m.value("dataVersion").toString()
+                 << "latest=" << m.value("latestVersion").toString();
+        if (!m.value("ok").toBool()) {
+            qCritical() << "tree-version check FAILED:" << m;
             return false;
         }
     }

@@ -199,6 +199,64 @@ public:
     // (already boolean sets). Drives Config option visibility (Phase 7).
     Q_INVOKABLE QVariant getConfigUsageSets();
 
+    // ---- Phase 3: Build Shell -------------------------------------------
+    //
+    // These exist because the Qt host has NO FRAME LOOP. Everything
+    // buildMode:OnFrame recomputed every frame (Build.lua:1162) is dead code
+    // here, so each of those responsibilities becomes an explicit call:
+    //
+    //   getUnsaved()   replaces reading main.modes.BUILD.unsaved, which is
+    //                  written only inside OnFrame (Build.lua:1254) and is
+    //                  therefore permanently stale under Qt.
+    //   getShellState() is the whole top-bar payload in ONE call. Do not bind
+    //                  it to a QML property expression: it runs
+    //                  EstimatePlayerProgress, which mutates characterLevel in
+    //                  auto mode and appends point-overflow warnings.
+    //   saveDBFile()   is the recalc-gated save. buildMode:Save denormalizes
+    //                  <PlayerStat>/<FullDPSSkill> out of calcsTab.mainOutput,
+    //                  so saving before a completed calc pass silently ships a
+    //                  build with stale or missing stats. Returns a structured
+    //                  {ok=false, error=...}, never a bare null.
+    Q_INVOKABLE QVariant getUnsaved();
+    Q_INVOKABLE QVariant getShellState();
+    Q_INVOKABLE QVariant getClassList();
+    // mode: "check" (apply only if free, else report needsConfirm and change
+    // nothing) | "force" (accept the tree reset) | "connect" (try ConnectToClass).
+    Q_INVOKABLE QVariant setClass(int classId, const QString& mode);
+    Q_INVOKABLE QVariant setAscendClass(int ascendClassId);
+    Q_INVOKABLE QVariant setSecondaryAscendClass(int ascendClassId);
+    Q_INVOKABLE QVariant setCharacterLevel(int level);
+    Q_INVOKABLE QVariant setLevelAutoMode(bool autoMode);
+    Q_INVOKABLE QVariant setSideBarCollapsed(bool collapsed);
+    Q_INVOKABLE QVariant saveDBFile(const QString& path = QString());
+    Q_INVOKABLE QVariant closeBuild();
+    Q_INVOKABLE QVariant sanitizeBuildName(const QString& name, const QString& subPath);
+
+    // Part 3.2: the main-skill selector stack (a data port of
+    // buildMode:RefreshSkillSelectControls, Build.lua:1511).
+    //
+    // `suffix` selects WHICH of the two independent main-skill selections you
+    // are reading or writing: "" is the side bar's, "Calcs" is the Calcs tab's.
+    // Legacy keeps them separate on purpose — the Calcs tab lets you inspect a
+    // different skill than the side bar displays — so never collapse them.
+    //
+    // getMainSkillControls() forces a recalc: displayLabel/displaySkillList are
+    // engine write-backs that only exist after a calc pass. It deliberately
+    // does NOT go through getActiveSkills(), which costs 61-470ms because it
+    // runs one full BuildOutput per displayed skill.
+    Q_INVOKABLE QVariant getMainSkillControls(const QString& suffix = QString());
+    Q_INVOKABLE QVariant setMainSocketGroup(int index);
+    Q_INVOKABLE QVariant setMainActiveSkill(int index, const QString& suffix = QString());
+    Q_INVOKABLE QVariant setMainSkillPart(int index, const QString& suffix = QString());
+    Q_INVOKABLE QVariant setSkillStageCount(int count, const QString& suffix = QString());
+    Q_INVOKABLE QVariant setSkillMineCount(int count, const QString& suffix = QString());
+    // value: { "minionId": "Metadata/..." } or { "itemSetId": 2 }.
+    Q_INVOKABLE QVariant setSkillMinion(const QVariantMap& value, const QString& suffix = QString());
+    Q_INVOKABLE QVariant setSkillMinionSkill(int index, const QString& suffix = QString());
+    Q_INVOKABLE QStringList getSocketGroupTooltip(int index);
+    Q_INVOKABLE QVariant getConversionState();
+    Q_INVOKABLE QVariant convertBuild();
+
     // full list of config option descriptors (QVariantList of QVariantMap with
     // name/label/type/value/options/section/tooltip); setConfigOption writes a
     // value back into the active config set and triggers a rebuild.
@@ -337,6 +395,14 @@ private:
     // ToastNotification wrap after every Add/Update/Remove/Clear; emits
     // toastsChanged() so QML re-fetches via getToasts().
     static int l_pob_toastsChanged(lua_State* L);
+    // Phase 4: pob.imageSize(path) -> width, height (0, 0 when unreadable).
+    // Backs the real NewImageHandle():ImageSize() in pob_host.lua, which was
+    // stubbed to 1, 1 -- a value four sites in src/ divide or multiply by
+    // (PassiveTree.lua:368 sprite-sheet UV divisors, :871 tree.assets dims,
+    // :956 the orbit-arc radius, PassiveTreeView.lua:524/:1233). Reads only the
+    // image header via QImageReader::size() -- never decodes the pixels, which
+    // matters because the sheets are up to 4k x 4k -- and memoises per path.
+    static int l_pob_imageSize(lua_State* L);
     static LuaEngine* selfOf(lua_State* L);
 
     lua_State* m_L = nullptr;

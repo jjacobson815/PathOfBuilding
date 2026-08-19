@@ -17,6 +17,7 @@ public:
 
     void setConnectors(const QVariantList& connectors);
     Q_INVOKABLE QVariant get(int row) const;
+    const QList<QVariantMap>& connectors() const { return m_connectors; }
 
 signals:
     void countChanged();
@@ -31,7 +32,11 @@ private:
         X1Role,
         Y1Role,
         X2Role,
-        Y2Role
+        Y2Role,
+        VertRole,
+        UvRole,
+        AtlasRole,
+        IsArcRole,
     };
 
     QList<QVariantMap> m_connectors;

@@ -25,6 +25,13 @@
         <file>components/Slider.qml</file>
         <file>components/ScrollBar.qml</file>
         <file>components/PathControl.qml</file>
+        <file>components/EditControl.qml</file>
+        <file>components/DropDownControl.qml</file>
+        <file>components/ConversionPopup.qml</file>
+        <file>components/TopBar.qml</file>
+        <file>components/MainSkillPanel.qml</file>
+        <file>components/StatPanel.qml</file>
+        <file>components/WarningsBar.qml</file>
         <file>components/TextListControl.qml</file>
         <file>components/SearchHost.qml</file>
         <file>components/OptionsDialog.qml</file>
@@ -32,6 +39,7 @@
         <file>components/ToastStack.qml</file>
         <file>components/BottomBar.qml</file>
         <file>components/AboutPopup.qml</file>
+        <file>components/TreeViewer.qml</file>
         <file>views/TreeView.qml</file>
         <file>views/SkillsView.qml</file>
         <file>views/ItemsView.qml</file>

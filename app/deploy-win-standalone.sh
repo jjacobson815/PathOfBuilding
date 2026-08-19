@@ -37,6 +37,18 @@ cp -f "$BUILD/pob-qt.exe" "$DIST/pob-qt.exe"               # force-copy so dist 
 echo "[deploy] 2/4 windeployqt (Qt6 DLLs + qml modules + plugins, Fusion style)"
 windeployqt.exe --qmldir "$ROOT/app/qml" --no-translations "$DIST/pob-qt.exe" >/dev/null
 
+# The 3_27+/3_28+ trees ship their ascendancy/bloodline art as .webp, which Qt can
+# only decode through the qtimageformats webp plugin -- a SEPARATE msys2 package
+# (mingw-w64-x86_64-qt6-imageformats). Without it QImageReader returns a null
+# QImage and that art renders blank, with no error logged anywhere, so check for it
+# here rather than shipping a dist that is quietly missing artwork. Runs after
+# windeployqt and before the closure pass, which is what pulls libwebp in.
+if [ ! -f "$DIST/imageformats/qwebp.dll" ]; then
+    echo "[deploy] ERROR: imageformats/qwebp.dll was not deployed." >&2
+    echo "[deploy]        Install it and re-run: pacman -S mingw-w64-x86_64-qt6-imageformats" >&2
+    exit 1
+fi
+
 echo "[deploy] 3/4 copy mingw dependency closure next to exe (iterate to fixpoint)"
 prev=0
 for pass in 1 2 3 4 5; do

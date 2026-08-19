@@ -30,7 +30,9 @@ if command -v linuxdeployqt >/dev/null 2>&1; then
     linuxdeployqt "$DIST/pob-qt" -qmldir="$ROOT/app/qml" -bundle-non-qt-libs -appimage
 else
     echo "linuxdeployqt not found; the binary links against the system Qt6."
-    echo "Ensure qt6-qtbase / qt6-qtdeclarative / qt6-qtsvg are installed at runtime."
+    echo "Ensure qt6-qtbase / qt6-qtdeclarative / qt6-qtsvg / qt6-qtimageformats are"
+    echo "installed at runtime. qtimageformats decodes the .webp ascendancy art on"
+    echo "3_27+ trees; without it that art renders blank with no error logged."
 fi
 
 echo "Deployment ready at: $DIST"

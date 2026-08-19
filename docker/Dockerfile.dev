@@ -29,7 +29,14 @@ RUN apk add --no-cache \
         qt6-qtdeclarative-dev \
         qt6-qtsvg-dev \
         qt6-qttools-dev \
-        qt6-qt5compat-dev
+        qt6-qt5compat-dev \
+        # REQUIRED, not optional: the webp decoder ships separately from
+        # qtbase. Without it QImageReader returns a null QImage for every
+        # .webp, so the 3_27+/3_28 ascendancy/bloodline tree art renders
+        # BLANK with no error logged anywhere -- and CI's offscreen GUI
+        # smoke test treats a timeout/SIGKILL as success, so it would
+        # degrade silently here rather than failing the job.
+        qt6-qtimageformats-dev
 
 # --- LuaJIT (same commit as the project's test Dockerfile) ------------------
 WORKDIR /opt

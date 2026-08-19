@@ -14,6 +14,9 @@
 #include <QDateTime>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QImageReader>
+#include <QHash>
+#include <QSize>
 #include <lauxlib.h>
 
 // Part 1.4: Win32 file attributes for OneDrive-dehydration detection
@@ -127,6 +130,8 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
         // Part 1.4 (bullet 5): toast mirror change notification (Lua-initiated
         // push, same pattern as cloudErrorPopup/pathErrorPopup above).
         { "toastsChanged",     l_pob_toastsChanged },
+        // Phase 4: real image dimensions for NewImageHandle():ImageSize().
+        { "imageSize",         l_pob_imageSize },
         { nullptr, nullptr }
     };
     lua_newtable(m_L);
@@ -600,6 +605,75 @@ int LuaEngine::l_pob_http(lua_State* L) {
     return 1;
 }
 
+// Phase 4: pob.imageSize(path) -> width, height. Backs the real
+// NewImageHandle():ImageSize() in pob_host.lua.
+//
+// Why a C++ primitive at all: `ImageSize` was stubbed to `1, 1`, and four sites
+// in the (unmodifiable, invariant #2) engine do arithmetic on the result --
+// PassiveTree.lua:368 divides sprite-sheet coords by it to build UVs,
+// PassiveTree.lua:871 stores it as every tree.assets[] entry's dimensions,
+// PassiveTree.lua:956 computes each orbit arc's radius as `art.width * 2 * 1.33`
+// (so every arc collapsed to 2.66 tree units at the group centre), and
+// PassiveTreeView.lua:524/:1233 size the background and DrawAsset draws from it.
+//
+// QImageReader::size() reads ONLY the header -- it never allocates or decodes
+// the pixel data, which is the point: the sprite sheets run to several thousand
+// pixels square and there are hundreds of them per tree version. It also covers
+// .webp via the qtimageformats plugin (see deploy-win-standalone.sh, which hard-
+// fails without imageformats/qwebp.dll).
+//
+// Returns 0, 0 -- never nil, and never 1, 1 -- when the file is missing or
+// unreadable. 0 is what legacy SimpleGraphic reports for an invalid handle and
+// is what PassiveTreeView.lua:523/:1232 explicitly test for; nil would make
+// `bg.width > 0` a runtime error on a nil comparison. Callers that divide by the
+// result (the sprite-sheet UVs) must guard for 0 themselves -- 10 of the 449
+// max-zoom sheet references in the shipped TreeData genuinely do not exist on
+// disk.
+//
+// Memoised per path for the process lifetime. Tree assets are immutable data
+// files shipped beside the binary, and a single pob_getTreeData resolves the
+// same handful of sheets thousands of times; without the memo this would be a
+// stat + open + header parse per node.
+int LuaEngine::l_pob_imageSize(lua_State* L) {
+    if (lua_gettop(L) < 1 || !lua_isstring(L, 1)) {
+        lua_pushinteger(L, 0); lua_pushinteger(L, 0); return 2;
+    }
+    const QString path = QString::fromUtf8(luaL_checkstring(L, 1));
+
+    static QHash<QString, QSize> cache;
+    const auto hit = cache.constFind(path);
+    if (hit != cache.constEnd()) {
+        lua_pushinteger(L, hit->width());
+        lua_pushinteger(L, hit->height());
+        return 2;
+    }
+
+    // The engine passes CWD-relative paths ("TreeData/<ver>/skills-3.jpg") and
+    // runs with cwd = src/ (invariant #6), so the plain path normally resolves.
+    // Fall back to an explicit srcDir join so a caller that has chdir'd
+    // elsewhere -- or a host embedding this engine -- still resolves.
+    QString file = path;
+    if (!QFileInfo::exists(file)) {
+        LuaEngine* self = selfOf(L);
+        if (self && !self->m_srcDir.isEmpty()) {
+            const QString alt = self->m_srcDir + QLatin1Char('/') + path;
+            if (QFileInfo::exists(alt)) file = alt;
+        }
+    }
+
+    QSize sz;
+    if (QFileInfo::exists(file)) {
+        QImageReader reader(file);
+        const QSize s = reader.size();
+        if (s.isValid() && s.width() > 0 && s.height() > 0) sz = s;
+    }
+    cache.insert(path, sz);          // negatives cached too: a missing sheet
+                                     // must not be re-probed per node.
+    lua_pushinteger(L, sz.width());
+    lua_pushinteger(L, sz.height());
+    return 2;
+}
+
 // --- Read / call helpers ----------------------------------------------------
 
 // Phase 3: directory listing backing the SimpleGraphic NewFileSearch stub.
@@ -1055,6 +1129,183 @@ QVariant LuaEngine::compareNodes(const QVariantList& nodeIds) {
 // the helper MUST be a top-level global, not a dotted name).
 QVariant LuaEngine::getConfigUsageSets() {
     return callGlobal("pob_getConfigUsageSets");
+}
+
+// ---- Phase 3: Build Shell ------------------------------------------------
+// Thin delegations to the top-level pob_* globals (callGlobal does a single
+// lua_getglobal, so they must be top-level, not dotted). The mutators emit the
+// existing signals rather than inventing new ones, so the already-wired model
+// refresh block in main.cpp picks them up unchanged.
+
+QVariant LuaEngine::getUnsaved() {
+    return callGlobal("pob_getUnsaved");
+}
+
+QVariant LuaEngine::getShellState() {
+    return callGlobal("pob_getShellState");
+}
+
+QVariant LuaEngine::getClassList() {
+    return callGlobal("pob_getClassList");
+}
+
+QVariant LuaEngine::setClass(int classId, const QString& mode) {
+    QVariant r = callGlobal("pob_setClass", { classId, mode });
+    // Only a class change that actually APPLIED touches anything. A "check"
+    // that came back needsConfirm deliberately mutated nothing, so emitting
+    // here would spuriously invalidate every model.
+    if (r.typeId() == QMetaType::QVariantMap && r.toMap().value("applied").toBool()) {
+        emit buildDataChanged();
+        emit treeChanged();   // SelectClass deallocates nodes
+        emit calcsChanged();
+    }
+    return r;
+}
+
+QVariant LuaEngine::setAscendClass(int ascendClassId) {
+    QVariant r = callGlobal("pob_setAscendClass", { ascendClassId });
+    emit buildDataChanged();
+    emit treeChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSecondaryAscendClass(int ascendClassId) {
+    QVariant r = callGlobal("pob_setSecondaryAscendClass", { ascendClassId });
+    emit buildDataChanged();
+    emit treeChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setCharacterLevel(int level) {
+    QVariant r = callGlobal("pob_setCharacterLevel", { level });
+    emit buildDataChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setLevelAutoMode(bool autoMode) {
+    QVariant r = callGlobal("pob_setLevelAutoMode", { autoMode });
+    emit buildDataChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSideBarCollapsed(bool collapsed) {
+    // Pure UI state: no calc, no model invalidation, so no signal.
+    return callGlobal("pob_setSideBarCollapsed", { collapsed });
+}
+
+QVariant LuaEngine::saveDBFile(const QString& path) {
+    QVariant r = callGlobal("pob_saveDBFile", { path });
+    // A successful save resets every modFlag, so the unsaved indicator must
+    // re-read. Nothing else changed.
+    if (r.typeId() == QMetaType::QVariantMap && r.toMap().value("ok").toBool()) {
+        emit buildDataChanged();
+    }
+    return r;
+}
+
+QVariant LuaEngine::closeBuild() {
+    QVariant r = callGlobal("pob_closeBuild");
+    // CloseBuild flips main.mode to LIST behind our back, so republish the mode
+    // and view the same way setMode() does -- the QML shell binds to these.
+    emit modeChanged();
+    emit viewChanged();
+    emit currentModeChanged();
+    emit currentViewChanged();
+    return r;
+}
+
+QVariant LuaEngine::sanitizeBuildName(const QString& name, const QString& subPath) {
+    return callGlobal("pob_sanitizeBuildName", { name, subPath });
+}
+
+// --- Part 3.2: main-skill selector stack ---
+// Every setter mutates the build and recalcs, so all three of the models that
+// depend on skill selection have to re-read: skillsChanged for the selector
+// stack itself, calcsChanged for the stat panel, buildDataChanged for the
+// socket-group count in the top bar.
+
+QVariant LuaEngine::getMainSkillControls(const QString& suffix) {
+    return callGlobal("pob_getMainSkillControls", { suffix });
+}
+
+QVariant LuaEngine::setMainSocketGroup(int index) {
+    QVariant r = callGlobal("pob_setMainSocketGroup", { index });
+    emit skillsChanged();
+    emit buildDataChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setMainActiveSkill(int index, const QString& suffix) {
+    QVariant r = callGlobal("pob_setMainActiveSkill", { index, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setMainSkillPart(int index, const QString& suffix) {
+    QVariant r = callGlobal("pob_setMainSkillPart", { index, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSkillStageCount(int count, const QString& suffix) {
+    QVariant r = callGlobal("pob_setSkillStageCount", { count, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSkillMineCount(int count, const QString& suffix) {
+    QVariant r = callGlobal("pob_setSkillMineCount", { count, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSkillMinion(const QVariantMap& value, const QString& suffix) {
+    QVariant r = callGlobal("pob_setSkillMinion", { value, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSkillMinionSkill(int index, const QString& suffix) {
+    QVariant r = callGlobal("pob_setSkillMinionSkill", { index, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QStringList LuaEngine::getSocketGroupTooltip(int index) {
+    QStringList out;
+    const QVariantList rows = callGlobal("pob_getSocketGroupTooltip", { index }).toList();
+    for (const QVariant& v : rows) out << v.toString();
+    return out;
+}
+
+QVariant LuaEngine::getConversionState() {
+    return callGlobal("pob_getConversionState");
+}
+
+QVariant LuaEngine::convertBuild() {
+    QVariant r = callGlobal("pob_convertBuild");
+    // Conversion re-runs Build:Init from scratch: every model is invalid.
+    emit buildDataChanged();
+    emit treeChanged();
+    emit skillsChanged();
+    emit itemsChanged();
+    emit calcsChanged();
+    emit modeChanged();
+    emit viewChanged();
+    emit currentModeChanged();
+    emit currentViewChanged();
+    return r;
 }
 
 // Phase 5d: ConfigTab (CONFIG view) bridge. Delegates to the top-level Lua

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQml            // Instantiator, for the generated Ctrl+N view hotkeys
 import "views"
 // Namespaced import (avoids the components/Button.qml vs QtQuick.Controls.Button
 // ambiguity this file's top bar relies on): reach the component library as
@@ -60,63 +61,28 @@ Window {
         anchors.fill: parent
         spacing: 0
 
-        // --- Top bar: title + typed build metadata + current mode + collapse toggle ---
-        Rectangle {
+        // --- Top bar (Phase 3) ---------------------------------------
+        // Was an inline RowLayout of read-only Texts. Now the real shell bar:
+        // Back / Save / Save As, build-name plate with unsaved marker, points
+        // plate, Auto|Manual + level edit, and the class / ascendancy /
+        // secondary-ascendancy dropdowns. Lives in components/TopBar.qml.
+        //
+        // NOTE the two Buttons that used to be here resolved to
+        // QtQuick.Controls.Button (this file imports Controls unqualified).
+        // Inside components/ that same bare name would collide with
+        // components/Button.qml, so TopBar.qml uses the library Button with
+        // `label:` rather than `text:`.
+        Widgets.TopBar {
+            id: topBar
             Layout.fillWidth: true
             Layout.preferredHeight: theme.topBarHeight
-            color: theme.titleBar
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: theme.space2
-                anchors.rightMargin: theme.space2
-                spacing: theme.space2
-                Button {
-                    text: sideBarCollapsed ? ">>" : "<<"
-                    onClicked: sideBarCollapsed = !sideBarCollapsed
-                    ToolTip.text: "Collapse / expand sidebar"
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 250
-                }
-                Text {
-                    text: "Path of Building"
-                    color: theme.text
-                    font.bold: true
-                    font.pixelSize: theme.fontSize + 2
-                }
-                // Phase 3: mode-switch bar (toggle LIST / BUILD). Buttons are
-                // generated from luaEngine.modeNames() and call setMode(name).
-                Repeater {
-                    model: luaEngine.modeNames()
-                    delegate: Button {
-                        text: modelData
-                        highlighted: activeMode === modelData
-                        onClicked: luaEngine.setMode(modelData)
-                    }
-                }
-                Item { Layout.fillWidth: true }
-                // Phase 2a: typed, signal-driven build metadata.
-                Text {
-                    text: "Build: " + (buildModel.buildName || "—")
-                    color: theme.text
-                    font.bold: true
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: 220
-                    Layout.minimumWidth: 60
-                }
-                Text {
-                    text: "Lv " + buildModel.characterLevel
-                    color: theme.text
-                }
-                Text {
-                    text: (buildModel.className || "?") +
-                          (buildModel.ascendClassName ? " (" + buildModel.ascendClassName + ")" : "")
-                    color: theme.text
-                }
-                Text {
-                    text: "Mode: " + activeMode
-                    color: theme.accent
-                    font.bold: true
-                }
+
+            onCollapseToggled: (collapsed) => root.sideBarCollapsed = collapsed
+            onSaveAsRequested: saveAsPopup.openForCurrentBuild()
+            onSavePromptRequested: (mode) => savePrompt.openFor(mode)
+            onSaveFailed: (error) => {
+                saveErrorPopup.message = "^7Could not save the build. ^1" + error
+                saveErrorPopup.open()
             }
         }
 
@@ -209,6 +175,36 @@ Window {
                                     }
                                 }
                             }
+                        }
+
+                        // Phase 3: the live stat panel + warnings row. These are
+                        // the first real consumers of Phase 2's output
+                        // marshalling -- if a number here is wrong, fix the
+                        // marshalling, not the panel.
+                        Item { Layout.preferredHeight: theme.space2 }
+
+                        // Part 3.2: socket group / active skill / part / stages /
+                        // mines / minion / minion skill. Which of these appear is
+                        // decided by the engine payload, not by QML.
+                        Widgets.MainSkillPanel {
+                            id: mainSkillPanel
+                            Layout.fillWidth: true
+                            suffix: ""
+                            onManageSpectresRequested: spectreNotice.open()
+                        }
+
+                        Item { Layout.preferredHeight: theme.space1 }
+
+                        Widgets.StatPanel {
+                            id: statPanel
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                        }
+
+                        Widgets.WarningsBar {
+                            id: warningsBar
+                            Layout.fillWidth: true
+                            Layout.bottomMargin: theme.space2
                         }
                     }
                 }
@@ -311,6 +307,184 @@ Window {
     Widgets.AboutPopup {
         id: aboutPopup
         content: bottomBar.aboutContent
+    }
+
+    // ===== Phase 3: shell popups ==========================================
+
+    // Save As. A minimal but real implementation: prompt for a name, run it
+    // through the engine's own filename filter, refuse to overwrite, then save
+    // through the recalc-gated path. The full legacy folder-browser (Build.lua:
+    // 1343-1412, with New Folder and a sort mode) is deliberately NOT built
+    // here — it is long-tail per the phase plan, and this covers the actual
+    // "save a new build somewhere" need.
+    Widgets.TextInputPopup {
+        id: saveAsPopup
+        title: " Save As "
+        prompt: "^7Enter build name:"
+        confirmLabel: "Save"
+
+        property var _check: ({ valid: false, exists: false, fullPath: "" })
+        property string _subPath: ""
+
+        // Legacy's filter is the Lua class [\/:%*%?"<>|%c] (Build.lua:1362) and
+        // it enables Save only when io.open(name,"r") returns nil, i.e. it
+        // refuses to clobber (Build.lua:1352-1358). Both live in the engine, so
+        // ask it rather than re-implementing the rule in QML.
+        confirmEnabled: _check.valid && !_check.exists
+
+        function openForCurrentBuild() {
+            var shell = luaEngine.getShellState() || {}
+            _subPath = shell.dbFileSubPath || ""
+            text = shell.buildName || ""
+            recheck()
+            open()
+        }
+        function recheck() {
+            _check = luaEngine.sanitizeBuildName(text, _subPath) || { valid: false }
+        }
+        onTextChanged: recheck()
+        onAccepted: {
+            var r = luaEngine.saveDBFile(_check.fullPath)
+            if (!r || !r.ok) {
+                saveErrorPopup.message = "^7Could not save the build. ^1" + (r ? r.error : "unknown error")
+                saveErrorPopup.open()
+            }
+        }
+    }
+
+    Widgets.MessagePopup {
+        id: saveErrorPopup
+        title: " Save Failed "
+    }
+
+    // The Spectre Library (Build.lua:1415) is explicit Phase 3 long tail — it
+    // needs dual-pane drag-between-lists, which --capture cannot verify anyway.
+    // The button is wired now so the seam exists; this says so rather than
+    // silently doing nothing when it is clicked.
+    Widgets.MessagePopup {
+        id: spectreNotice
+        title: " Manage Spectres "
+        message: "^7The Spectre Library is not built yet.^8 It is tracked as Phase 3 long-tail work; spectres already round-trip through the build XML."
+    }
+
+    // Save / Don't Save / Cancel (Build.lua:1314-1341). `mode` decides what
+    // happens after the save resolves: LIST closes the build, EXIT quits.
+    Widgets.ConfirmPopup {
+        id: savePrompt
+        title: " Unsaved Changes "
+        confirmLabel: "Save"
+        extraLabel: "Don't Save"
+
+        property string mode: "LIST"
+
+        function openFor(m) {
+            mode = m
+            message = "^7This build has unsaved changes.\nDo you want to save them before continuing?"
+            open()
+        }
+        function _finish() {
+            if (mode === "EXIT") Qt.quit()
+            else luaEngine.closeBuild()
+        }
+        onAccepted: {
+            var shell = luaEngine.getShellState() || {}
+            if (!shell.dbFileName || shell.dbFileName.length === 0) {
+                saveAsPopup.openForCurrentBuild()
+                return
+            }
+            var r = luaEngine.saveDBFile("")
+            if (r && r.ok) _finish()
+            else {
+                saveErrorPopup.message = "^7Could not save the build. ^1" + (r ? r.error : "unknown error")
+                saveErrorPopup.open()
+            }
+        }
+        onExtraClicked: { close(); _finish() }
+    }
+
+    // Version conversion. This is a HANG FIX, not a nicety — see the header of
+    // components/ConversionPopup.qml. Opened automatically whenever the engine
+    // reports a build that failed its targetVersion check, because in that
+    // state BUILD mode is half-initialised and nothing else can proceed.
+    Widgets.ConversionPopup {
+        id: conversionPopup
+        onConverted: {
+            topBar.refresh()
+            statPanel.refresh()
+            warningsBar.refresh()
+        }
+        onDeclined: luaEngine.setListMode()
+    }
+
+    function checkConversion() {
+        if (root.activeMode !== "BUILD") return
+        var cs = luaEngine.getConversionState() || {}
+        if (cs.needsConversion && !conversionPopup.visible) {
+            conversionPopup.liveDisplay = cs.liveDisplay || ""
+            conversionPopup.buildName = cs.buildName || ""
+            conversionPopup.open()
+        }
+    }
+
+    onActiveModeChanged: checkConversion()
+
+    Component.onCompleted: {
+        // Adopt the persisted sidebar state (Settings.xml via
+        // main.sideBarCollapsed) instead of always starting expanded.
+        var shell = luaEngine.getShellState()
+        if (shell) root.sideBarCollapsed = shell.sideBarCollapsed || false
+        checkConversion()
+    }
+
+    // ===== Phase 3: hotkeys ================================================
+    // Ports the Ctrl-key block of buildMode:OnFrame (Build.lua:1173-1204).
+    // That block ran per frame off inputEvents; with no frame loop these are
+    // real QML Shortcuts instead. Ctrl+1..9 come from the viewList registry's
+    // own `key` field, so the bindings stay correct if the registry changes.
+    Instantiator {
+        model: root.allViews
+        delegate: Shortcut {
+            sequence: "Ctrl+" + modelData.key
+            enabled: root.activeMode === "BUILD"
+            onActivated: luaEngine.setActiveView(modelData.id)
+        }
+    }
+
+    Shortcut {
+        // Not StandardKey.Save: that maps to multiple sequences on Windows and
+        // Qt warns it will bind only one of them. Legacy documents Ctrl+S.
+        sequence: "Ctrl+S"
+        enabled: root.activeMode === "BUILD"
+        onActivated: {
+            var shell = luaEngine.getShellState() || {}
+            if (!shell.dbFileName || shell.dbFileName.length === 0) {
+                saveAsPopup.openForCurrentBuild()
+                return
+            }
+            var r = luaEngine.saveDBFile("")
+            if (!r || !r.ok) {
+                saveErrorPopup.message = "^7Could not save the build. ^1" + (r ? r.error : "unknown error")
+                saveErrorPopup.open()
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+W"
+        enabled: root.activeMode === "BUILD"
+        onActivated: {
+            if (luaEngine.getUnsaved().unsaved) savePrompt.openFor("LIST")
+            else luaEngine.closeBuild()
+        }
+    }
+
+    // Closing the window with unsaved work must prompt, mirroring
+    // buildMode:CanExit (Build.lua:945).
+    onClosing: (close) => {
+        if (root.activeMode === "BUILD" && luaEngine.getUnsaved().unsaved) {
+            close.accepted = false
+            savePrompt.openFor("EXIT")
+        }
     }
 
     // Part 1.4: F1 context help, mirroring main:OnFrame's F1 handler

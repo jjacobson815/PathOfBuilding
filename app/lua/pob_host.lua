@@ -94,15 +94,54 @@ function StripEscapes(text)
 end
 function GetAsyncCount() return 0 end
 
--- Image handles (no-op stubs)
+-- Image handles. QML owns all rendering (invariant #1), so these never hold a
+-- texture -- but they are NOT inert: the engine does real arithmetic on
+-- ImageSize(), and `Load` is the only place the filename is ever seen.
+--
+-- ImageSize() used to return a hardcoded `1, 1`. Four sites in src/ consume it
+-- (and src/ cannot be changed -- invariant #2):
+--
+--   PassiveTree.lua:368   sheet.width/height, the DIVISOR that turns sprite-sheet
+--                         coords into UVs. With 1 the "UVs" came out as raw
+--                         pixels, which pob_getTreeData's nodeSprite() below was
+--                         written against; both had to move together.
+--   PassiveTree.lua:871   width/height of every tree.assets[] entry -- all 1x1.
+--   PassiveTree.lua:956   `size = art.width * 2 * 1.33`, the orbit-arc radius, so
+--                         EVERY arc collapsed to 2.66 tree units at the group
+--                         centre and connector.vert[state] was garbage.
+--   PassiveTreeView.lua:524/:1233  background sizing and DrawAsset.
+--
+-- So: retain the filename, and measure lazily through pob.imageSize (header-only
+-- QImageReader read, memoised C++-side). Lazily because Load is called for every
+-- asset of every tree version that gets loaded, while only a fraction are ever
+-- measured. 0, 0 on failure -- what legacy SimpleGraphic reports for an invalid
+-- handle, and what PassiveTreeView.lua:523/:1232 test for; nil would make their
+-- `data.width == 0` comparison silently false and `bg.width > 0` a runtime error.
 function NewImageHandle()
     return setmetatable({ }, {
         __index = {
-            Load = function(self, fileName, ...) self.valid = true end,
-            Unload = function(self) self.valid = false end,
+            Load = function(self, fileName, ...)
+                self.fileName = fileName
+                self.valid = true
+                self.w, self.h = nil, nil   -- re-measure on next ImageSize()
+            end,
+            Unload = function(self)
+                self.valid = false
+                self.fileName = nil
+                self.w, self.h = nil, nil
+            end,
             IsValid = function(self) return self.valid end,
             SetLoadingPriority = function(self, pri) end,
-            ImageSize = function(self) return 1, 1 end,
+            ImageSize = function(self)
+                if self.w then return self.w, self.h end
+                local w, h = 0, 0
+                if self.fileName and pob and pob.imageSize then
+                    local rw, rh = pob.imageSize(self.fileName)
+                    w, h = tonumber(rw) or 0, tonumber(rh) or 0
+                end
+                self.w, self.h = w, h
+                return w, h
+            end,
         }
     })
 end
@@ -1325,9 +1364,28 @@ function pob_compareOverride(override)
     if hasAdd then luaOverride.addNodes = addSet end
     if hasRemove then luaOverride.removeNodes = removeSet end
 
-    if override.repSlotName and override.repItemRaw and override.repItemRaw ~= "" then
-        bm.itemsTab:CreateDisplayItemFromRaw(override.repItemRaw)
-        local item = bm.itemsTab.displayItem
+    if override.repSlotName and override.repItemId then
+        -- Compare against an item already in the build. Cheaper and lossless vs
+        -- round-tripping through raw text, and it cannot perturb any editor state.
+        local item = bm.itemsTab.items[override.repItemId]
+        if item and item.base then
+            luaOverride.repSlotName = override.repSlotName
+            luaOverride.repItem = item
+        end
+    elseif override.repSlotName and override.repItemRaw and override.repItemRaw ~= "" then
+        -- Build the candidate item DIRECTLY. This deliberately does NOT go through
+        -- itemsTab:CreateDisplayItemFromRaw (ItemsTab.lua:1658), which a previous
+        -- revision used and which is wrong here on two counts:
+        --   1. It runs CopyAnointsAndEldritchImplicits (ItemsTab.lua:1661) first, so
+        --      the item being compared silently inherits the EQUIPPED amulet's anoint
+        --      and the equipped Eater/Exarch implicits -- the compare then reports the
+        --      diff for an item the user never asked about. (That grafting is correct
+        --      and intended on the *editor* path; it must not happen on the *compare*
+        --      path.)
+        --   2. It ends in SetDisplayItem (ItemsTab.lua:1666), clobbering
+        --      itemsTab.displayItem -- i.e. a mere hover-compare would destroy
+        --      whatever the user is editing once Phase 6's display-item editor exists.
+        local item = new("Item", override.repItemRaw)
         if item and item.base then
             luaOverride.repSlotName = override.repSlotName
             luaOverride.repItem = item
@@ -1434,11 +1492,35 @@ function pob_selftestCompare()
         return { ok = false, error = "compareOverride failed", detail = overrideResult }
     end
 
+    -- A raw-text compare must be side-effect-free on the editor buffer. An earlier
+    -- revision routed this through itemsTab:CreateDisplayItemFromRaw, which ends in
+    -- SetDisplayItem (ItemsTab.lua:1666) and therefore destroyed whatever the user
+    -- was editing on every hover. Pin a sentinel, compare, and assert the sentinel
+    -- survived byte-identical.
+    local sentinel = { base = false, _pobSelftestSentinel = true }
+    local savedDisplayItem = bm.itemsTab.displayItem
+    bm.itemsTab.displayItem = sentinel
+    local rawResult = pob_compareOverride({
+        repSlotName = "Weapon 1",
+        repItemRaw = "Rarity: Normal\nDriftwood Wand\nWand",
+    })
+    local displayItemIntact = rawResult and (bm.itemsTab.displayItem == sentinel)
+    bm.itemsTab.displayItem = savedDisplayItem
+
+    if not rawResult or not rawResult.ok then
+        return { ok = false, error = "compareOverride(repItemRaw) failed", detail = rawResult }
+    end
+    if not displayItemIntact then
+        return { ok = false, error = "compareOverride clobbered itemsTab.displayItem" }
+    end
+
     return {
         ok = true,
         candidateId = candidateId,
         nodeDiffCount = #nodeResult.stats,
         overrideDiffCount = #overrideResult.stats,
+        rawDiffCount = #rawResult.stats,
+        displayItemIntact = displayItemIntact,
     }
 end
 
@@ -2141,62 +2223,141 @@ end
 -- otherwise every node is treated as unallocated (full tree, nothing highlighted).
 -- Memo for loadSourceSprites (keyed by tree version; persists across calls).
 local _sourceSpritesCache = { }
+-- Memo for the group-background resolution below, keyed version -> spriteKey.
+-- Must live out here (not inside pob_getTreeData) or it is rebuilt on every call,
+-- and loadSourceGroupBackground runs once per GROUP -- thousands of times per call.
+local _gbCache = { }
+-- Bumped by pob_setTreeSearch so the renderer revision below changes when the
+-- search highlight changes. A serial rather than a hash of the match list: the
+-- search results are the ONLY thing that call mutates, so "it ran again" is
+-- exactly the signal, and re-running the same query is cheap to repaint.
+local _treeSearchSerial = 0
+
+-- Folds one ALLOCATED node id into the running checksum that feeds
+-- pob_getTreeData().revision. File-scope (not inline) so pob_selftestAllocChecksum
+-- below can exercise it directly on the id sets that break the naive versions.
+--
+-- pairs() order over tree.nodes is arbitrary and may differ between calls, so the
+-- accumulator has to be COMMUTATIVE -- but it must not be LINEAR, and a scattered
+-- SUM is exactly that: sum((id*K) % M) % M == (K * sum(id)) % M, so the constant
+-- factors straight back out and EVERY sum-preserving swap still collides
+-- ({100,201} vs {101,200} both hash to 121247005; {5000,5003} vs {5001,5002} both
+-- to 833093411). Consecutive ids inside one group make {n,n+3} -> {n+1,n+2} an
+-- ordinary edit, not a contrived one. Adding sum(id^2) does not save it either
+-- ({1,5,6} vs {2,3,7} agree on both sum and sum-of-squares). So: scatter, xor-FOLD
+-- the high half onto the low half to break linearity, then combine with xor --
+-- commutative (order-independent) and involutive (an undo returns the revision to
+-- its exact prior value). `bit` is a LuaJIT built-in.
+local function foldAllocId(acc, id)
+    local scattered = (tonumber(id) or 0) * 2654435761 % 4294967296
+    return bit.bxor(acc, bit.bxor(scattered, math.floor(scattered / 65536)))
+end
+
+-- Sprite-sheet resolution: basename -> on-disk path + PIXEL dimensions.
+--
+-- File-scope, and memoised on ver/base, because the three call sites below run
+-- once per NODE ICON, per NODE FRAME and per GROUP -- ~7,400 io.open probes per
+-- pob_getTreeData call for a set of ~15 distinct sheets. Negative results are
+-- memoised too (as `false`): 10 of the 449 max-zoom sheet references in the
+-- shipped TreeData do not exist on disk, and those must not be re-probed per node.
+--
+-- Probe order is <ver>/<base> then TreeData/<base>, which is what all three call
+-- sites already did. It is NOT the order PassiveTree:LoadImage uses (root first,
+-- PassiveTree.lua:849) -- that only matters if a basename exists in both places,
+-- and none of the atlas sheets do (the root holds only whole standalone images
+-- like PSGroupBackgroundN.png, never a `*-3.*` atlas page). Verified rather than
+-- assumed, because now that ImageSize() is real the DENOMINATOR of every UV comes
+-- from the file the engine measured and the NUMERATOR from the file we measure;
+-- if those two ever diverge, every sprite silently samples the wrong rectangle.
+local _sheetCache = { }
+local function sheetInfo(ver, base)
+    if not ver or not base then return nil end
+    local key = ver .. "/" .. base
+    local hit = _sheetCache[key]
+    if hit ~= nil then
+        if hit == false then return nil end
+        return hit.path, hit.w, hit.h
+    end
+    local verPath = ((_SRC_DIR .. "/TreeData/" .. ver .. "/" .. base):gsub("\\", "/"))
+    local rootPath = ((_SRC_DIR .. "/TreeData/" .. base):gsub("\\", "/"))
+    for _, path in ipairs({ verPath, rootPath }) do
+        local f = io.open(path, "r")
+        if f then
+            f:close()
+            local w, h = 0, 0
+            if pob and pob.imageSize then
+                local rw, rh = pob.imageSize(path)
+                w, h = tonumber(rw) or 0, tonumber(rh) or 0
+            end
+            _sheetCache[key] = { path = path, w = w, h = h }
+            return path, w, h
+        end
+    end
+    _sheetCache[key] = false
+    return nil
+end
+
 function pob_getTreeData()
 local bm = main and main.modes and main.modes.BUILD
-local treeVersion = latestTreeVersion
-local tree = (main and main.tree and treeVersion and main.tree[treeVersion])
-             or (bm and bm.spec and bm.spec.tree)
+-- Phase 4: the BUILD'S OWN SPEC TREE FIRST, global latest only as the no-build
+-- fallback. This order used to be reversed, and because main.tree[latestTreeVersion]
+-- is essentially always present the spec branch was dead code -- so a build sitting
+-- on, say, a 3_25 spec rendered 3_28 GEOMETRY with that spec's allocation ids
+-- painted over it. Every path below reads tree.treeVersion (the tree object's own
+-- version), not this local, so correcting the selection is all that is needed.
+local tree = (bm and bm.spec and bm.spec.tree)
+             or (main and main.tree and latestTreeVersion and main.tree[latestTreeVersion])
 if not tree then return nil end
 local spec = (bm and bm.spec) or { nodes = { } }
 
-local function resolveAsset(assetName, iconKey)
-    local asset = tree.assets[assetName]
-    if not asset or not asset.filename then return nil end
-    local base = asset.filename:match("([^/]+)%?") or asset.filename:match("([^/]+)$")
-    local localPath = (_SRC_DIR .. "/TreeData/" .. tree.treeVersion .. "/" .. base):gsub("\\", "/")
-    local f = io.open(localPath, "r")
-    if not f then return nil end
-    f:close()
-    local rect
-    if asset.coords then
-        rect = asset.coords[iconKey]
-        if not rect then
-            for _, v in pairs(asset.coords) do rect = v; break end
-        end
-    end
-    if not rect then rect = { x = 0, y = 0, w = asset.w or 0, h = asset.h or 0 } end
-    if not rect.w or rect.w <= 0 or not rect.h or rect.h <= 0 then return nil end
-    return { atlas = "file:///" .. localPath, sx = rect.x, sy = rect.y, sw = rect.w, sh = rect.h }
-end
-
--- Find the first sub-rect table ({ [1]=x, [2]=y, [3]=x+w, [4]=y+h, ... }) inside t.
-local function firstRect(t)
-    if type(t) ~= "table" then return nil end
-    if t[1] ~= nil and t[3] ~= nil then return t end
-    for _, v in pairs(t) do
-        if type(v) == "table" and v[1] ~= nil and v[3] ~= nil then return v end
-    end
-    return nil
-end
+-- (`resolveAsset` and `firstRect` lived here and are gone: both were dead --
+-- resolveAsset had zero callers and read tree.assets, which is STALE on 3_20+
+-- (a tree with no assets of its own falls back to TreeData/3_19/Assets.lua, so
+-- tree.assets holds 3_19 CDN URLs); firstRect's only caller now selects the
+-- sub-rect by key so that the sheet it is paired with matches.)
 
 local function nodeSprite(node, alloc)
     local sprites = node.sprites
     if not sprites then return nil end
-    -- node.sprites[state] is the DIRECT sub-rect in the sprite sheet, built in
-    -- PassiveTree.lua as { handle, width, height, [1]=x, [2]=y, [3]=x+w, [4]=y+h }.
-    -- Because NewImageHandle() is a no-op stub (ImageSize returns 1,1), the UV
-    -- coords [1..4] are RAW pixel coordinates in the sheet, not normalised UVs.
+    -- node.sprites[state] is a spriteMap entry (PassiveTree.lua:689/:712/:819),
+    -- built at PassiveTree.lua:288-297 as
+    --     { handle, width = coords.w, height = coords.h,
+    --       [1] = coords.x / sheet.width,  [2] = coords.y / sheet.height,
+    --       [3] = (coords.x+coords.w) / sheet.width, ... }
+    -- so [1..4] are NORMALISED UVs in 0..1 and `width`/`height` are the sub-rect's
+    -- size in PIXELS. That distinction is NEW: while ImageSize() was stubbed to
+    -- 1x1 the divisor was 1, the "UVs" came out as raw pixels, and this function
+    -- was written against exactly that. The two had to move in the same commit --
+    -- the moment ImageSize tells the truth, reading [1..4] as pixels samples a
+    -- sub-pixel speck out of the top-left corner of every sheet.
     -- The sheet file is resolved from tree.skillSprites[state].filename (a CDN
-    -- URL); we take its basename and look for a matching local file in
-    -- TreeData/<ver>/. This mirrors PassiveTreeView.lua's sprite selection.
+    -- URL); we take its basename and look for the matching local file. This
+    -- mirrors PassiveTreeView.lua's sprite selection.
     local sp, sheetKey
     if node.type == "Mastery" then
         -- Mastery art lives in node.masterySprites.{inactiveIcon,activeIcon};
         -- each is a spriteMap entry keyed by mastery* state.
         if node.masterySprites then
             local ms = node.masterySprites[alloc and "activeIcon" or "inactiveIcon"]
-            sp = firstRect(ms)
             sheetKey = alloc and "masteryActive" or "masteryInactive"
+            if type(ms) == "table" then
+                sp = ms[sheetKey]
+                if not sp then
+                    -- Take whatever state this sprite set DOES carry, and take
+                    -- that key as the sheet too. The old code took the first
+                    -- sub-rect via firstRect() but kept the fixed sheetKey, so a
+                    -- rect from one atlas could be sampled out of another --
+                    -- harmless while every coordinate was raw pixels into
+                    -- equally-sized sheets, but with real normalised UVs the two
+                    -- sheets' dimensions differ and the rect lands elsewhere.
+                    for k, v in pairs(ms) do
+                        if type(v) == "table" and v[1] ~= nil and v[3] ~= nil then
+                            sp, sheetKey = v, k
+                            break
+                        end
+                    end
+                end
+            end
         end
         if not sp then
             -- Mastery nodes without masterySprites carry the art directly in
@@ -2223,9 +2384,6 @@ local function nodeSprite(node, alloc)
         end
     end
     if not sp then return nil end
-    local sx, sy = sp[1], sp[2]
-    local sw, sh = sp[3] - sp[1], sp[4] - sp[2]
-    if not sw or sw <= 0 or not sh or sh <= 0 then return nil end
     -- Resolve the sheet file from the skillSprites table (keyed by state name).
     local sheet = tree.skillSprites and tree.skillSprites[sheetKey]
     local sheetFile = sheet and sheet.filename
@@ -2240,10 +2398,33 @@ local function nodeSprite(node, alloc)
         elseif t == "jewelsocket" or t == "socket" then base = "jewel-3.png"
         else base = "skills-3.jpg" end
     end
-    local localPath = (_SRC_DIR .. "/TreeData/" .. tree.treeVersion .. "/" .. base):gsub("\\", "/")
-    local f = io.open(localPath, "r")
-    if not f then return nil end
-    f:close()
+    local localPath, sheetW, sheetH = sheetInfo(tree.treeVersion, base)
+    if not localPath or sheetW <= 0 or sheetH <= 0 then return nil end
+
+    -- De-normalise back to sheet pixels, which is what the QML canvas samples in.
+    local u0, v0, u1, v1 = tonumber(sp[1]), tonumber(sp[2]), tonumber(sp[3]), tonumber(sp[4])
+    if not u0 or not v0 or not u1 or not v1 then return nil end
+    -- This guards the ENGINE's division, not ours: PassiveTree.lua builds these as
+    -- coords.x / sheet.width, and a sheet whose file is missing measures 0x0, so
+    -- the "UV" arrives as inf (or nan for a zero numerator). Every comparison below
+    -- is false for both, so an unusable sprite is dropped rather than drawn at an
+    -- absurd offset. The bound is 1.001 and not 1 because these are floating-point
+    -- quotients: the last sub-rect's right/bottom edge lands on 1.0 give or take
+    -- an ulp.
+    if not (u0 >= 0 and u0 <= 1 and v0 >= 0 and v0 <= 1
+            and u1 > u0 and v1 > v0 and u1 <= 1.001 and v1 <= 1.001) then
+        return nil
+    end
+    -- Prefer the sprite data's own pixel width/height over (u1-u0)*sheetW: it is
+    -- the exact integer the atlas was cut with, not a quotient multiplied back out.
+    local sw = tonumber(sp.width) or 0
+    local sh = tonumber(sp.height) or 0
+    if sw <= 0 or sh <= 0 then
+        sw, sh = (u1 - u0) * sheetW, (v1 - v0) * sheetH
+    end
+    if sw <= 0 or sh <= 0 then return nil end
+    local sx = math.floor(u0 * sheetW + 0.5)
+    local sy = math.floor(v0 * sheetH + 0.5)
     return { atlas = "file:///" .. localPath, sx = sx, sy = sy, sw = sw, sh = sh }
 end
 
@@ -2282,10 +2463,11 @@ local function nodeFrame(node, alloc)
     if not rect or not rect.w or rect.w <= 0 or not rect.h or rect.h <= 0 then return nil end
     local base = grp.filename and (grp.filename:match("([^/]+)%?") or grp.filename:match("([^/]+)$"))
     if not base then return nil end
-    local localPath = (_SRC_DIR .. "/TreeData/" .. tree.treeVersion .. "/" .. base):gsub("\\", "/")
-    local f = io.open(localPath, "r")
-    if not f then return nil end
-    f:close()
+    -- Memoised: this ran an io.open per NODE for one of ~2 distinct sheets.
+    -- `rect` stays in raw pixels -- it comes from the shipped sprites.lua, which
+    -- is authored in pixels and is not touched by ImageSize()/UV normalisation.
+    local localPath = sheetInfo(tree.treeVersion, base)
+    if not localPath then return nil end
     return { atlas = "file:///" .. localPath, sx = rect.x, sy = rect.y, sw = rect.w, sh = rect.h }
 end
 
@@ -2302,20 +2484,20 @@ local function resolveGroupBackground(oo)
     -- background geometry). Fall back to the genuine data shipped in the source
     -- TreeData/<ver>/sprites.lua (or tree.lua) `groupBackground` asset, which holds
     -- the atlas filename + the PSGroupBackground1/2/3 sub-rects.
-    local gb = loadSourceGroupBackground()
+    local gb = loadSourceGroupBackground(spriteKey)
     if gb and gb.filename then
         local base = gb.filename:match("([^/]+)%?") or gb.filename:match("([^/]+)$")
-        local p = (_SRC_DIR .. "/TreeData/" .. tree.treeVersion .. "/" .. base):gsub("\\", "/")
-        local f = io.open(p, "r")
-        if not f then
-            local rp = (_SRC_DIR .. "/TreeData/" .. base):gsub("\\", "/")
-            f = io.open(rp, "r")
-            if f then p = rp end
-        end
-        if f then
-            f:close()
+        -- Memoised, and the same <ver>/<base>-then-TreeData/<base> order this
+        -- probe already used: the 3_25+ atlas page lives under <ver>/, the
+        -- <=3_24 standalone PSGroupBackgroundN.png at the TreeData root.
+        -- Ran once per GROUP before, which is the bulk of the old probe count.
+        local p = sheetInfo(tree.treeVersion, base)
+        if p then
+            -- No "any rect will do" fallback here: loadSourceGroupBackground
+            -- only ever returns a table that HAS coords[spriteKey], so picking an
+            -- arbitrary sibling rect could never fire and would silently paint the
+            -- wrong-size backdrop if it did.
             local rect = gb.coords and gb.coords[spriteKey]
-            if not rect then for _, v in pairs(gb.coords or { }) do rect = v; break end end
             if rect and rect.w and rect.w > 0 and rect.h and rect.h > 0 then
                 -- PSGroupBackground3 is stored as a HALF image; legacy's
                 -- DrawAsset(..., isHalf) draws it top-half + vertical mirror.
@@ -2329,24 +2511,63 @@ local function resolveGroupBackground(oo)
     return nil
 end
 
--- Static group-background geometry per tree version. The runtime
--- tree.assets["PSGroupBackgroundN"] entries are scale-keyed stubs with empty
--- coords (the engine does not populate group-background geometry), so we use the
--- genuine sub-rects from the source TreeData/<ver>/sprites.lua `groupBackground`
--- asset (verified data, static per version). Returned in the same
--- { filename, coords } shape resolveGroupBackground already consumes.
-local _gbByVersion = {
-    ["3_28"] = {
-        filename = "group-background-3.png",
-        coords = {
-            PSGroupBackground1 = { x = 443, y = 444, w = 138, h = 138 },
-            PSGroupBackground2 = { x = 723, y = 286, w = 178, h = 178 },
-            PSGroupBackground3 = { x = 723, y = 0,   w = 283, h = 143 },
-        },
-    },
-}
-function loadSourceGroupBackground()
-    return _gbByVersion[tree.treeVersion] or nil
+-- Group-background geometry, resolved from shipped data for EVERY tree version
+-- (this used to be a static table with a single "3_28" entry, so every other
+-- version drew no group backdrops at all).
+--
+-- The runtime tree.assets["PSGroupBackgroundN"] entries cannot be used: their
+-- per-scale `coords` are empty (the engine never populates group-background
+-- geometry) and their width/height come from the stubbed ImageSize(), so they
+-- are all 1x1. Two genuine sources between them cover the whole version range:
+--
+--   3_25+  TreeData/<ver>/sprites.lua ships a `groupBackground` atlas asset
+--          (filename + the PSGroupBackground1/2/3 sub-rects). Reuse the existing
+--          loadSourceSprites() memo -- same file, already parsed once per version.
+--   <=3_24 No sprites.lua exists. Legacy falls back to the shared
+--          TreeData/3_19/Assets.lua table, whose PSGroupBackgroundN entries are
+--          scale-keyed CDN URLs that PassiveTree:LoadImage resolves to the
+--          STANDALONE TreeData/PSGroupBackgroundN.png at the TreeData root
+--          (LoadImage probes "TreeData/<name>" before "TreeData/<ver>/<name>").
+--          Those are whole images rather than atlas pages, so the sub-rect is the
+--          entire file and the size has to come from the PNG itself.
+--
+-- Both branches return the same { filename, coords } shape resolveGroupBackground
+-- already consumes, and its existing "<ver>/<base> then <root>/<base>" probe
+-- locates the standalone files with no further change.
+
+-- (A hand-rolled PNG IHDR reader lived here. It existed ONLY because
+-- ImageSize() was stubbed, which made the image handle unusable for sizing
+-- the standalone group-background files; sheetInfo() above now measures any
+-- format through the real pob.imageSize, so the workaround -- and the
+-- byte-built PNG signature constant it needed -- are gone with it.)
+
+function loadSourceGroupBackground(spriteKey)
+    local ver = tree.treeVersion
+    local byKey = _gbCache[ver]
+    if not byKey then byKey = { }; _gbCache[ver] = byKey end
+    local cached = byKey[spriteKey]
+    if cached ~= nil then return cached or nil end
+
+    -- 3_25+: the atlas asset shipped next to the tree.
+    local sprites = loadSourceSprites()
+    local gb = sprites and sprites.groupBackground
+    if gb and gb.filename and gb.coords and gb.coords[spriteKey] then
+        byKey[spriteKey] = gb
+        return gb
+    end
+
+    -- <=3_24: the standalone root PNG. sheetInfo probes <ver>/<base> then the
+    -- TreeData root, and these files only ever exist at the root, so it lands
+    -- on the same file PassiveTree:LoadImage would -- now measured for real.
+    local base = spriteKey .. ".png"
+    local _, w, h = sheetInfo(tree.treeVersion, base)
+    if not w or w <= 0 or not h or h <= 0 then
+        byKey[spriteKey] = false
+        return nil
+    end
+    local built = { filename = base, coords = { [spriteKey] = { x = 0, y = 0, w = w, h = h } } }
+    byKey[spriteKey] = built
+    return built
 end
 
 local function groupSprite(group)
@@ -2355,10 +2576,19 @@ end
 
 local nodes = { }
 local allocCount = 0
+-- Checksum of the ALLOCATED node ids, feeding the `revision` returned below.
+-- See foldAllocId's note above for why it is an xor-fold and not a sum.
+local allocSum = 0
 for id, node in pairs(tree.nodes) do
-    if not node.group or not node.group.isProxy then
+    -- Match PassiveTreeView.lua's clickable/renderable-node predicate. In
+    -- particular, neither a node proxy nor a proxy group is a real target;
+    -- allowing either here created invisible hit targets over cluster graphs.
+    if node.group and node.rsq and not node.isProxy and not node.group.isProxy then
         local alloc = spec.nodes[id] and spec.nodes[id].alloc or false
-        if alloc then allocCount = allocCount + 1 end
+        if alloc then
+            allocCount = allocCount + 1
+            allocSum = foldAllocId(allocSum, id)
+        end
         local sd = node.sd
         if type(sd) ~= "table" then sd = { } end
         nodes[#nodes + 1] = {
@@ -2372,6 +2602,12 @@ for id, node in pairs(tree.nodes) do
             name = node.name or node.dn or "",
             isJewelSocket = node.isJewelSocket or false,
             isMastery = node.type == "Mastery",
+            -- C++ consumes these to reproduce legacy's per-node hit circle
+            -- without a QVariantMap scan on every mouse move.
+            rsq = node.rsq,
+            isProxy = node.isProxy or false,
+            hasGroup = node.group ~= nil,
+            groupIsProxy = node.group.isProxy or false,
             iconSprite = nodeSprite(node, alloc),
             frameSprite = nodeFrame(node, alloc),
             sd = sd,
@@ -2395,23 +2631,70 @@ for id, group in pairs(tree.groups) do
     end
 end
 
+local function resolveConnectorAtlas(cType, state)
+    local assetName = (cType or "LineConnector") .. (state or "Normal")
+    local asset = tree.assets and tree.assets[assetName]
+    if asset and asset.handle and asset.handle.fileName then
+        local fn = asset.handle.fileName:gsub("\\", "/")
+        return "file:///" .. (_SRC_DIR .. "/" .. fn):gsub("\\", "/")
+    end
+    -- Fallback: probe via sheetInfo
+    local p = sheetInfo(tree.treeVersion, assetName .. ".png")
+    if p then return "file:///" .. p end
+    local p2 = sheetInfo(tree.treeVersion, "line-3.png")
+    if p2 then return "file:///" .. p2 end
+    return nil
+end
+
 local connectors = { }
-for _, c in pairs(tree.connectors) do
+local function addConnectorRecord(c)
     local n1 = tree.nodes[c.nodeId1]
     local n2 = tree.nodes[c.nodeId2]
     if n1 and n2 then
         local a1 = spec.nodes[c.nodeId1] and spec.nodes[c.nodeId1].alloc or false
         local a2 = spec.nodes[c.nodeId2] and spec.nodes[c.nodeId2].alloc or false
         local state = (a1 and a2) and "Active" or "Normal"
+        local vert = c.vert and (c.vert[state] or c.vert["Normal"] or c) or c
+        local vertArr = {
+            tonumber(vert[1]) or n1.x, tonumber(vert[2]) or n1.y,
+            tonumber(vert[3]) or n1.x, tonumber(vert[4]) or n1.y,
+            tonumber(vert[5]) or n2.x, tonumber(vert[6]) or n2.y,
+            tonumber(vert[7]) or n2.x, tonumber(vert[8]) or n2.y,
+        }
+        local cTable = c.c or { }
+        local uvArr = {
+            tonumber(cTable[9]) or 0, tonumber(cTable[10]) or 0,
+            tonumber(cTable[11]) or 0, tonumber(cTable[12]) or 0,
+            tonumber(cTable[13]) or 0, tonumber(cTable[14]) or 0,
+            tonumber(cTable[15]) or 0, tonumber(cTable[16]) or 0,
+        }
+        local isArc = (c.type and tostring(c.type):sub(1, 5) == "Orbit") or false
         connectors[#connectors + 1] = {
             nodeId1 = c.nodeId1,
             nodeId2 = c.nodeId2,
-            type = c.type,
+            type = c.type or "LineConnector",
             ascendancyName = c.ascendancyName,
             state = state,
+            isArc = isArc,
             x1 = n1.x, y1 = n1.y,
             x2 = n2.x, y2 = n2.y,
+            vert = vertArr,
+            uv = uvArr,
+            atlas = resolveConnectorAtlas(c.type, state),
         }
+    end
+end
+
+for _, c in pairs(tree.connectors) do
+    addConnectorRecord(c)
+end
+if spec.subGraphs then
+    for _, subGraph in pairs(spec.subGraphs) do
+        if subGraph.connectors then
+            for _, c in pairs(subGraph.connectors) do
+                addConnectorRecord(c)
+            end
+        end
     end
 end
 
@@ -2447,18 +2730,121 @@ return {
     backgroundUrl = "file:///" .. (_SRC_DIR .. "/TreeData/" .. tree.treeVersion .. "/background-3.png"):gsub("\\", "/"),
     allocCount = allocCount,
     nodeCount = #nodes,
+    -- Opaque revision for the renderer's rebuild throttle. Folds every input that
+    -- changes what the canvas should draw: the tree version (a spec switch can move
+    -- geometry wholesale), the node/alloc counts, the allocated-id checksum (catches
+    -- same-count swaps) and the search serial. A ':'-joined string rather than a
+    -- packed integer so no component can overflow into another's bits.
+    revision = table.concat({
+        tostring(tree.treeVersion),
+        tostring(#nodes),
+        tostring(allocCount),
+        string.format("%.0f", allocSum),
+        tostring(_treeSearchSerial),
+    }, ":"),
 }
+end
+
+-- Phase 4: the tree the renderer is handed must be the tree the SPEC is on.
+-- Guards the regression where pob_getTreeData preferred main.tree[latestTreeVersion]
+-- unconditionally, so an older spec silently rendered latest-version geometry.
+function pob_selftestTreeVersion()
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm or not bm.spec then return { ok = false, error = "no build" } end
+    local d = pob_getTreeData()
+    if not d then return { ok = false, error = "no tree data" } end
+    local specVersion = bm.spec.treeVersion or (bm.spec.tree and bm.spec.tree.treeVersion)
+    local dataVersion = d.assetBasePath and d.assetBasePath:match("TreeData/(.+)$")
+    return {
+        ok = (specVersion ~= nil) and (dataVersion == specVersion),
+        specVersion = tostring(specVersion),
+        dataVersion = tostring(dataVersion),
+        latestVersion = tostring(latestTreeVersion),
+    }
 end
 
 function pob_selftestTreeRender()
 local d = pob_getTreeData()
 if not d then return { ok = false, error = "no tree" } end
+
+-- Sprite geometry: the direct evidence that the real ImageSize() and the UV
+-- consumption landed COHERENTLY, which is the whole risk in that change.
+--   * node.sprites[1..4] are NORMALISED UVs (PassiveTree.lua:288-297). Read as
+--     raw pixels -- which is what this seam did while ImageSize() was stubbed to
+--     1x1 -- every sub-rect collapses to a sub-pixel speck in the top-left corner
+--     of its sheet, so `sw >= 1` fails for every sprite on the tree.
+--   * De-normalising against the WRONG sheet puts the rect outside that sheet's
+--     bounds, so `sx + sw <= atlasW` fails.
+-- Both are checked against the atlas each sprite actually names, measured through
+-- the same pob.imageSize primitive (memoised C++-side, so this costs ~15 header
+-- reads, not one per node).
+local checked, bad, badSample = 0, 0, nil
+local minW, maxW = math.huge, 0
+local function checkSprite(sp)
+    if not sp or not sp.atlas then return false end
+    local path = sp.atlas:gsub("^file:///", "")
+    local aw, ah = 0, 0
+    if pob and pob.imageSize then
+        local rw, rh = pob.imageSize(path)
+        aw, ah = tonumber(rw) or 0, tonumber(rh) or 0
+    end
+    checked = checked + 1
+    local sx, sy = tonumber(sp.sx) or -1, tonumber(sp.sy) or -1
+    local sw, sh = tonumber(sp.sw) or 0, tonumber(sp.sh) or 0
+    -- +1 of slack on the far edge only: sx/sy are rounded to whole pixels, so a
+    -- rect flush against the right or bottom edge can round one pixel past it.
+    local okRect = aw > 0 and ah > 0
+        and sw >= 1 and sh >= 1
+        and sx >= 0 and sy >= 0
+        and sx + sw <= aw + 1 and sy + sh <= ah + 1
+    if not okRect then
+        bad = bad + 1
+        if not badSample then
+            badSample = string.format("%s [%s,%s %sx%s] in sheet %sx%s",
+                tostring(path), tostring(sx), tostring(sy),
+                tostring(sw), tostring(sh), tostring(aw), tostring(ah))
+        end
+    end
+    if sw < minW then minW = sw end
+    if sw > maxW then maxW = sw end
+    return true
+end
+
+local iconCount, frameCount, groupCount = 0, 0, 0
+for _, n in ipairs(d.nodes) do
+    if checkSprite(n.iconSprite) then iconCount = iconCount + 1 end
+    if checkSprite(n.frameSprite) then frameCount = frameCount + 1 end
+end
+for _, g in ipairs(d.groups) do
+    if checkSprite(g.sprite) then groupCount = groupCount + 1 end
+end
+local arcCount, lineCount, badConnectors = 0, 0, 0
+for _, c in ipairs(d.connectors) do
+    if c.isArc then arcCount = arcCount + 1 else lineCount = lineCount + 1 end
+    if not (c.vert and #c.vert == 8 and c.uv and #c.uv == 8) then
+        badConnectors = badConnectors + 1
+    end
+end
+
 return {
     ok = #d.nodes > 0 and #d.groups > 0 and #d.connectors > 0
-          and d.bounds and d.bounds.size > 0,
+          and d.bounds and d.bounds.size > 0
+          and iconCount > 0 and frameCount > 0 and groupCount > 0
+          and bad == 0 and badConnectors == 0 and arcCount > 0,
     nodeCount = #d.nodes,
     groupCount = #d.groups,
     connectorCount = #d.connectors,
+    arcCount = arcCount,
+    lineCount = lineCount,
+    badConnectors = badConnectors,
+    spriteIcons = iconCount,
+    spriteFrames = frameCount,
+    spriteGroupBgs = groupCount,
+    spriteChecked = checked,
+    spriteBad = bad,
+    spriteMinW = minW,
+    spriteMaxW = maxW,
+    spriteBadSample = badSample,
 }
 end
 
@@ -2484,6 +2870,10 @@ function pob_allocNode(id)
         return { ok = true, alreadyAlloc = true, used = select(1, spec:CountAllocNodes()) }
     end
     spec:AllocNode(node)
+    -- Legacy PassiveTreeView adds an undo state after every real allocation.
+    -- Qt has no legacy Control callback path, so this must live at the bridge
+    -- seam or tree edits silently bypass Ctrl+Z.
+    spec:AddUndoState()
     -- Trigger a recalc through the engine's canonical dirty-flag path. pob_recalculate
     -- itself pcalls BuildOutput, so a recalc hiccup can never mask the (already
     -- applied) allocation.
@@ -2502,6 +2892,9 @@ function pob_deallocNode(id)
         return { ok = true, alreadyDealloc = true, used = select(1, spec:CountAllocNodes()) }
     end
     spec:DeallocNode(node)
+    -- Same ordering as legacy (PassiveTreeView.lua:372): snapshot the result
+    -- of the cascading deallocation, not merely the clicked node.
+    spec:AddUndoState()
     bm.buildFlag = true
     pob_recalculate()
     return { ok = true, used = select(1, spec:CountAllocNodes()), alloc = node.alloc }
@@ -2540,6 +2933,7 @@ end
 -- Set the tree search string; returns the list of matching node ids (substring match
 -- on the node display name and stat-description lines). Empty string clears results.
 function pob_setTreeSearch(str)
+    _treeSearchSerial = _treeSearchSerial + 1
     treeSearchResults = { }
     local spec = main and main.modes and main.modes.BUILD and main.modes.BUILD.spec
     if not spec or not spec.tree then return treeSearchResults end
@@ -2587,24 +2981,47 @@ function pob_selftestTreeInteract()
     -- and deallocating it restores the original used count. (Allocating a far node
     -- would also allocate its whole path, which DeallocNode only partially unwinds
     -- since the trunk path nodes stay connected to the start.)
-    local targetId = nil
+    -- ALL of them, not just the first two: the first two drive the single-node
+    -- SWAP case, and the full list is searched for a sum-preserving PAIR swap
+    -- further down. Every candidate is chosen while the tree is untouched, so each
+    -- is linked to an ORIGINALLY allocated node and none depends on another being
+    -- allocated.
+    local cands = { }
     for id, node in pairs(spec.nodes) do
         if node.type == "Normal" and node.path and not node.alloc and not node.ascendancyName then
             local linkedToAlloc = false
             for _, ln in ipairs(node.linked) do
                 if ln.alloc then linkedToAlloc = true; break end
             end
-            if linkedToAlloc then
-                targetId = id
-                break
+            if linkedToAlloc and tonumber(id) then
+                cands[#cands + 1] = id
             end
         end
     end
+    -- pairs() order is arbitrary; sort so the fixture picks the same nodes on every
+    -- run and a failure is reproducible.
+    table.sort(cands, function(l, r) return tonumber(l) < tonumber(r) end)
+    local targetId, targetId2 = cands[1], cands[2]
     if not targetId then
         res.error = "no allocatable normal node found"
         return res
     end
+
+    -- The renderer rebuild throttle keys off pob_getTreeData().revision, so the
+    -- revision has to move for every edit below -- and, just as importantly, has to
+    -- come BACK to its old value when an edit is undone.
+    local function revision()
+        local d = pob_getTreeData()
+        return d and d.revision or nil
+    end
+    -- Earlier selftests intentionally mutate the fixture before arriving here;
+    -- their direct engine calls predate this bridge and do not all create undo
+    -- snapshots. Start the undo probe from a real current-state baseline, just
+    -- as PassiveSpec does after a load, so Undo is asserted against this edit.
+    spec:ResetUndo()
+    local rev0 = revision()
     local before = select(1, spec:CountAllocNodes())
+    local undoBefore = #spec.undo
     local a = pob_allocNode(targetId)
     if not a or not a.ok then
         res.error = "alloc failed"
@@ -2612,6 +3029,18 @@ function pob_selftestTreeInteract()
     end
     local after = select(1, spec:CountAllocNodes())
     res.allocOk = (after >= before + 1) and (spec.nodes[targetId].alloc == true)
+    -- The bridge must add exactly the same post-change undo snapshot that
+    -- PassiveTreeView does. Exercise Undo/Redo too: a growing undo array alone
+    -- would not prove that Ctrl+Z returns the allocation state to its predecessor.
+    res.undoAllocSnapshotOk = (#spec.undo == undoBefore + 1)
+    spec:Undo()
+    res.undoAllocRestoresOk = (not spec.nodes[targetId].alloc)
+                              and (select(1, spec:CountAllocNodes()) == before)
+    spec:Redo()
+    res.redoAllocRestoresOk = spec.nodes[targetId].alloc
+                              and (select(1, spec:CountAllocNodes()) == after)
+    local revAlloc = revision()
+    local undoBeforeDealloc = #spec.undo
     local d = pob_deallocNode(targetId)
     if not d or not d.ok then
         res.error = "dealloc failed"
@@ -2619,12 +3048,130 @@ function pob_selftestTreeInteract()
     end
     local restored = select(1, spec:CountAllocNodes())
     res.deallocOk = (restored == before) and (spec.nodes[targetId].alloc == false)
+    res.undoDeallocSnapshotOk = (#spec.undo == undoBeforeDealloc + 1)
+    local revDealloc = revision()
+    res.revAllocOk = (rev0 ~= nil) and (revAlloc ~= nil) and (revAlloc ~= rev0)
+    res.revRestoreOk = (revDealloc == rev0)
+
+    -- The case the old `allocCount * 1000003 + nodeCount` signature could not see:
+    -- swap one allocated node for another. Node and alloc counts are IDENTICAL
+    -- either side of the swap, so anything counting nodes reports "no change" and
+    -- the canvas keeps painting the node that is no longer allocated.
+    if targetId2 then
+        pob_allocNode(targetId)
+        local revA = revision()
+        local countA = select(1, spec:CountAllocNodes())
+        pob_deallocNode(targetId)
+        pob_allocNode(targetId2)
+        local revB = revision()
+        local countB = select(1, spec:CountAllocNodes())
+        res.swapCountsEqual = (countA == countB)   -- the collision precondition
+        res.revSwapOk = (revA ~= nil) and (revB ~= nil) and (revA ~= revB)
+        pob_deallocNode(targetId2)
+    else
+        -- Only one allocatable node on this tree: nothing to swap, so do not fail
+        -- the gate on a case the fixture cannot construct.
+        res.swapCountsEqual = true
+        res.revSwapOk = true
+        res.swapSkipped = true
+    end
+
+    -- The harder case, and the one a merely-commutative checksum cannot see: swap
+    -- TWO allocated nodes for two others whose ids have the SAME SUM. Any linear
+    -- accumulator -- including a sum of ids scattered through a constant, which is
+    -- what this checksum used to be -- collides here by construction, because
+    -- sum((id*K) % M) % M == (K * sum(id)) % M. A single-node swap does NOT cover
+    -- this: it only needs the checksum to be id-sensitive, not non-linear.
+    local pairA, pairB = nil, nil
+    do
+        local n = math.min(#cands, 220)     -- O(n^2) pair scan; 220 -> ~24k pairs
+        local bySum = { }
+        for i = 1, n - 1 do
+            for j = i + 1, n do
+                local a, b = cands[i], cands[j]
+                local sum = tonumber(a) + tonumber(b)
+                local prev = bySum[sum]
+                if prev then
+                    -- Disjoint pairs only: sharing a node makes the two states
+                    -- differ by one id, which is the single-swap case again.
+                    if prev[1] ~= a and prev[1] ~= b and prev[2] ~= a and prev[2] ~= b then
+                        pairA, pairB = prev, { a, b }
+                        break
+                    end
+                else
+                    bySum[sum] = { a, b }
+                end
+            end
+            if pairA then break end
+        end
+    end
+    if pairA then
+        local function allocPair(pr)
+            local c0 = select(1, spec:CountAllocNodes())
+            local okA = pob_allocNode(pr[1])
+            local okB = pob_allocNode(pr[2])
+            local c1 = select(1, spec:CountAllocNodes())
+            return (okA and okA.ok and okB and okB.ok and c1 == c0 + 2) and c1 or nil
+        end
+        local countA = allocPair(pairA)
+        local revA = countA and revision()
+        pob_deallocNode(pairA[1]); pob_deallocNode(pairA[2])
+        local countB = allocPair(pairB)
+        local revB = countB and revision()
+        pob_deallocNode(pairB[1]); pob_deallocNode(pairB[2])
+        if countA and countB then
+            res.swap2SumsEqual = (tonumber(pairA[1]) + tonumber(pairA[2]))
+                                 == (tonumber(pairB[1]) + tonumber(pairB[2]))
+            res.swap2CountsEqual = (countA == countB)
+            res.swap2Ok = (revA ~= nil) and (revB ~= nil) and (revA ~= revB)
+            res.swap2Restored = (select(1, spec:CountAllocNodes()) == before)
+        else
+            -- Allocating a pair did not add exactly two nodes (a path dragged
+            -- extra nodes in), so the precondition does not hold on this fixture.
+            -- Say so rather than asserting on a state we did not construct.
+            res.swap2Skipped = true
+        end
+    else
+        res.swap2Skipped = true
+    end
+    if res.swap2Skipped then
+        res.swap2SumsEqual, res.swap2CountsEqual = true, true
+        res.swap2Ok, res.swap2Restored = true, true
+    end
+
+    -- Direct, fixture-independent proof of the same property: the id sets below are
+    -- sum-preserving (and the third is also sum-of-squares-preserving), so every
+    -- linear commutative checksum collides on them. This runs even when the live
+    -- tree cannot construct a sum-preserving pair swap.
+    local function chk(ids)
+        local acc = 0
+        for _, id in ipairs(ids) do acc = foldAllocId(acc, id) end
+        return acc
+    end
+    res.checksumNonLinearOk = (chk({ 100, 201 }) ~= chk({ 101, 200 }))
+                              and (chk({ 5000, 5003 }) ~= chk({ 5001, 5002 }))
+                              and (chk({ 1, 5, 6 }) ~= chk({ 2, 3, 7 }))
+    -- ...and still order-independent, which is what pairs() over tree.nodes needs.
+    res.checksumCommutativeOk = (chk({ 7, 11, 13 }) == chk({ 13, 7, 11 }))
+                                and (chk({ 41, 97, 512 }) == chk({ 512, 41, 97 }))
+
     pob_setTreeSearch("life")
     local results = pob_getTreeSearchResults()
     res.searchOk = (type(results) == "table" and #results > 0)
+    local revSearch = revision()
+    -- Search state was entirely absent from the old signature, so a search
+    -- highlight never repainted until some unrelated edit moved the counts.
+    res.revSearchOk = (revSearch ~= nil) and (revSearch ~= revDealloc)
     pob_setTreeSearch("")
     res.searchClearOk = (#pob_getTreeSearchResults() == 0)
-    res.ok = not not (res.allocOk and res.deallocOk and res.searchOk and res.searchClearOk)
+    res.ok = not not (res.allocOk and res.deallocOk and res.searchOk and res.searchClearOk
+                      and res.undoAllocSnapshotOk and res.undoAllocRestoresOk
+                      and res.redoAllocRestoresOk and res.undoDeallocSnapshotOk
+                      and res.revAllocOk and res.revRestoreOk and res.revSwapOk
+                      and res.swapCountsEqual and res.revSearchOk
+                      and res.swap2Ok and res.swap2SumsEqual and res.swap2CountsEqual
+                      and res.swap2Restored
+                      and res.checksumNonLinearOk and res.checksumCommutativeOk)
     return res
 end
 
@@ -3004,4 +3551,1154 @@ function pob_selftestAboutContent()
     res.helpSectionCount = #(c.helpSections or {})
     res.ok = not not (res.changeCount > 0 and res.helpCount > 0 and res.helpSectionCount > 0)
     return res
+end
+
+-- ============================================================================
+-- PHASE 3 -- Build Shell bridge (top bar, side bar state, save/load lifecycle).
+--
+-- THE ONE THING TO UNDERSTAND ABOUT THIS SECTION: there is no frame loop.
+-- The Qt host deliberately removed the 30ms pump (main.cpp), so everything
+-- buildMode:OnFrame (Build.lua:1162) used to do EVERY FRAME is dead code here:
+--   * self.unsaved            (Build.lua:1254)  -> pob_getUnsaved()
+--   * RefreshSkillSelectControls (Build.lua:1237)
+--   * class/ascend dropdown resync (Build.lua:1207-1211) -> pob_getClassList()
+--   * the Ctrl-key hotkey handler (Build.lua:1173-1204) -> QML Shortcuts
+-- Each is ported to an explicit host call below. Do NOT reintroduce a frame
+-- pump to "fix" any of them -- that re-creates the GUI freeze Phase 0 removed.
+-- ============================================================================
+
+local function pob_buildMode()
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm or not bm.spec then return nil end
+    return bm
+end
+
+-- Real unsaved state. Legacy ORs the ten modFlags once per frame into
+-- bm.unsaved (Build.lua:1254); with no frame loop that field is permanently
+-- stale, which is why SaveLoadModel's isDirty has always been wrong. We compute
+-- it on demand AND write it back to bm.unsaved, because unmodified legacy code
+-- still reads that field -- buildMode:CanExit (Build.lua:945) and
+-- buildMode:Shutdown's dev autosave (Build.lua:958) both branch on it.
+function pob_getUnsaved()
+    local bm = pob_buildMode()
+    if not bm then return { unsaved = false, flags = { } } end
+    local flags = {
+        build      = bm.modFlag or false,
+        notes      = (bm.notesTab and bm.notesTab.modFlag) or false,
+        party      = (bm.partyTab and bm.partyTab.modFlag) or false,
+        config     = (bm.configTab and bm.configTab.modFlag) or false,
+        tree       = (bm.treeTab and bm.treeTab.modFlag) or false,
+        treeSearch = (bm.treeTab and bm.treeTab.searchFlag) or false,
+        spec       = (bm.spec and bm.spec.modFlag) or false,
+        skills     = (bm.skillsTab and bm.skillsTab.modFlag) or false,
+        items      = (bm.itemsTab and bm.itemsTab.modFlag) or false,
+        calcs      = (bm.calcsTab and bm.calcsTab.modFlag) or false,
+    }
+    local unsaved = false
+    for _, v in pairs(flags) do
+        if v then unsaved = true break end
+    end
+    bm.unsaved = unsaved
+    return { unsaved = unsaved, flags = flags }
+end
+
+-- Whole top-bar scalar payload in one call.
+--
+-- EstimatePlayerProgress (Build.lua:890) is NOT a pure getter, which is why it
+-- is called exactly once here rather than from any QML binding:
+--   * in auto-level mode it MUTATES bm.characterLevel and calls
+--     configTab:BuildModList() (Build.lua:901-905);
+--   * it appends the three point-overflow strings into
+--     bm.controls.warnings.lines via InsertIfNew (Build.lua:916-918) -- a list
+--     nothing in the Qt host ever clears, so without the wipe below the
+--     warnings would accumulate forever across calls.
+-- Legacy clears that same list at the top of RefreshStatList (Build.lua:1770);
+-- we do the same, then read the overflow lines straight back out rather than
+-- re-deriving the three conditions.
+function pob_getShellState()
+    local bm = pob_buildMode()
+    if not bm then return nil end
+    pob_recalculate()
+
+    if bm.controls and bm.controls.warnings then bm.controls.warnings.lines = { } end
+    local pointStr, pointTooltip = bm:EstimatePlayerProgress()
+    local pointWarnings = { }
+    if bm.controls and bm.controls.warnings then
+        for _, line in ipairs(bm.controls.warnings.lines) do
+            pointWarnings[#pointWarnings + 1] = line
+        end
+    end
+
+    local used, asc, secondaryAsc = bm.spec:CountAllocNodes()
+    local extra = (bm.calcsTab and bm.calcsTab.mainOutput and bm.calcsTab.mainOutput.ExtraPoints) or 0
+    local unsaved = pob_getUnsaved()
+
+    return {
+        buildName      = bm.buildName or "",
+        buildPath      = main.buildPath or "",
+        dbFileName     = bm.dbFileName or "",
+        dbFileSubPath  = bm.dbFileSubPath or "",
+        unsaved        = unsaved.unsaved,
+        canSave        = true,
+        targetVersion  = bm.targetVersion or "",
+        needsConversion = bm.targetVersion == nil,
+        level          = bm.characterLevel or 1,
+        levelAutoMode  = bm.characterLevelAutoMode or false,
+        act            = tostring(bm.Act or ""),
+        points = {
+            used = used, usedMax = 99 + 23 + extra,
+            asc = asc, ascMax = 8,
+            secondary = secondaryAsc or 0, secondaryMax = 8,
+            str = pointStr, tooltip = pointTooltip,
+            warnings = pointWarnings,
+        },
+        classId                 = bm.spec.curClassId or 0,
+        className               = bm.spec.curClassName or "",
+        ascendClassId           = bm.spec.curAscendClassId or 0,
+        ascendClassName         = bm.spec.curAscendClassName or "",
+        secondaryAscendClassId  = bm.spec.curSecondaryAscendClassId or 0,
+        sideBarCollapsed        = main.sideBarCollapsed or false,
+        showWarnings            = main.showWarnings ~= false,
+        devMode                 = (launch and launch.devMode) or false,
+        outputRevision          = bm.outputRevision or 0,
+    }
+end
+
+-- Class / ascendancy dropdown data. Data port of buildMode:UpdateClassDropdowns
+-- (Build.lua:1446) + UpdateSecondaryAscendancyDropdown (Build.lua:1115).
+-- Both legacy functions pairs()-iterate their source table and then table.sort
+-- by label; keeping that trailing sort is load-bearing, because Lua pairs()
+-- order is unstable and an unsorted list would reshuffle the dropdown between
+-- runs (the same class of bug as the known modeNames() instability).
+function pob_getClassList()
+    local bm = pob_buildMode()
+    if not bm then return nil end
+    local treeVersion = bm.spec.treeVersion or latestTreeVersion
+    local tree = main.tree and main.tree[treeVersion]
+    if not tree then return nil end
+
+    local classes = { }
+    for classId, class in pairs(tree.classes) do
+        local ascendancies = { }
+        for i = 0, #class.classes do
+            local ascendClass = class.classes[i]
+            if ascendClass then
+                ascendancies[#ascendancies + 1] = { ascendClassId = i, label = ascendClass.name }
+            end
+        end
+        classes[#classes + 1] = { classId = classId, label = class.name, ascendancies = ascendancies }
+    end
+    table.sort(classes, function(a, b) return a.label < b.label end)
+
+    -- Secondary ascendancies: three ids are "legacy" and are hidden unless the
+    -- build is currently sitting on one (Build.lua:1120-1127,1138).
+    local legacyAlternateAscendancyIds = { Warden = true, Warlock = true, Primalist = true }
+    local selection = bm.spec.curSecondaryAscendClassId or 0
+    local altAscendancies = bm.spec.tree and bm.spec.tree.alternate_ascendancies
+    local secondary = { { ascendClassId = 0, label = "None" } }
+    if altAscendancies then
+        local sortable = { }
+        for ascendClassId, ascendClass in pairs(altAscendancies) do
+            if ascendClass and ascendClass.id then
+                if not legacyAlternateAscendancyIds[ascendClass.id] or ascendClassId == selection then
+                    sortable[#sortable + 1] = { ascendClassId = ascendClassId, label = ascendClass.name }
+                end
+            end
+        end
+        table.sort(sortable, function(a, b) return a.label < b.label end)
+        for _, entry in ipairs(sortable) do secondary[#secondary + 1] = entry end
+    end
+
+    return {
+        classes = classes,
+        secondaryAscendancies = secondary,
+        curClassId = bm.spec.curClassId or 0,
+        curAscendClassId = bm.spec.curAscendClassId or 0,
+        curSecondaryAscendClassId = selection,
+        secondaryEnabled = #secondary > 1,
+    }
+end
+
+local function pob_applyClass(bm, classId)
+    bm.spec:SelectClass(classId)
+    bm.spec:AddUndoState()
+    bm.buildFlag = true
+    pob_recalculate()
+end
+
+-- Change class. Ports the classDrop callback (Build.lua:262-285).
+--
+-- mode = "check"   : apply only if it is free (no allocated nodes, or the new
+--                    class start is already connected); otherwise report
+--                    needsConfirm and change NOTHING.
+--        "force"   : apply, accepting the tree reset (legacy "Continue").
+--        "connect" : try spec:ConnectToClass first (legacy "Connect Path");
+--                    apply only if that succeeded.
+--
+-- canConnect is reported as true whenever a confirm is needed, matching legacy,
+-- which always offers the button and lets ConnectToClass fail silently. We do
+-- NOT probe it up front: ConnectToClass mutates the tree, so a speculative call
+-- to find out whether it would work is itself the side effect we are guarding
+-- against. The "connect" result reports connected=false if it did not take.
+function pob_setClass(classId, mode)
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    mode = mode or "check"
+
+    local label = ""
+    local treeVersion = bm.spec.treeVersion or latestTreeVersion
+    local tree = main.tree and main.tree[treeVersion]
+    if tree and tree.classes and tree.classes[classId] then label = tree.classes[classId].name end
+
+    if classId == bm.spec.curClassId then
+        return { ok = true, applied = false, needsConfirm = false, label = label }
+    end
+
+    if mode == "force" then
+        pob_applyClass(bm, classId)
+        return { ok = true, applied = true, needsConfirm = false, label = label,
+                 outputRevision = bm.outputRevision or 0 }
+    elseif mode == "connect" then
+        local connected = bm.spec:ConnectToClass(classId) and true or false
+        if connected then pob_applyClass(bm, classId) end
+        return { ok = true, applied = connected, connected = connected,
+                 needsConfirm = false, label = label,
+                 outputRevision = bm.outputRevision or 0 }
+    end
+
+    if bm.spec:CountAllocNodes() == 0 or bm.spec:IsClassConnected(classId) then
+        pob_applyClass(bm, classId)
+        return { ok = true, applied = true, needsConfirm = false, label = label,
+                 outputRevision = bm.outputRevision or 0 }
+    end
+    return { ok = true, applied = false, needsConfirm = true, label = label, canConnect = true }
+end
+
+function pob_setAscendClass(ascendClassId)
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    bm.spec:SelectAscendClass(ascendClassId)
+    bm.spec:AddUndoState()
+    bm.buildFlag = true
+    pob_recalculate()
+    return { ok = true, ascendClassId = bm.spec.curAscendClassId or 0,
+             outputRevision = bm.outputRevision or 0 }
+end
+
+function pob_setSecondaryAscendClass(ascendClassId)
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    bm.spec:SelectSecondaryAscendClass(ascendClassId)
+    bm.spec:AddUndoState()
+    bm.buildFlag = true
+    pob_recalculate()
+    return { ok = true, secondaryAscendClassId = bm.spec.curSecondaryAscendClassId or 0,
+             outputRevision = bm.outputRevision or 0 }
+end
+
+-- Level edit. Mirrors the characterLevel EditControl callback (Build.lua:225-232)
+-- exactly, including the clamp to 1..100 and the implicit switch to Manual.
+function pob_setCharacterLevel(level)
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    level = math.min(math.max(tonumber(level) or 1, 1), 100)
+    bm.characterLevel = level
+    bm.configTab:BuildModList()
+    bm.modFlag = true
+    bm.buildFlag = true
+    bm.characterLevelAutoMode = false
+    pob_recalculate()
+    return { ok = true, level = bm.characterLevel, auto = false,
+             outputRevision = bm.outputRevision or 0 }
+end
+
+-- Auto/Manual toggle (Build.lua:218-224). In auto mode the level is re-derived
+-- from allocated points by EstimatePlayerProgress, so call that afterwards to
+-- settle bm.characterLevel before reporting it.
+function pob_setLevelAutoMode(autoMode)
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    bm.characterLevelAutoMode = autoMode and true or false
+    bm.configTab:BuildModList()
+    bm.modFlag = true
+    bm.buildFlag = true
+    pob_recalculate()
+    if bm.characterLevelAutoMode then
+        if bm.controls and bm.controls.warnings then bm.controls.warnings.lines = { } end
+        bm:EstimatePlayerProgress()
+    end
+    return { ok = true, auto = bm.characterLevelAutoMode, level = bm.characterLevel or 1,
+             outputRevision = bm.outputRevision or 0 }
+end
+
+-- Sidebar collapse. Legacy keeps the flag in two places: main.sideBarCollapsed
+-- is what Settings.xml persists (Main.lua:107,784), buildMode.sideBarCollapsed
+-- is what the layout reads (Build.lua:80,1240). Build:Init copies the former to
+-- the latter, so both must be written or the state is lost on the next save.
+function pob_setSideBarCollapsed(collapsed)
+    collapsed = collapsed and true or false
+    main.sideBarCollapsed = collapsed
+    local bm = main and main.modes and main.modes.BUILD
+    if bm then bm.sideBarCollapsed = collapsed end
+    return { ok = true, collapsed = collapsed }
+end
+
+-- ---------------------------------------------------------------------------
+-- Save / lifecycle
+-- ---------------------------------------------------------------------------
+
+-- THE real save. Recalc-gated port of buildMode:SaveDBFile (Build.lua:1994).
+--
+-- Why this exists when pob_saveBuild already did: buildMode:Save (Build.lua:1036)
+-- denormalizes <PlayerStat>/<MinionStat>/<FullDPSSkill> straight out of
+-- calcsTab.mainOutput. If buildFlag is dirty those come from the PREVIOUS pass;
+-- if mainEnv is nil it throws outright -- and pob_getBuildXML's pcall turned
+-- that into a silent nil. Third-party sites that read a PoB export depend on
+-- those denormalized stats, so a save that quietly drops them is worse than a
+-- save that fails loudly. Hence: recalculate first, and always return a
+-- structured {ok=false, error=...} rather than nil.
+function pob_saveDBFile(path)
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+
+    pob_recalculate()
+    local ct = bm.calcsTab
+    if not ct or not ct.mainEnv or not ct.mainOutput then
+        return { ok = false, error = "no calc output; save aborted" }
+    end
+
+    local target = path
+    if target == nil or target == "" then target = bm.dbFileName end
+    if not target or target == "" then
+        return { ok = false, error = "no file name; use Save As" }
+    end
+
+    -- Save-As: adopt the new location so subsequent plain Saves go there, and
+    -- keep dbFileSubPath consistent with the same slicing legacy uses
+    -- (Build.lua:66). Everything is normalised to forward slashes first --
+    -- a separator mismatch against main.buildPath silently yields a garbage
+    -- subPath, which then corrupts the Save-As folder default.
+    if path and path ~= "" and path ~= bm.dbFileName then
+        local norm = path:gsub("\\", "/")
+        local base = (main.buildPath or ""):gsub("\\", "/")
+        local name = norm:match("([^/]+)%.xml$") or norm:match("([^/]+)$") or "Unnamed build"
+        bm.dbFileName = norm
+        bm.buildName = name
+        if #base > 0 and norm:sub(1, #base) == base then
+            bm.dbFileSubPath = norm:sub(#base + 1, -#name - 5)
+        else
+            bm.dbFileSubPath = ""
+        end
+        target = norm
+    end
+
+    local xmlText = bm:SaveDB(target)
+    if not xmlText then
+        return { ok = false, error = "SaveDB failed to compose XML" }
+    end
+    local file = io.open(target, "w+")
+    if not file then
+        return { ok = false, error = "could not open for writing: " .. tostring(target) }
+    end
+    file:write(xmlText)
+    file:close()
+
+    bm.actionOnSave = nil
+    bm:ResetModFlags()
+    pob_getUnsaved()
+
+    local playerStatCount = select(2, xmlText:gsub("<PlayerStat ", ""))
+    local minionStatCount = select(2, xmlText:gsub("<MinionStat ", ""))
+    local fullDPSSkillCount = select(2, xmlText:gsub("<FullDPSSkill ", ""))
+    return {
+        ok = true, path = target, bytes = #xmlText,
+        playerStatCount = playerStatCount,
+        minionStatCount = minionStatCount,
+        fullDPSSkillCount = fullDPSSkillCount,
+        outputRevision = bm.outputRevision or 0,
+    }
+end
+
+-- Keep the Phase-1 name working, routed through the gated path above so no
+-- caller can reach the ungated one any more.
+function pob_saveBuild(filename)
+    local r = pob_saveDBFile(filename)
+    return r and r.ok or false
+end
+
+-- Save-As support. Legacy filters the typed name through the Lua character
+-- class [\/:%*%?"<>|%c] (Build.lua:1362) -- note %c is CONTROL CHARACTERS, not
+-- a literal "c" -- and enables the Save button only when io.open(newFileName,
+-- "r") returns nil, i.e. it refuses to overwrite (Build.lua:1352-1358).
+function pob_sanitizeBuildName(name, subPath)
+    -- The backslash MUST be doubled: "\/" is not a valid Lua escape sequence and
+    -- fails the whole host bootstrap at load time (silently, as "engine.init
+    -- FAILED" with no Lua error surfaced by the capture harness).
+    name = tostring(name or ""):gsub('[\\/:%*%?"<>|%c]', "-")
+    local base = (main.buildPath or ""):gsub("\\", "/")
+    local sub = (subPath or ""):gsub("\\", "/")
+    if #sub > 0 and sub:sub(-1) ~= "/" then sub = sub .. "/" end
+    local fullPath = base .. sub .. name .. ".xml"
+    local exists = false
+    if #name > 0 then
+        local f = io.open(fullPath, "r")
+        if f then exists = true f:close() end
+    end
+    return {
+        name = name,
+        valid = name:match("%S") ~= nil,
+        exists = exists,
+        fullPath = fullPath,
+    }
+end
+
+function pob_closeBuild()
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm then return { ok = false, error = "no build" } end
+    bm:CloseBuild()
+    return { ok = true, mode = main.mode or "LIST" }
+end
+
+-- ---------------------------------------------------------------------------
+-- Version conversion
+--
+-- This is the one LIVE HANG in the current shell. Build:Init (Build.lua:104-108)
+-- sets self.targetVersion = nil and RETURNS EARLY when a build's targetVersion
+-- differs from liveTargetVersion, expecting OpenConversionPopup's SimpleGraphic
+-- buttons to drive the recovery. Those controls are inert under QML, so the app
+-- lands in a half-initialised BUILD mode that buildMode:OnFrame then refuses to
+-- advance (Build.lua:1164-1167) -- with no way out. These two functions are the
+-- QML-side replacement for that popup.
+-- ---------------------------------------------------------------------------
+function pob_getConversionState()
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm then return { needsConversion = false } end
+    local liveDisplay = liveTargetVersion
+    if treeVersions and treeVersions[latestTreeVersion] then
+        liveDisplay = treeVersions[latestTreeVersion].display or liveTargetVersion
+    end
+    return {
+        needsConversion = (bm.buildName ~= nil and bm.targetVersion == nil),
+        buildVersion = bm.dbFileName and "" or "",
+        liveVersion = liveTargetVersion or "",
+        liveDisplay = liveDisplay or "",
+        dbFileName = bm.dbFileName or "",
+        buildName = bm.buildName or "",
+    }
+end
+
+function pob_convertBuild()
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm then return { ok = false, error = "no build" } end
+    if bm.targetVersion ~= nil then
+        return { ok = true, converted = false, targetVersion = bm.targetVersion }
+    end
+    -- Guard the dev autosave: Init returned before setting abortSave, so
+    -- Shutdown would otherwise be free to write a half-initialised build over
+    -- the user's file (Build.lua:955-969). Legacy has the same hole; we don't.
+    bm.abortSave = true
+    bm:Shutdown()
+    bm:Init(bm.dbFileName, bm.buildName, nil, true)
+    if bm.targetVersion == nil then
+        return { ok = false, error = "conversion did not take" }
+    end
+    return { ok = true, converted = true, targetVersion = bm.targetVersion,
+             hasSpec = bm.spec ~= nil }
+end
+
+-- ---------------------------------------------------------------------------
+-- Phase 3 selftests. Every one restores what it touches -- the suite is a
+-- single ordered run over one shared engine, and later checks assume earlier
+-- ones left state alone.
+-- ---------------------------------------------------------------------------
+
+function pob_selftestUnsaved()
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+
+    local savedTreeFlag = bm.treeTab.modFlag
+    local savedBmFlag = bm.modFlag
+    local savedUnsavedField = bm.unsaved
+
+    bm:ResetModFlags()
+    local clean = pob_getUnsaved()
+
+    -- Prove the OLD read was wrong: park a deliberately false value in the
+    -- OnFrame-owned field and show a real dirty flag does not move it.
+    bm.unsaved = false
+    bm.treeTab.modFlag = true
+    local dirty = pob_getUnsaved()
+    local staleFieldWouldHaveLied = (dirty.unsaved == true)
+
+    bm.treeTab.modFlag = savedTreeFlag
+    bm.modFlag = savedBmFlag
+    bm.unsaved = savedUnsavedField
+
+    return {
+        ok = (clean.unsaved == false) and (dirty.unsaved == true)
+             and (dirty.flags.tree == true) and staleFieldWouldHaveLied,
+        clean = clean.unsaved,
+        dirty = dirty.unsaved,
+        flagCount = 10,
+    }
+end
+
+function pob_selftestShellState()
+    local d = pob_getShellState()
+    if not d then return { ok = false, error = "no shell state" } end
+    local cl = pob_getClassList()
+    if not cl then return { ok = false, error = "no class list" } end
+
+    -- The points string is the legacy format "%s%3d / %3d   %s%d / %d"; assert
+    -- it actually carries the two counts rather than an empty/garbage value.
+    local formatOk = d.points.str ~= nil and d.points.str:find("/") ~= nil
+    local classOk = cl.curClassId == d.classId
+    local sortedOk = true
+    for i = 2, #cl.classes do
+        if cl.classes[i - 1].label > cl.classes[i].label then sortedOk = false break end
+    end
+
+    return {
+        ok = formatOk and classOk and sortedOk and d.level >= 1 and d.level <= 100,
+        level = d.level,
+        classCount = #cl.classes,
+        secondaryCount = #cl.secondaryAscendancies,
+        pointsStr = d.points.str,
+        outputRevision = d.outputRevision,
+    }
+end
+
+function pob_selftestShellClass()
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+
+    local origClassId = bm.spec.curClassId
+    local origAscend = bm.spec.curAscendClassId
+    local cl = pob_getClassList()
+    if not cl then return { ok = false, error = "no class list" } end
+
+    -- Pick some class that is not the current one.
+    local otherId = nil
+    for _, c in ipairs(cl.classes) do
+        if c.classId ~= origClassId then otherId = c.classId break end
+    end
+    if not otherId then return { ok = false, error = "only one class" } end
+
+    -- Allocate a node so the tree is non-empty and the confirm path is live.
+    local candidateId = nil
+    for id, node in pairs(bm.spec.nodes) do
+        if node.type == "Normal" and node.path and not node.alloc and not node.ascendancyName then
+            for _, linked in ipairs(node.linked) do
+                if linked.alloc then candidateId = id break end
+            end
+        end
+        if candidateId then break end
+    end
+    local allocated = false
+    if candidateId then
+        bm.spec:AllocNode(bm.spec.nodes[candidateId], nil)
+        allocated = bm.spec.nodes[candidateId].alloc and true or false
+    end
+
+    local before = bm.spec:CountAllocNodes()
+    local checkResult = pob_setClass(otherId, "check")
+    local unchanged = (bm.spec.curClassId == origClassId)
+    -- needsConfirm is only expected when the tree actually has allocations that
+    -- the target class start is not already connected to.
+    local confirmExpected = allocated and not bm.spec:IsClassConnected(otherId)
+
+    local forceResult = pob_setClass(otherId, "force")
+    local switched = (bm.spec.curClassId == otherId)
+    local after = bm.spec:CountAllocNodes()
+
+    -- Level clamp + auto mode, on the way back.
+    local origLevel = bm.characterLevel
+    local origAuto = bm.characterLevelAutoMode
+    local clamped = pob_setCharacterLevel(150)
+    local clampOk = (clamped.level == 100)
+
+    -- Restore everything.
+    pob_setCharacterLevel(origLevel)
+    bm.characterLevelAutoMode = origAuto
+    pob_setClass(origClassId, "force")
+    if allocated and bm.spec.nodes[candidateId] and bm.spec.nodes[candidateId].alloc then
+        bm.spec:DeallocNode(bm.spec.nodes[candidateId])
+    end
+    bm.buildFlag = true
+    pob_recalculate()
+
+    return {
+        ok = (checkResult.ok and unchanged and switched and clampOk
+              and (not confirmExpected or checkResult.needsConfirm == true)),
+        needsConfirm = checkResult.needsConfirm or false,
+        confirmExpected = confirmExpected,
+        switched = switched,
+        allocBefore = before,
+        allocAfter = after,
+        clampOk = clampOk,
+        restoredClassId = bm.spec.curClassId,
+    }
+end
+
+function pob_selftestSaveDBFile()
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+
+    local origDbFileName = bm.dbFileName
+    local origBuildName = bm.buildName
+    local origSubPath = bm.dbFileSubPath
+
+    -- NEVER name a test fixture "~~temp~~": Build:Init unconditionally
+    -- os.remove()s that filename (Build.lua:424-431).
+    local target = (main.buildPath or "") .. "~~phase3-savegate~~.xml"
+    local r = pob_saveDBFile(target)
+    if not r or not r.ok then
+        bm.dbFileName, bm.buildName, bm.dbFileSubPath = origDbFileName, origBuildName, origSubPath
+        return { ok = false, error = "save failed", detail = r }
+    end
+
+    local f = io.open(target, "r")
+    local contents = f and f:read("*a") or ""
+    if f then f:close() end
+    os.remove(target)
+
+    local hasPlayerStat = contents:find("<PlayerStat ", 1, true) ~= nil
+    local hasBuildAttribs = contents:find("level=", 1, true) ~= nil
+                            and contents:find("className=", 1, true) ~= nil
+    local cleanAfterSave = (pob_getUnsaved().unsaved == false)
+
+    bm.dbFileName, bm.buildName, bm.dbFileSubPath = origDbFileName, origBuildName, origSubPath
+
+    return {
+        ok = hasPlayerStat and hasBuildAttribs and cleanAfterSave and r.bytes > 0,
+        bytes = r.bytes,
+        playerStatCount = r.playerStatCount,
+        fullDPSSkillCount = r.fullDPSSkillCount,
+        hasPlayerStat = hasPlayerStat,
+        cleanAfterSave = cleanAfterSave,
+    }
+end
+
+-- Part 3.3: prove the FULL savers registry (Config/Notes/Party/Tree/TreeView/
+-- Items/Skills/Calcs/Import + legacy Spec) round-trips REAL per-tab state
+-- through SaveDB -> disk-shaped XML text -> LoadDB, not just the buildName
+-- string pob_selftestSaveLoad already covers. Build.lua:651-678 (unmodified
+-- legacy code) defers Tree/Spec loading until every other section has loaded,
+-- then sweeps PostLoad -- this is the load-bearing evidence that sequence
+-- actually reconstructs every tab correctly under the Qt host, not just that
+-- it doesn't crash. Builds up one real mutation per major saver (a tree
+-- alloc, an item, an active-skill socket group, a config option), verifies
+-- each survives the round trip, then returns to a fresh Unnamed build so a
+-- check appended after this one in the suite doesn't inherit a probe build.
+--
+-- characterLevel is pinned to a fixed value with auto-mode OFF for the
+-- round trip: in auto mode, `buildMode:OnFrame` -> `ProcessControlsInput`
+-- (Build.lua:1205) still walks the legacy (Qt-invisible) Control tree every
+-- frame, and the point-display control's width function calls
+-- EstimatePlayerProgress() (Build.lua:198), which MUTATES characterLevel to
+-- match current point requirements as a side effect of what looks like a
+-- pure layout query. That's legitimate legacy behaviour (confirmed by
+-- instrumenting a real run: 128 calls during one reload's Init/OnFrame), but
+-- it means auto-mode level is a derived value that legitimately drifts
+-- between "before" and "after" here -- pinning to manual mode makes this a
+-- fair test of round-trip fidelity instead of colliding with that feature.
+function pob_selftestSaveLoadRoundTrip()
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+
+    -- Tree: pick a Normal node directly linked to the trunk, same fixture
+    -- pattern as pob_selftestTreeInteract, so allocating it adds exactly one
+    -- node (not a whole path) -- a precise, checkable delta.
+    local targetId = nil
+    for id, node in pairs(bm.spec.nodes) do
+        if node.type == "Normal" and node.path and not node.alloc and not node.ascendancyName then
+            local linkedToAlloc = false
+            for _, ln in ipairs(node.linked) do
+                if ln.alloc then linkedToAlloc = true break end
+            end
+            if linkedToAlloc then targetId = id break end
+        end
+    end
+    if not targetId then return { ok = false, error = "no allocatable node found" } end
+    local a = pob_allocNode(targetId)
+    if not a or not a.ok then return { ok = false, error = "alloc failed" } end
+
+    local itemId = pob_addItemFromRaw("Rarity: Rare\nRound Trip Ring\nGold Ring\nQuality: 0\nSockets: R-B\n")
+    if not itemId then
+        pob_deallocNode(targetId)
+        return { ok = false, error = "item add failed" }
+    end
+
+    -- Active-skill socket group, set as THE main skill and flagged for Full
+    -- DPS (SkillsTab.lua:208's includeInFullDPS) so calcsTab.mainOutput.
+    -- SkillDPS has something to denormalize into <FullDPSSkill> on save.
+    local groupId = pob_addSocketGroupWithGem("Round Trip Group", "Fireball")
+    if not groupId then
+        pob_deleteItem(itemId)
+        pob_deallocNode(targetId)
+        return { ok = false, error = "skill add failed" }
+    end
+    bm.skillsTab.socketGroupList[groupId].includeInFullDPS = true
+    bm.mainSocketGroup = groupId
+    bm.buildFlag = true
+    pob_recalculate()
+
+    bm.characterLevelAutoMode = false
+    bm.characterLevel = 90
+
+    local configTarget = nil
+    for _, o in ipairs(pob_getConfigOptions() or { }) do
+        if o.type == "boolean" then configTarget = o break end
+    end
+    if configTarget then
+        pob_setConfigOption(configTarget.name, not configTarget.value)
+    end
+
+    local before = {
+        allocUsed = select(1, bm.spec:CountAllocNodes()),
+        itemCount = #bm.itemsTab.itemOrderList,
+        groupCount = #bm.skillsTab.socketGroupList,
+        className = bm.spec.curClassName,
+        level = bm.characterLevel,
+    }
+    if configTarget then
+        for _, o in ipairs(pob_getConfigOptions() or { }) do
+            if o.name == configTarget.name then before.configVal = o.value break end
+        end
+    end
+
+    local xmlText = bm:SaveDB(nil)
+    if not xmlText then
+        return { ok = false, error = "SaveDB returned nil" }
+    end
+    local hasPlayerStat = xmlText:find("<PlayerStat ", 1, true) ~= nil
+    local hasFullDPSSkill = xmlText:find("<FullDPSSkill ", 1, true) ~= nil
+    local hasTimelessData = xmlText:find("<TimelessData", 1, true) ~= nil
+
+    local loadOk = pcall(function() pob_loadBuildXML(xmlText, "Round Trip Probe") end)
+    if not loadOk then
+        return { ok = false, error = "load failed", before = before, xmlLen = #xmlText }
+    end
+
+    local bm2 = pob_buildMode()
+    local after = nil
+    if bm2 then
+        after = {
+            allocUsed = select(1, bm2.spec:CountAllocNodes()),
+            nodeAlloc = bm2.spec.nodes[targetId] and bm2.spec.nodes[targetId].alloc,
+            itemCount = #bm2.itemsTab.itemOrderList,
+            groupCount = #bm2.skillsTab.socketGroupList,
+            className = bm2.spec.curClassName,
+            level = bm2.characterLevel,
+        }
+        if configTarget then
+            for _, o in ipairs(pob_getConfigOptions() or { }) do
+                if o.name == configTarget.name then after.configVal = o.value break end
+            end
+        end
+    end
+
+    local sectionsOk = after ~= nil
+        and after.allocUsed == before.allocUsed
+        and after.nodeAlloc == true
+        and after.itemCount == before.itemCount
+        and after.groupCount == before.groupCount
+        and after.className == before.className
+        and after.level == before.level
+        and (not configTarget or after.configVal == before.configVal)
+
+    -- Clean slate: nothing after this check in the suite should see a
+    -- round-tripped probe build (same discipline as pob_selftestReopenLastBuild).
+    main:SetMode("BUILD", false, "Unnamed build")
+    runCallback("OnFrame")
+
+    return {
+        ok = not not (sectionsOk and hasPlayerStat and hasFullDPSSkill and hasTimelessData),
+        sectionsOk = sectionsOk,
+        hasPlayerStat = hasPlayerStat,
+        hasFullDPSSkill = hasFullDPSSkill,
+        hasTimelessData = hasTimelessData,
+        before = before,
+        after = after,
+        xmlLen = #xmlText,
+    }
+end
+
+function pob_selftestSideBar()
+    local origMain = main.sideBarCollapsed
+    local bm = main and main.modes and main.modes.BUILD
+    local origBm = bm and bm.sideBarCollapsed
+
+    pob_setSideBarCollapsed(not origMain)
+    local bothFlipped = (main.sideBarCollapsed == (not origMain))
+                        and (not bm or bm.sideBarCollapsed == (not origMain))
+
+    pob_setSideBarCollapsed(origMain)
+    local restored = (main.sideBarCollapsed == origMain)
+    if bm then bm.sideBarCollapsed = origBm end
+
+    return { ok = bothFlipped and restored, bothFlipped = bothFlipped, restored = restored }
+end
+
+-- ============================================================================
+-- PHASE 3 Part 3.2 -- the main-skill selector stack.
+--
+-- Data port of buildMode:RefreshSkillSelectControls (Build.lua:1511-1609). That
+-- function mutated eight SimpleGraphic DropDown/Edit controls in place and was
+-- re-run EVERY FRAME from OnFrame (Build.lua:1237); with no frame loop it is
+-- dead code, so this returns the same decisions as a plain table instead.
+--
+-- TWO INDEPENDENT SELECTIONS EXIST. Legacy parameterises the whole function on
+-- a `suffix`: "" for the side bar and "Calcs" for the Calcs tab, reading
+-- `mainActiveSkill`/`skillPart`/`skillStageCount`/`skillMineCount`/`skillMinion`/
+-- `skillMinionItemSet`/`skillMinionSkill` with that suffix appended. They must
+-- never be collapsed into one -- the Calcs tab deliberately lets you inspect a
+-- different skill than the side bar is displaying. Every function here takes
+-- the same suffix so Phase 8 can reuse them unchanged.
+--
+-- PERFORMANCE, load-bearing: this must NEVER call pob_getActiveSkills(), which
+-- runs one full BuildOutput PER displayed skill (61-470ms, STATUS.md). Legacy
+-- reads skillsTab.socketGroupList[i].displayLabel and .displaySkillList
+-- directly, and so do we. Note displayLabel is NOT the same field as .label --
+-- pob_getSocketGroups() returns .label, so reusing it here would silently show
+-- the wrong text on every group.
+--
+-- displayLabel / displaySkillList are ENGINE WRITE-BACKS populated during a calc
+-- pass, so a recalc has to happen before they can be read.
+-- ============================================================================
+
+local function pob_mainSkillSrcInstance(bm, suffix)
+    local sg = bm.skillsTab.socketGroupList[bm.mainSocketGroup]
+    if not sg then return nil end
+    local list = sg["displaySkillList" .. suffix]
+    if not list then return nil end
+    local active = list[sg["mainActiveSkill" .. suffix] or 1]
+    if not active or not active.activeEffect then return nil end
+    return active.activeEffect.srcInstance, active, sg
+end
+
+function pob_getMainSkillControls(suffix)
+    suffix = suffix or ""
+    local bm = pob_buildMode()
+    if not bm or not bm.skillsTab then return nil end
+    pob_recalculate()
+
+    local result = {
+        noSkills = false,
+        mainSocketGroup = bm.mainSocketGroup or 1,
+        socketGroups = { },
+        skills = { },
+        mainActiveSkill = 1,
+        skillsEnabled = false,
+        parts = { }, partIndex = 1, partsShown = false,
+        stages = { shown = false, value = "" },
+        mines  = { shown = false, value = "" },
+        minion = { shown = false, enabled = false, isItemSet = false,
+                   libraryShown = false, selected = nil, list = { } },
+        minionSkill = { shown = false, enabled = false, index = 1, list = { } },
+        outputRevision = bm.outputRevision or 0,
+    }
+
+    -- pairs(), matching legacy (Build.lua:1514) -- socketGroupList is a dense
+    -- array so ipairs order is what actually comes out either way.
+    for i, socketGroup in pairs(bm.skillsTab.socketGroupList) do
+        result.socketGroups[#result.socketGroups + 1] =
+            { index = i, label = socketGroup.displayLabel or socketGroup.label or "" }
+    end
+    table.sort(result.socketGroups, function(a, b) return a.index < b.index end)
+
+    if #result.socketGroups == 0 then
+        result.noSkills = true
+        result.socketGroups[1] = { index = 1, label = "<No skills added yet>" }
+        return result
+    end
+
+    local mainSocketGroup = bm.skillsTab.socketGroupList[bm.mainSocketGroup]
+    if not mainSocketGroup then return result end
+    local displaySkillList = mainSocketGroup["displaySkillList" .. suffix] or { }
+    local mainActiveSkill = mainSocketGroup["mainActiveSkill" .. suffix] or 1
+    result.mainActiveSkill = mainActiveSkill
+    result.skillsEnabled = #displaySkillList > 1
+
+    for i, activeSkill in ipairs(displaySkillList) do
+        -- An item-granted skill shows "From <item>" in the item's rarity colour
+        -- rather than the gem name (Build.lua:1535-1537).
+        local explodeSource = activeSkill.activeEffect.srcInstance.explodeSource
+        local explodeSourceName = explodeSource and (explodeSource.name or explodeSource.dn)
+        local colourCoded = explodeSourceName
+            and ("From " .. (colorCodes[explodeSource.rarity or "NORMAL"] or "") .. explodeSourceName)
+        result.skills[#result.skills + 1] = {
+            index = i,
+            label = colourCoded or activeSkill.activeEffect.grantedEffect.name,
+        }
+    end
+
+    local activeSkill = displaySkillList[mainActiveSkill]
+    local activeEffect = activeSkill and activeSkill.activeEffect
+    if not displaySkillList[1] or not activeEffect then return result end
+
+    local grantedEffect = activeEffect.grantedEffect
+    local srcInstance = activeEffect.srcInstance
+
+    if grantedEffect.parts and #grantedEffect.parts > 1 then
+        result.partsShown = true
+        for i, part in ipairs(grantedEffect.parts) do
+            result.parts[#result.parts + 1] = { index = i, label = part.name }
+        end
+        result.partIndex = srcInstance["skillPart" .. suffix] or 1
+        local part = grantedEffect.parts[result.partIndex]
+        if part and part.stages then
+            result.stages.shown = true
+            result.stages.value = tostring(srcInstance["skillStageCount" .. suffix]
+                or activeSkill.skillData.stagesMax or part.stagesMin or 1)
+        end
+    end
+
+    if activeSkill.skillFlags.mine then
+        result.mines.shown = true
+        result.mines.value = tostring(srcInstance["skillMineCount" .. suffix] or "")
+    end
+
+    if activeSkill.skillFlags.multiStage
+       and not (grantedEffect.parts and #grantedEffect.parts > 1) then
+        result.stages.shown = true
+        result.stages.value = tostring(srcInstance["skillStageCount" .. suffix]
+            or activeSkill.skillData.stagesMax or activeSkill.skillData.stagesMin or 1)
+    end
+
+    if not activeSkill.skillFlags.disable
+       and (grantedEffect.minionList or activeSkill.minionList[1]) then
+        if grantedEffect.minionHasItemSet then
+            -- Animate Guardian: the "minion" dropdown lists ITEM SETS, and is
+            -- also a drag-equip target (Build.lua:1573-1581).
+            result.minion.isItemSet = true
+            for _, itemSetId in ipairs(bm.itemsTab.itemSetOrderList) do
+                local itemSet = bm.itemsTab.itemSets[itemSetId]
+                result.minion.list[#result.minion.list + 1] = {
+                    label = itemSet.title or "Default Item Set",
+                    itemSetId = itemSetId,
+                }
+            end
+            result.minion.selected = srcInstance["skillMinionItemSet" .. suffix] or 1
+        else
+            result.minion.libraryShown =
+                (grantedEffect.minionList and not grantedEffect.minionList[1]) and true or false
+            for _, minionId in ipairs(activeSkill.minionList) do
+                result.minion.list[#result.minion.list + 1] = {
+                    label = bm.data.minions[minionId].name,
+                    minionId = minionId,
+                }
+            end
+            local sel = srcInstance["skillMinion" .. suffix]
+            if sel == nil and result.minion.list[1] then sel = result.minion.list[1].minionId end
+            result.minion.selected = sel
+        end
+        result.minion.enabled = #result.minion.list > 1
+        result.minion.shown = true
+
+        if activeSkill.minion then
+            for _, minionSkill in ipairs(activeSkill.minion.activeSkillList) do
+                result.minionSkill.list[#result.minionSkill.list + 1] =
+                    minionSkill.activeEffect.grantedEffect.name
+            end
+            result.minionSkill.index = srcInstance["skillMinionSkill" .. suffix] or 1
+            result.minionSkill.shown = true
+            result.minionSkill.enabled = #result.minionSkill.list > 1
+        else
+            -- Legacy appends this as a bare string into the MINION list
+            -- (Build.lua:1605), not the minion-skill list.
+            result.minion.list[#result.minion.list + 1] = { label = "<No spectres in build>" }
+        end
+    end
+
+    return result
+end
+
+-- --- setters (Build.lua:488-575) -------------------------------------------
+-- Each mirrors its legacy callback exactly: mutate, set modFlag + buildFlag,
+-- then go through the canonical recalc (invariant #4).
+
+local function pob_mainSkillCommit(bm)
+    bm.modFlag = true
+    bm.buildFlag = true
+    pob_recalculate()
+    return { ok = true, outputRevision = bm.outputRevision or 0 }
+end
+
+function pob_setMainSocketGroup(index)
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    bm.mainSocketGroup = index
+    return pob_mainSkillCommit(bm)
+end
+
+function pob_setMainActiveSkill(index, suffix)
+    suffix = suffix or ""
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    local sg = bm.skillsTab.socketGroupList[bm.mainSocketGroup]
+    if not sg then return { ok = false, error = "no socket group" } end
+    sg["mainActiveSkill" .. suffix] = index
+    return pob_mainSkillCommit(bm)
+end
+
+function pob_setMainSkillPart(index, suffix)
+    suffix = suffix or ""
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    local srcInstance = pob_mainSkillSrcInstance(bm, suffix)
+    if not srcInstance then return { ok = false, error = "no active skill" } end
+    srcInstance["skillPart" .. suffix] = index
+    return pob_mainSkillCommit(bm)
+end
+
+function pob_setSkillStageCount(count, suffix)
+    suffix = suffix or ""
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    local srcInstance = pob_mainSkillSrcInstance(bm, suffix)
+    if not srcInstance then return { ok = false, error = "no active skill" } end
+    srcInstance["skillStageCount" .. suffix] = tonumber(count)
+    return pob_mainSkillCommit(bm)
+end
+
+function pob_setSkillMineCount(count, suffix)
+    suffix = suffix or ""
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    local srcInstance = pob_mainSkillSrcInstance(bm, suffix)
+    if not srcInstance then return { ok = false, error = "no active skill" } end
+    srcInstance["skillMineCount" .. suffix] = tonumber(count)
+    return pob_mainSkillCommit(bm)
+end
+
+-- value: { minionId = "Metadata/..." } or { itemSetId = 2 }.
+function pob_setSkillMinion(value, suffix)
+    suffix = suffix or ""
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    local srcInstance = pob_mainSkillSrcInstance(bm, suffix)
+    if not srcInstance then return { ok = false, error = "no active skill" } end
+    if value and value.itemSetId then
+        srcInstance["skillMinionItemSet" .. suffix] = value.itemSetId
+    elseif value and value.minionId then
+        srcInstance["skillMinion" .. suffix] = value.minionId
+    else
+        return { ok = false, error = "value needs minionId or itemSetId" }
+    end
+    return pob_mainSkillCommit(bm)
+end
+
+function pob_setSkillMinionSkill(index, suffix)
+    suffix = suffix or ""
+    local bm = pob_buildMode()
+    if not bm then return { ok = false, error = "no build" } end
+    local srcInstance = pob_mainSkillSrcInstance(bm, suffix)
+    if not srcInstance then return { ok = false, error = "no active skill" } end
+    srcInstance["skillMinionSkill" .. suffix] = index
+    return pob_mainSkillCommit(bm)
+end
+
+-- Socket-group tooltip. Wraps skillsTab:AddSocketGroupTooltip with the same
+-- line-collector shim technique pob_getAboutContent already uses, so the real
+-- legacy tooltip body is reused rather than re-derived.
+function pob_getSocketGroupTooltip(index)
+    local bm = pob_buildMode()
+    if not bm or not bm.skillsTab then return { } end
+    local socketGroup = bm.skillsTab.socketGroupList[index]
+    if not socketGroup then return { } end
+    local lines = { }
+    local shim = {
+        lines = lines,
+        Clear = function(self) for i = #lines, 1, -1 do lines[i] = nil end end,
+        CheckForUpdate = function() return true end,
+        AddLine = function(self, size, text) lines[#lines + 1] = tostring(text or "") end,
+        AddSeparator = function(self) lines[#lines + 1] = "" end,
+        SetRecipe = function() end,
+    }
+    local ok = pcall(function() bm.skillsTab:AddSocketGroupTooltip(shim, socketGroup) end)
+    if not ok then return { } end
+    return lines
+end
+
+-- Selftest: the whole point is to catch the displayLabel-vs-label trap and
+-- prove a part change actually reaches srcInstance and bumps the revision.
+function pob_selftestMainSkill()
+    local bm = pob_buildMode()
+    if not bm or not bm.skillsTab then return { ok = false, error = "no build" } end
+
+    -- An earlier check in the suite reopens a probe build, so by the time we
+    -- run the socket-group list is usually EMPTY -- which would exercise only
+    -- the <No skills added yet> branch and never touch the displayLabel
+    -- assertion this check exists for. Add a real group when there is none, and
+    -- remove it again afterwards so the next run starts from the same state.
+    local addedId = nil
+    if #bm.skillsTab.socketGroupList == 0 then
+        addedId = pob_addSocketGroupWithGem("Selftest Main Skill", "Fireball")
+    end
+
+    local d = pob_getMainSkillControls("")
+    if not d then
+        if addedId then table.remove(bm.skillsTab.socketGroupList, addedId) end
+        return { ok = false, error = "no payload" }
+    end
+
+    -- Every reported group label must equal the engine's displayLabel, not the
+    -- plain .label pob_getSocketGroups returns.
+    local labelsMatch = true
+    if not d.noSkills then
+        for _, g in ipairs(d.socketGroups) do
+            local sg = bm.skillsTab.socketGroupList[g.index]
+            local want = sg and (sg.displayLabel or sg.label or "")
+            if want ~= g.label then labelsMatch = false break end
+        end
+    end
+
+    local inRange = d.noSkills
+        or (d.mainSocketGroup >= 1 and d.mainSocketGroup <= #bm.skillsTab.socketGroupList)
+
+    -- The two selections must stay independent: writing the Calcs suffix must
+    -- not disturb the side bar's mainActiveSkill.
+    local independent = true
+    local sg = bm.skillsTab.socketGroupList[bm.mainSocketGroup]
+    if sg then
+        local savedPlain = sg.mainActiveSkill
+        local savedCalcs = sg.mainActiveSkillCalcs
+        sg.mainActiveSkillCalcs = (savedPlain or 1) + 1
+        independent = (sg.mainActiveSkill == savedPlain)
+        sg.mainActiveSkill = savedPlain
+        sg.mainActiveSkillCalcs = savedCalcs
+    end
+
+    -- Prove a setter actually reaches the engine: flip the active skill and
+    -- confirm the payload follows, then put it back.
+    local setterOk = true
+    if not d.noSkills and #d.skills > 0 then
+        local orig = d.mainActiveSkill
+        pob_setMainActiveSkill(1, "")
+        local after = pob_getMainSkillControls("")
+        setterOk = after and after.mainActiveSkill == 1
+        pob_setMainActiveSkill(orig, "")
+    end
+
+    local result = {
+        ok = labelsMatch and inRange and independent and setterOk,
+        noSkills = d.noSkills,
+        groupCount = #d.socketGroups,
+        skillCount = #d.skills,
+        labelsMatch = labelsMatch,
+        independent = independent,
+        setterOk = setterOk,
+        partsShown = d.partsShown,
+        minionShown = d.minion.shown,
+        outputRevision = d.outputRevision,
+    }
+
+    if addedId then
+        table.remove(bm.skillsTab.socketGroupList, addedId)
+        bm.mainSocketGroup = 1
+        bm.buildFlag = true
+        pob_recalculate()
+    end
+    return result
 end
