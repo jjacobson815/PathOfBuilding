@@ -9,7 +9,11 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**Phase 3 — Build Shell — IN PROGRESS (started 2026-08-18).** Spec:
+**ACTIVE: Phase 4 — Tree Tab — IN PROGRESS** (see the Phase 4 paragraph
+below). Phase 3's MVP is done; its gate stays open only on the long-tail
+scope call described next.
+
+**Phase 3 — Build Shell — MVP DONE, gate awaiting scope decision (started 2026-08-18).** Spec:
 `phases/PHASE-3-build-shell.md`; that file's "Session log — 2026-08-18" and
 "Session log — 2026-08-19" sections have full per-item evidence. The MVP core
 is landed and gated: top bar (Back / Save / Save As / build name / points /
@@ -31,17 +35,21 @@ Loadouts (needs the Phase 5/6/7 set UIs), the Spectre Library popup, and the
 full Save-As folder browser — all explicit long tail; Phase 3's acceptance
 gate is otherwise clear to close whenever those are judged in/out of scope.
 
-**Phase 4 — RECON DONE (2026-08-19), one fix landed.** Full findings are at the
-bottom of `phases/PHASE-4-tree-tab.md`. Headline: **`NewImageHandle():ImageSize()`
-is stubbed to `1,1`**, which makes `PassiveTree.lua:956` compute every orbit
-arc's size as 2.66 tree units — *that* is why the port draws straight-line
-connectors instead of legacy's textured arc quads. Fixing it needs a
-`pob.imageSize()` C++ primitive AND a simultaneous change to the sprite-UV
-consumption (which currently depends on the broken value). Do it first.
-**Part 4.1 — 3 of 5 items DONE (2026-08-19), independent of the ImageSize fix**
+**Phase 4 — Tree Tab — IN PROGRESS.** Recon findings are at the bottom of
+`phases/PHASE-4-tree-tab.md`. **Part 4.1 — 4 of 5 items DONE.** The renderer
+decision is made AND landed (commit `7227ad42c`): the tree draws through the C++
+`QQuickItem` `TreeScene` (`app/src/TreeScene.cpp`, hosted by
+`app/qml/components/TreeViewer.qml`); the old Canvas-2D path is deleted.
+Connectors are the engine's real textured orbit quads (`vert`/`uv` per connector
+— the gate counts 1828 arcs + 1233 lines, 0 bad), atlases are shared
+`QSGTexture`s (`s_textureCache`). Re-gated 2026-09-24: selftest + headless exit 0;
+tree capture vs `skill_tree/legacy.png` SSIM 0.53 / hist-corr 0.91 (the pre-
+TreeScene baseline scored 0.14 / 0.38), so the tree capture baseline was
+refreshed. Earlier items (2026-08-19):
 (evidence: the "Session log — 2026-08-19" section of the phase file): group
-backgrounds now resolve for **39/39** tree versions instead of 1 (`_gbByVersion`
-generalized to shipped sprite data + the standalone root PNGs); the renderer
+backgrounds now resolve for **39/39** tree versions instead of 1 (resolved from shipped sprite
+data via the memoised `sheetInfo`; the old `_gbByVersion` table and hand-rolled
+`pngSize` reader are both deleted); the renderer
 rebuild throttle keys off an engine-sourced `revision` instead of
 `allocCount*1000003 + nodeCount`, which was blind to allocation SWAPS and to
 search state entirely; WebP decoding works (**439/439** max-zoom sprite sheets
@@ -49,8 +57,8 @@ across all 39 versions decode). The real `ImageSize()` + coherent sprite-UV
 conversion is now gated (`5537` sampled sprites, `0` out of bounds), and tree
 interactions use a C++ spatial hit index with each node's legacy `rsq` radius,
 proxy rejection, and bridge-side undo snapshots (the selftest exercises
-alloc→undo→redo→dealloc). Still open in 4.1: the renderer-strategy decision and
-the embeddable tree component.
+alloc→undo→redo→dealloc). Still open in 4.1: the embeddable tree component;
+then Parts 4.2–4.5.
 Already fixed: `pob_getTreeData` rendered `latestTreeVersion` regardless of the
 spec's actual tree version (the spec fallback was dead code).
 
@@ -92,6 +100,14 @@ msys2 ships the webp decoder separately from `qt6-base`. Without it
 ascendancy/bloodline tree art renders **blank with no error logged anywhere**.
 `deploy-win-standalone.sh` now hard-fails if `imageformats/qwebp.dll` did not
 deploy, so this cannot silently ship again.
+
+**Env gotcha (NEW 2026-08-19, recorded 2026-09-24):** always build as
+`PATH="/c/msys64/mingw64/bin:$PATH" ninja` (in `build-win/`). Without that PATH
+EVERY compile step reports `FAILED: [code=1]` with ZERO diagnostics —
+`cc1plus.exe` cannot resolve its own DLLs and exits 127, which gcc swallows. Not
+Smart App Control, not a code error. Running `pob-selftest.exe`/`pob-qt.exe`
+needs the same PATH prefix (else exit 127). Also: `app/src/selftest_checks.h` has
+MIXED CRLF/LF line endings, so exact-string edits must match per region.
 
 User-data policy is RESOLVED (SHARE); see resolved decision below +
 [[solo-hobby-fork-poc-scope]].
@@ -148,6 +164,12 @@ Full detail in `reference/00-architecture.md`. The short list:
    overrun the anchor. Give the element a real box and use
    `horizontalAlignment` / Qt's own layout. (Cost a real column collision in the
    Phase 3 stat panel before it was understood.)
+10. **`node.sprites[1..4]` are NORMALISED UVs — never read them as pixels.**
+   `PassiveTree.lua:288-297` builds them as `coords.x / sheet.width` now that
+   `ImageSize()` is real. The bridge de-normalises against the sheet measured
+   via `pob.imageSize` (`sheetInfo` in `pob_host.lua`) and takes `sw/sh` from the
+   sprite data's integer `width`/`height`. `pob_selftestTreeRender` gates it
+   (`spriteBad == 0`, `spriteMinW >= 1`).
 
 ---
 

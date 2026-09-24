@@ -1,6 +1,6 @@
 # Phase 4 — Tree Tab (finish & harden)
 
-**Status:** RECON DONE + 1 fix landed (2026-08-19). See "Recon findings" at the bottom before starting.
+**Status:** IN PROGRESS — Part 4.1 4/5 done (renderer landed as `TreeScene`); latest evidence in "Session log — 2026-09-24". See "Recon findings" at the bottom before starting.
 **Goal:** Finish the passive-tree tab — the one view that already renders. Harden
 the renderer, make the tree viewer an embeddable multi-instance component, and add
 the missing interactive features (spec management, compare overlay, search, node
@@ -20,10 +20,13 @@ ItemSlotControl, TimelessJewelSocketControl, and CalcBreakdown reuse later.
 
 ## Part 4.1 — Renderer hardening
 
-- [ ] Decide: keep the Canvas-2D JS renderer and optimize, or move to
+- [x] Decide: keep the Canvas-2D JS renderer and optimize, or move to
   `QQuickItem`/scene-graph nodes. Either way: persist atlas decode (stop recreating
   `Image` objects), add a **spatial index for hitTest** (replace the C++ linear
   scan), and stop the per-call `io.open` asset probing in `pob_getTreeData`. (L)
+  → **DONE: scene graph (`TreeScene`)**, Canvas path deleted; shared
+  `QSGTexture` cache, C++ hit grid, memoised `sheetInfo`. Evidence: session log
+  2026-09-24.
 - [x] Replace the `TreeViewController` refresh signature (`allocCount*1000003 +
   nodeCount`, which misses same-count changes and ignores search state) with an
   engine-sourced **revision counter** (e.g. spec serial) that includes search. (S)
@@ -150,8 +153,9 @@ regression before render work continues.
 
 ### Renderer decision: move to a `QQuickItem` scene graph (`TreeScene`)
 
-Staged behind the existing Canvas until `tools/verify_style.py` clears, then
-delete the Canvas path. Four reasons, each from current code:
+**LANDED in `7227ad42c`** — the Canvas path is deleted; see session log
+2026-09-24. (Original plan: stage behind the existing Canvas until
+`tools/verify_style.py` clears, then delete the Canvas path.) Four reasons, each from current code:
 1. **Canvas-2D structurally cannot draw legacy connectors** — they are textured
    *quads* (`DrawImageQuad`, `PassiveTreeView.lua:694`) with arc art on
    kite-shaped quads; `Context2D.drawImage` is axis-aligned rects only. In a
@@ -380,3 +384,43 @@ The full `pob-selftest` exited 0. A fresh ten-view capture compared against
 `app/tests/capture-baseline/` at SSIM 1.000 for every view (tree's unrounded SSIM
 was 0.9997, MSE 2.9; all images non-blank), so this interaction-only change has no
 idle-render regression.
+
+## Session log — 2026-09-24 (TreeScene landed: doc sync + re-gate)
+
+Commit `7227ad42c` (2026-08-19 18:09) landed work that the 17:26 handoff
+(`HANDOFF-phase4.md`) had listed as deferred, and the phase docs were never
+updated for it. What is in the tree, checked against code:
+
+- **Renderer = `TreeScene`** (`app/src/TreeScene.cpp`, a `QQuickItem`), hosted by
+  `app/qml/components/TreeViewer.qml`. No Canvas renderer remains in QML (only a
+  stale comment at `main.qml:222` still says "Canvas renderer").
+- **Connectors are real textured quads**: `pob_getTreeData` exports each
+  connector's engine `vert`/`uv` (`isArc` for `Orbit*` types); `TreeScene`
+  batches them. The earlier "QML still draws straight lines" note is obsolete.
+- Atlases decode once into a per-window `QSGTexture` cache (`s_textureCache`).
+- Handoff items 1–7 (checksum non-linearity fix, swap selftests, Dockerfile
+  imageformats, normalised-UV sprite consumption, `sheetInfo` memo, dead-code
+  removal, sprite-bounds gate) are all in the commit.
+
+Re-gate on the current binaries (`ninja`: no work to do):
+
+```
+pob-selftest  EXIT=0
+tree-render ok = true  nodeCount = 2782  connectorCount = 3061  spriteChecked = 5537
+  spriteBad = 0  arcCount = 1828  lineCount = 1233  badConnectors = 0  spriteMinW = 26
+tree-interact ok = true  (alloc/dealloc/search/undo/redo/rev*/swap2/checksum* all true)
+pob-qt --headless  EXIT=0  "SELFTEST PASSED"
+```
+
+Captures (warm second run) vs `app/tests/capture-baseline/`: 9/10 views SSIM
+1.000. **tree SSIM 0.32 — stale baseline, not a regression**: the committed
+`tree.png` predates the TreeScene switch (straight connectors, blue fill). Scored
+against the legacy reference `skill_tree/legacy.png`: committed baseline SSIM
+0.136 / hist-corr 0.38; current TreeScene capture SSIM 0.534 / hist-corr 0.91.
+Baseline `tree.png` refreshed from this capture.
+
+Note: `swap2Skipped = true` on the default fixture — no two disjoint
+sum-preserving frontier pairs exist from a fresh Scion, so the two-node swap
+path is not exercised there; `checksumNonLinearOk` covers the class directly.
+
+Still open in 4.1: the embeddable, parameterized tree component.
