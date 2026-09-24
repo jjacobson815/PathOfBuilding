@@ -1,5 +1,55 @@
 <RCC>
     <qresource prefix="/qml">
         <file>main.qml</file>
+        <file>components/ColorText.qml</file>
+        <file>components/Chrome.qml</file>
+        <file>components/Arrow.qml</file>
+        <file>components/CheckMark.qml</file>
+        <file>components/Tooltip.qml</file>
+        <file>components/PopupBase.qml</file>
+        <file>components/PopupButton.qml</file>
+        <file>components/MessagePopup.qml</file>
+        <file>components/ConfirmPopup.qml</file>
+        <file>components/TextInputPopup.qml</file>
+        <file>components/NewFolderPopup.qml</file>
+        <file>components/DragSource.qml</file>
+        <file>components/DropTarget.qml</file>
+        <file>components/UndoHandler.qml</file>
+        <file>components/HoverKeyArea.qml</file>
+        <file>components/Label.qml</file>
+        <file>components/Section.qml</file>
+        <file>components/RectangleOutline.qml</file>
+        <file>components/Button.qml</file>
+        <file>components/CheckBox.qml</file>
+        <file>components/Dragger.qml</file>
+        <file>components/Slider.qml</file>
+        <file>components/ScrollBar.qml</file>
+        <file>components/PathControl.qml</file>
+        <file>components/EditControl.qml</file>
+        <file>components/DropDownControl.qml</file>
+        <file>components/ConversionPopup.qml</file>
+        <file>components/TopBar.qml</file>
+        <file>components/MainSkillPanel.qml</file>
+        <file>components/StatPanel.qml</file>
+        <file>components/WarningsBar.qml</file>
+        <file>components/TextListControl.qml</file>
+        <file>components/SearchHost.qml</file>
+        <file>components/OptionsDialog.qml</file>
+        <file>components/Toast.qml</file>
+        <file>components/ToastStack.qml</file>
+        <file>components/BottomBar.qml</file>
+        <file>components/AboutPopup.qml</file>
+        <file>components/TreeViewer.qml</file>
+        <file>views/TreeView.qml</file>
+        <file>views/SkillsView.qml</file>
+        <file>views/ItemsView.qml</file>
+        <file>views/CalcsView.qml</file>
+        <file>views/ConfigView.qml</file>
+        <file>views/NotesView.qml</file>
+        <file>views/ImportView.qml</file>
+        <file>views/CompareView.qml</file>
+        <file>views/PartyView.qml</file>
+        <file>views/PlaceholderView.qml</file>
+        <file>views/BuildListPage.qml</file>
     </qresource>
 </RCC>

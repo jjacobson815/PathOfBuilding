@@ -1,6 +1,7 @@
 #include "LuaEngine.h"
 #include "selftest_checks.h"
 #include "luabridge.h"
+#include "TextMetrics.h"
 
 #include <QDebug>
 #ifndef POB_NO_GUI
@@ -13,11 +14,31 @@
 #include <QDateTime>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QImageReader>
+#include <QHash>
+#include <QSize>
 #include <lauxlib.h>
+
+// Part 1.4: Win32 file attributes for OneDrive-dehydration detection
+// (l_pob_fileAttributes). NOMINMAX so windows.h's min/max macros don't collide
+// with std::min/max used via <algorithm> below.
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#ifndef FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+#define FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS 0x00400000
+#endif
+#ifndef FILE_ATTRIBUTE_RECALL_ON_OPEN
+#define FILE_ATTRIBUTE_RECALL_ON_OPEN 0x00040000
+#endif
+#endif
 
 #include <zlib.h>
 #include <curl/curl.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -51,6 +72,13 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
     if (m_userDir.isEmpty())
         m_userDir = QDir::homePath() + "/Documents";
     QDir().mkpath(m_userDir);
+
+    // Phase 1.2a: create the .tgf-backed text-measurement engine before the host
+    // bootstrap runs, so DrawStringWidth/DrawStringCursorIndex are real from the
+    // first OnInit layout pass. Fonts load lazily on first use. The bitmap-font
+    // metrics ship under <runtime>/SimpleGraphic/Fonts.
+    m_textMetrics = new TextMetrics(this);
+    m_textMetrics->setFontDir(m_runtimeDir + "/SimpleGraphic/Fonts");
 
     // One-time libcurl global init (idempotent across engine instances).
     static bool curlReady = false;
@@ -91,6 +119,19 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
         { "deflate",       l_pob_deflate },
         { "http",          l_pob_http },
         { "listDir",       l_pob_listDir },
+        { "stringWidth",       l_pob_stringWidth },
+        { "stringCursorIndex", l_pob_stringCursorIndex },
+        // Part 1.4: cloud robustness. GUI-independent (registered even headless):
+        // fileAttributes backs GetCloudProvider; the two *Popup fns emit Qt
+        // signals the QML host turns into real dialogs (no-op with no listener).
+        { "fileAttributes",    l_pob_fileAttributes },
+        { "cloudErrorPopup",   l_pob_cloudErrorPopup },
+        { "pathErrorPopup",    l_pob_pathErrorPopup },
+        // Part 1.4 (bullet 5): toast mirror change notification (Lua-initiated
+        // push, same pattern as cloudErrorPopup/pathErrorPopup above).
+        { "toastsChanged",     l_pob_toastsChanged },
+        // Phase 4: real image dimensions for NewImageHandle():ImageSize().
+        { "imageSize",         l_pob_imageSize },
         { nullptr, nullptr }
     };
     lua_newtable(m_L);
@@ -162,6 +203,95 @@ int LuaEngine::l_pob_getTime(lua_State* L) {
     // a monotonic clock avoids wall-clock jumps (NTP/DST) skewing those deltas.
     lua_pushnumber(L, double(selfOf(L)->m_clock.elapsed()));
     return 1;
+}
+
+// DrawStringWidth(height, font, text) — real metrics via the .tgf TextMetrics
+// engine (replaces the pob_host.lua stub that returned 1). font may be nil → FIXED.
+int LuaEngine::l_pob_stringWidth(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    const int height = (int)lua_tonumber(L, 1);
+    const QString font = lua_isstring(L, 2) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    const QString text = lua_isstring(L, 3) ? QString::fromUtf8(lua_tostring(L, 3)) : QString();
+    const int w = self->m_textMetrics ? self->m_textMetrics->stringWidth(height, font, text) : 1;
+    lua_pushinteger(L, w);
+    return 1;
+}
+
+// DrawStringCursorIndex(height, font, text, cursorX, cursorY) — caret hit-testing
+// (replaces the stub that returned 0). Returns a 0-based char offset.
+int LuaEngine::l_pob_stringCursorIndex(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    const int height = (int)lua_tonumber(L, 1);
+    const QString font = lua_isstring(L, 2) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    const QString text = lua_isstring(L, 3) ? QString::fromUtf8(lua_tostring(L, 3)) : QString();
+    const int curX = (int)lua_tonumber(L, 4);
+    const int curY = (int)lua_tonumber(L, 5);
+    const int idx = self->m_textMetrics
+        ? self->m_textMetrics->stringCursorIndex(height, font, text, curX, curY) : 0;
+    lua_pushinteger(L, idx);
+    return 1;
+}
+
+// Part 1.4: pob.fileAttributes(path) -> { exists, offline, recallOnDataAccess,
+// recallOnOpen, reparsePoint }. Backs the real GetCloudProvider Lua global. On
+// Windows the RECALL_ON_* / OFFLINE flags mark a OneDrive "files on demand"
+// dehydrated placeholder — the exact state whose transient read failure trips
+// the engine's errorReadingSettings path. On non-Windows only `exists` is set.
+int LuaEngine::l_pob_fileAttributes(lua_State* L) {
+    if (lua_gettop(L) < 1 || !lua_isstring(L, 1)) { lua_pushnil(L); return 1; }
+    QString path = QString::fromUtf8(lua_tostring(L, 1));
+    lua_newtable(L);
+    lua_pushboolean(L, QFileInfo::exists(path) ? 1 : 0);
+    lua_setfield(L, -2, "exists");
+#ifdef Q_OS_WIN
+    const std::wstring wpath = path.toStdWString();
+    DWORD attrs = GetFileAttributesW(wpath.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES) {
+        lua_pushboolean(L, (attrs & FILE_ATTRIBUTE_OFFLINE) != 0);
+        lua_setfield(L, -2, "offline");
+        lua_pushboolean(L, (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0);
+        lua_setfield(L, -2, "recallOnDataAccess");
+        lua_pushboolean(L, (attrs & FILE_ATTRIBUTE_RECALL_ON_OPEN) != 0);
+        lua_setfield(L, -2, "recallOnOpen");
+        lua_pushboolean(L, (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
+        lua_setfield(L, -2, "reparsePoint");
+    }
+#endif
+    return 1;
+}
+
+// Part 1.4: pob.cloudErrorPopup(path, provider, status) — the engine's
+// OpenCloudErrorPopup hands off here; we emit cloudErrorRequested so the QML host
+// opens a real MessagePopup. No-op (but harmless) when nothing is connected
+// (headless / pob-selftest).
+int LuaEngine::l_pob_cloudErrorPopup(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    QString path     = lua_isstring(L, 1) ? QString::fromUtf8(lua_tostring(L, 1)) : QString();
+    QString provider = lua_isstring(L, 2) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    QString status   = lua_isstring(L, 3) ? QString::fromUtf8(lua_tostring(L, 3)) : QString();
+    if (self) emit self->cloudErrorRequested(path, provider, status);
+    return 0;
+}
+
+// Part 1.4: pob.pathErrorPopup(invalidPath, errMsg) — the engine's OpenPathPopup
+// hands off here; we emit pathErrorRequested so the QML host opens a real
+// MessagePopup.
+int LuaEngine::l_pob_pathErrorPopup(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    QString invalidPath = lua_isstring(L, 1) ? QString::fromUtf8(lua_tostring(L, 1)) : QString();
+    QString errMsg      = lua_isstring(L, 2) ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    if (self) emit self->pathErrorRequested(invalidPath, errMsg);
+    return 0;
+}
+
+// Part 1.4 (bullet 5): pob.toastsChanged() -- the pob_host.lua ToastNotification
+// wrap calls this after every Add/Update/Remove/Clear; we emit toastsChanged()
+// so the QML host re-fetches the current list via getToasts(). No-op (but
+// harmless) when nothing is connected (headless / pob-selftest).
+int LuaEngine::l_pob_toastsChanged(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    if (self) emit self->toastsChanged();
+    return 0;
 }
 
 int LuaEngine::l_pob_copy(lua_State* L) {
@@ -475,6 +605,75 @@ int LuaEngine::l_pob_http(lua_State* L) {
     return 1;
 }
 
+// Phase 4: pob.imageSize(path) -> width, height. Backs the real
+// NewImageHandle():ImageSize() in pob_host.lua.
+//
+// Why a C++ primitive at all: `ImageSize` was stubbed to `1, 1`, and four sites
+// in the (unmodifiable, invariant #2) engine do arithmetic on the result --
+// PassiveTree.lua:368 divides sprite-sheet coords by it to build UVs,
+// PassiveTree.lua:871 stores it as every tree.assets[] entry's dimensions,
+// PassiveTree.lua:956 computes each orbit arc's radius as `art.width * 2 * 1.33`
+// (so every arc collapsed to 2.66 tree units at the group centre), and
+// PassiveTreeView.lua:524/:1233 size the background and DrawAsset draws from it.
+//
+// QImageReader::size() reads ONLY the header -- it never allocates or decodes
+// the pixel data, which is the point: the sprite sheets run to several thousand
+// pixels square and there are hundreds of them per tree version. It also covers
+// .webp via the qtimageformats plugin (see deploy-win-standalone.sh, which hard-
+// fails without imageformats/qwebp.dll).
+//
+// Returns 0, 0 -- never nil, and never 1, 1 -- when the file is missing or
+// unreadable. 0 is what legacy SimpleGraphic reports for an invalid handle and
+// is what PassiveTreeView.lua:523/:1232 explicitly test for; nil would make
+// `bg.width > 0` a runtime error on a nil comparison. Callers that divide by the
+// result (the sprite-sheet UVs) must guard for 0 themselves -- 10 of the 449
+// max-zoom sheet references in the shipped TreeData genuinely do not exist on
+// disk.
+//
+// Memoised per path for the process lifetime. Tree assets are immutable data
+// files shipped beside the binary, and a single pob_getTreeData resolves the
+// same handful of sheets thousands of times; without the memo this would be a
+// stat + open + header parse per node.
+int LuaEngine::l_pob_imageSize(lua_State* L) {
+    if (lua_gettop(L) < 1 || !lua_isstring(L, 1)) {
+        lua_pushinteger(L, 0); lua_pushinteger(L, 0); return 2;
+    }
+    const QString path = QString::fromUtf8(luaL_checkstring(L, 1));
+
+    static QHash<QString, QSize> cache;
+    const auto hit = cache.constFind(path);
+    if (hit != cache.constEnd()) {
+        lua_pushinteger(L, hit->width());
+        lua_pushinteger(L, hit->height());
+        return 2;
+    }
+
+    // The engine passes CWD-relative paths ("TreeData/<ver>/skills-3.jpg") and
+    // runs with cwd = src/ (invariant #6), so the plain path normally resolves.
+    // Fall back to an explicit srcDir join so a caller that has chdir'd
+    // elsewhere -- or a host embedding this engine -- still resolves.
+    QString file = path;
+    if (!QFileInfo::exists(file)) {
+        LuaEngine* self = selfOf(L);
+        if (self && !self->m_srcDir.isEmpty()) {
+            const QString alt = self->m_srcDir + QLatin1Char('/') + path;
+            if (QFileInfo::exists(alt)) file = alt;
+        }
+    }
+
+    QSize sz;
+    if (QFileInfo::exists(file)) {
+        QImageReader reader(file);
+        const QSize s = reader.size();
+        if (s.isValid() && s.width() > 0 && s.height() > 0) sz = s;
+    }
+    cache.insert(path, sz);          // negatives cached too: a missing sheet
+                                     // must not be re-probed per node.
+    lua_pushinteger(L, sz.width());
+    lua_pushinteger(L, sz.height());
+    return 2;
+}
+
 // --- Read / call helpers ----------------------------------------------------
 
 // Phase 3: directory listing backing the SimpleGraphic NewFileSearch stub.
@@ -587,6 +786,22 @@ QStringList LuaEngine::modeNames() const {
         lua_pop(m_L, 1); // pop value, keep key for next iteration
     }
     lua_pop(m_L, 2); // pop modes, main
+
+    // main.modes is a hash table, so lua_next (pairs) yields its keys in an
+    // unspecified, run-to-run-variable order — the top-bar mode buttons flipped
+    // between LIST/BUILD orderings across runs. Impose a stable order matching
+    // the engine's own registration sequence (Modules/Main.lua registers LIST
+    // then BUILD); any unknown/future mode sorts alphabetically after the known
+    // ones so the ordering stays deterministic regardless.
+    static const QStringList kModeOrder = { "LIST", "BUILD" };
+    std::stable_sort(out.begin(), out.end(), [](const QString& a, const QString& b) {
+        int ia = kModeOrder.indexOf(a);
+        int ib = kModeOrder.indexOf(b);
+        if (ia < 0) ia = kModeOrder.size();
+        if (ib < 0) ib = kModeOrder.size();
+        if (ia != ib) return ia < ib;
+        return a < b; // stable, deterministic tiebreak for unknown modes
+    });
     return out;
 }
 
@@ -626,10 +841,15 @@ QVariant LuaEngine::runCallback(const QString& name, const QVariantList& args) {
 // immediately (e.g. from a QML button click on the GUI thread).
 void LuaEngine::setMode(const QString& mode) {
     if (mode == "BUILD") {
-        // buildMode:Init reverts to LIST unless a buildName is supplied
-        // (see src/Modules/Build.lua). Mirror the boot's forced-build args so
-        // the mode actually lands on BUILD instead of bouncing back to LIST.
-        callMethod("main", "SetMode", {mode, false, "Unnamed build"});
+        // Reopen the LAST build the user had open (GetArgs persistence) rather
+        // than force-opening a fresh "Unnamed build" on every toggle back to
+        // BUILD. The decision — which dbFileName/buildName to replay and the
+        // genuine first-run "Unnamed build" fallback — lives in the
+        // pob_setBuildMode Lua global so it can read main.modes.BUILD:GetArgs()
+        // naturally (Build.lua). buildMode:Init still reverts to LIST if it is
+        // handed no buildName, so the fallback always supplies one. See
+        // app/lua/pob_host.lua.
+        callGlobal("pob_setBuildMode");
     } else {
         callMethod("main", "SetMode", {mode});
     }
@@ -855,6 +1075,20 @@ void LuaEngine::setActiveSkill(int socketGroupId, int index) {
     emit calcsChanged();
 }
 
+// Part 2.2: recalc orchestration bridge. Delegates to the top-level Lua
+// globals pob_recalculate / pob_getOutputRevision.
+QVariant LuaEngine::recalculate() {
+    QVariant r = callGlobal("pob_recalculate");
+    if (r.typeId() == QMetaType::QVariantMap && r.toMap().value("recalculated").toBool()) {
+        emit calcsChanged();
+    }
+    return r;
+}
+
+qint64 LuaEngine::outputRevision() {
+    return callGlobal("pob_getOutputRevision").toLongLong();
+}
+
 // Phase 5c: CalcsTab (CALCS view) bridge. Delegates to the top-level Lua
 // globals pob_getCalcOutput / pob_getCalcBreakdown (callGlobal does a single
 // lua_getglobal, so the helpers MUST be top-level globals, not dotted names).
@@ -870,6 +1104,208 @@ QVariantList LuaEngine::getCalcBreakdown(const QString& section, const QString& 
         return res.toMap().value("lines").toList();
     }
     return { };
+}
+
+// Part 2.3: sidebar output bridge. Delegates to the top-level Lua global
+// pob_getOutput (callGlobal does a single lua_getglobal, so the helper MUST be
+// a top-level global, not a dotted name).
+QVariant LuaEngine::getOutput() {
+    return callGlobal("pob_getOutput");
+}
+
+// Part 2.4: comparison-calculator bridge. Delegates to the top-level Lua
+// globals pob_compareOverride / pob_compareNodes (callGlobal does a single
+// lua_getglobal, so the helpers MUST be top-level globals, not dotted names).
+QVariant LuaEngine::compareOverride(const QVariantMap& override) {
+    return callGlobal("pob_compareOverride", { override });
+}
+
+QVariant LuaEngine::compareNodes(const QVariantList& nodeIds) {
+    return callGlobal("pob_compareNodes", { nodeIds });
+}
+
+// Part 2.5: Config usage-set export bridge. Delegates to the top-level Lua
+// global pob_getConfigUsageSets (callGlobal does a single lua_getglobal, so
+// the helper MUST be a top-level global, not a dotted name).
+QVariant LuaEngine::getConfigUsageSets() {
+    return callGlobal("pob_getConfigUsageSets");
+}
+
+// ---- Phase 3: Build Shell ------------------------------------------------
+// Thin delegations to the top-level pob_* globals (callGlobal does a single
+// lua_getglobal, so they must be top-level, not dotted). The mutators emit the
+// existing signals rather than inventing new ones, so the already-wired model
+// refresh block in main.cpp picks them up unchanged.
+
+QVariant LuaEngine::getUnsaved() {
+    return callGlobal("pob_getUnsaved");
+}
+
+QVariant LuaEngine::getShellState() {
+    return callGlobal("pob_getShellState");
+}
+
+QVariant LuaEngine::getClassList() {
+    return callGlobal("pob_getClassList");
+}
+
+QVariant LuaEngine::setClass(int classId, const QString& mode) {
+    QVariant r = callGlobal("pob_setClass", { classId, mode });
+    // Only a class change that actually APPLIED touches anything. A "check"
+    // that came back needsConfirm deliberately mutated nothing, so emitting
+    // here would spuriously invalidate every model.
+    if (r.typeId() == QMetaType::QVariantMap && r.toMap().value("applied").toBool()) {
+        emit buildDataChanged();
+        emit treeChanged();   // SelectClass deallocates nodes
+        emit calcsChanged();
+    }
+    return r;
+}
+
+QVariant LuaEngine::setAscendClass(int ascendClassId) {
+    QVariant r = callGlobal("pob_setAscendClass", { ascendClassId });
+    emit buildDataChanged();
+    emit treeChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSecondaryAscendClass(int ascendClassId) {
+    QVariant r = callGlobal("pob_setSecondaryAscendClass", { ascendClassId });
+    emit buildDataChanged();
+    emit treeChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setCharacterLevel(int level) {
+    QVariant r = callGlobal("pob_setCharacterLevel", { level });
+    emit buildDataChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setLevelAutoMode(bool autoMode) {
+    QVariant r = callGlobal("pob_setLevelAutoMode", { autoMode });
+    emit buildDataChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSideBarCollapsed(bool collapsed) {
+    // Pure UI state: no calc, no model invalidation, so no signal.
+    return callGlobal("pob_setSideBarCollapsed", { collapsed });
+}
+
+QVariant LuaEngine::saveDBFile(const QString& path) {
+    QVariant r = callGlobal("pob_saveDBFile", { path });
+    // A successful save resets every modFlag, so the unsaved indicator must
+    // re-read. Nothing else changed.
+    if (r.typeId() == QMetaType::QVariantMap && r.toMap().value("ok").toBool()) {
+        emit buildDataChanged();
+    }
+    return r;
+}
+
+QVariant LuaEngine::closeBuild() {
+    QVariant r = callGlobal("pob_closeBuild");
+    // CloseBuild flips main.mode to LIST behind our back, so republish the mode
+    // and view the same way setMode() does -- the QML shell binds to these.
+    emit modeChanged();
+    emit viewChanged();
+    emit currentModeChanged();
+    emit currentViewChanged();
+    return r;
+}
+
+QVariant LuaEngine::sanitizeBuildName(const QString& name, const QString& subPath) {
+    return callGlobal("pob_sanitizeBuildName", { name, subPath });
+}
+
+// --- Part 3.2: main-skill selector stack ---
+// Every setter mutates the build and recalcs, so all three of the models that
+// depend on skill selection have to re-read: skillsChanged for the selector
+// stack itself, calcsChanged for the stat panel, buildDataChanged for the
+// socket-group count in the top bar.
+
+QVariant LuaEngine::getMainSkillControls(const QString& suffix) {
+    return callGlobal("pob_getMainSkillControls", { suffix });
+}
+
+QVariant LuaEngine::setMainSocketGroup(int index) {
+    QVariant r = callGlobal("pob_setMainSocketGroup", { index });
+    emit skillsChanged();
+    emit buildDataChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setMainActiveSkill(int index, const QString& suffix) {
+    QVariant r = callGlobal("pob_setMainActiveSkill", { index, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setMainSkillPart(int index, const QString& suffix) {
+    QVariant r = callGlobal("pob_setMainSkillPart", { index, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSkillStageCount(int count, const QString& suffix) {
+    QVariant r = callGlobal("pob_setSkillStageCount", { count, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSkillMineCount(int count, const QString& suffix) {
+    QVariant r = callGlobal("pob_setSkillMineCount", { count, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSkillMinion(const QVariantMap& value, const QString& suffix) {
+    QVariant r = callGlobal("pob_setSkillMinion", { value, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QVariant LuaEngine::setSkillMinionSkill(int index, const QString& suffix) {
+    QVariant r = callGlobal("pob_setSkillMinionSkill", { index, suffix });
+    emit skillsChanged();
+    emit calcsChanged();
+    return r;
+}
+
+QStringList LuaEngine::getSocketGroupTooltip(int index) {
+    QStringList out;
+    const QVariantList rows = callGlobal("pob_getSocketGroupTooltip", { index }).toList();
+    for (const QVariant& v : rows) out << v.toString();
+    return out;
+}
+
+QVariant LuaEngine::getConversionState() {
+    return callGlobal("pob_getConversionState");
+}
+
+QVariant LuaEngine::convertBuild() {
+    QVariant r = callGlobal("pob_convertBuild");
+    // Conversion re-runs Build:Init from scratch: every model is invalid.
+    emit buildDataChanged();
+    emit treeChanged();
+    emit skillsChanged();
+    emit itemsChanged();
+    emit calcsChanged();
+    emit modeChanged();
+    emit viewChanged();
+    emit currentModeChanged();
+    emit currentViewChanged();
+    return r;
 }
 
 // Phase 5d: ConfigTab (CONFIG view) bridge. Delegates to the top-level Lua
@@ -888,6 +1324,53 @@ QVariant LuaEngine::setConfigOption(const QString& name, const QVariant& value) 
     emit configChanged();
     emit calcsChanged();
     return r;
+}
+
+// Part 1.4: Options dialog bridge. See the header for the live-vs-commit split.
+QVariantList LuaEngine::getOptions() {
+    QVariant res = callGlobal("pob_getOptions");
+    if (res.typeId() == QMetaType::QVariantList) {
+        return res.toList();
+    }
+    return { };
+}
+
+QVariant LuaEngine::previewOption(const QString& key, const QVariant& value) {
+    QVariant r = callGlobal("pob_previewOption", { key, value });
+    // Live-preview fields (node-power theme, hex colours, ...) are mutated on the
+    // engine immediately; emit configChanged so any live-bound QML refreshes.
+    emit configChanged();
+    return r;
+}
+
+bool LuaEngine::commitOptions(const QVariantMap& values) {
+    bool ok = callGlobal("pob_commitOptions", QVariantList{ QVariant(values) }).toBool();
+    emit configChanged();
+    return ok;
+}
+
+// Part 1.4 (bullet 5): toast bridge. Delegates to the top-level Lua globals
+// pob_getToasts / pob_dismissToast (callGlobal resolves only top-level globals).
+QVariantList LuaEngine::getToasts() {
+    QVariant v = callGlobal("pob_getToasts");
+    if (v.typeId() == QMetaType::QVariantList) return v.toList();
+    return { };
+}
+
+void LuaEngine::dismissToast(const QString& id) {
+    callGlobal("pob_dismissToast", { id });
+    // pob_dismissToast -> ToastNotification:Remove -> the wrap's pob.toastsChanged()
+    // already emits toastsChanged() synchronously; nothing further to do here.
+}
+
+// Part 1.4 (bullet 6): About popup content bridge. Delegates to the top-level
+// Lua global pob_getAboutContent (callGlobal resolves only top-level globals).
+QVariant LuaEngine::getAboutContent() {
+    return callGlobal("pob_getAboutContent");
+}
+
+void LuaEngine::openURL(const QString& url) {
+    callGlobal("OpenURL", { url });
 }
 
 // Phase 5e: Notes/Import/Compare/Party (utility) tabs bridge. Delegates

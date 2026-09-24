@@ -480,13 +480,22 @@ function main:CallMode(func, ...)
 end
 
 function main:LoadSettings(ignoreBuild)
-	if self.errorReadingSettings then
-		return true
-	end
+	-- Part 1.4 (Qt host cloud robustness): errorReadingSettings is no longer a
+	-- permanent one-strike latch. Previously a single failed read (e.g. a
+	-- transient OneDrive dehydrated-placeholder read at startup) latched it and
+	-- every later Load/Save early-returned for the rest of the session, silently
+	-- killing settings persistence. Now every call re-attempts the read; the flag
+	-- is set only so SaveSettings knows the in-memory state is stale and must not
+	-- clobber the on-disk file, and it is cleared the instant a read succeeds (or
+	-- the file legitimately does not exist yet). SaveSettings retries-after-hydrate.
 	local setXML, errMsg = common.xml.LoadXMLFile(self.userPath.."Settings.xml")
 	if errMsg and errMsg:match(".*file returns nil") then
+		-- Only surface the cloud-error popup on the FIRST failure of a run, so a
+		-- retry storm (SaveSettings re-attempting on each save) does not spam it.
+		if not self.errorReadingSettings then
+			self:OpenCloudErrorPopup(self.userPath.."Settings.xml")
+		end
 		self.errorReadingSettings = true
-		self:OpenCloudErrorPopup(self.userPath.."Settings.xml")
 		return true
 	elseif errMsg and not errMsg:match(".*No such file or directory") then
 		self.errorReadingSettings = true
@@ -494,11 +503,16 @@ function main:LoadSettings(ignoreBuild)
 		return true
 	end
 	if not setXML then
+		-- No settings file yet (fresh install) is not an error: clear the latch so
+		-- SaveSettings is allowed to create the file.
+		self.errorReadingSettings = false
 		return true
 	elseif setXML[1].elem ~= "PathOfBuilding" then
 		launch:ShowErrMsg("^1Error parsing 'Settings.xml': 'PathOfBuilding' root element missing")
 		return true
 	end
+	-- Read succeeded: the file is hydrated and parseable; drop any prior latch.
+	self.errorReadingSettings = false
 	for _, node in ipairs(setXML[1]) do
 		if type(node) == "table" then
 			if not ignoreBuild and node.elem == "Mode" then
@@ -640,13 +654,14 @@ function main:LoadSettings(ignoreBuild)
 end
 
 function main:LoadSharedItems()
-	if self.errorReadingSettings then
-		return true
-	end
+	-- Part 1.4: same non-fatal latch semantics as LoadSettings (see the note
+	-- there). No permanent early-return; re-attempt every call; clear on success.
 	local setXML, errMsg = common.xml.LoadXMLFile(self.userPath.."Settings.xml")
 	if errMsg and errMsg:match(".*file returns nil") then
+		if not self.errorReadingSettings then
+			self:OpenCloudErrorPopup(self.userPath.."Settings.xml")
+		end
 		self.errorReadingSettings = true
-		self:OpenCloudErrorPopup(self.userPath.."Settings.xml")
 		return true
 	elseif errMsg and not errMsg:match(".*No such file or directory") then
 		self.errorReadingSettings = true
@@ -654,11 +669,13 @@ function main:LoadSharedItems()
 		return true
 	end
 	if not setXML then
+		self.errorReadingSettings = false
 		return true
 	elseif setXML[1].elem ~= "PathOfBuilding" then
 		launch:ShowErrMsg("^1Error parsing 'Settings.xml': 'PathOfBuilding' root element missing")
 		return true
 	end
+	self.errorReadingSettings = false
 	for _, node in ipairs(setXML[1]) do
 		if type(node) == "table" then
 			if node.elem == "SharedItems" then
@@ -696,7 +713,21 @@ end
 
 function main:SaveSettings()
 	if self.errorReadingSettings then
-		return
+		-- Part 1.4 (Qt host cloud robustness): non-fatal retry-after-hydrate. The
+		-- previous settings read failed — almost always a transient OneDrive
+		-- dehydrated-placeholder read at startup. Rather than permanently
+		-- disabling persistence for the whole session (the old one-strike latch),
+		-- re-attempt the load now. If the cloud file has since hydrated the load
+		-- repopulates the real in-memory settings and clears the latch, so we can
+		-- safely save. If it still cannot be read we skip THIS save (writing our
+		-- defaults would clobber the user's real on-disk settings) but do NOT give
+		-- up permanently — the next natural save retries again. ignoreBuild=true so
+		-- the retry does not replay <Mode> and yank the user out of their build.
+		self:LoadSettings(true)
+		self:LoadSharedItems()
+		if self.errorReadingSettings then
+			return
+		end
 	end
 	local setXML = { elem = "PathOfBuilding" }
 	local mode = { elem = "Mode", attrib = { mode = self.mode } }
@@ -775,6 +806,17 @@ function main:SaveSettings()
 end
 
 function main:OpenPathPopup(invalidPath, errMsg, ignoreBuild)
+	-- Qt host: route to a REAL QML dialog (LuaEngine::pathErrorRequested ->
+	-- main.qml MessagePopup) instead of the SimpleGraphic EditControl tree below
+	-- (inert under QML). In the Qt host GetUserPath (QStandardPaths) always
+	-- resolves a valid Documents path, so this popup is effectively unreachable at
+	-- boot; the QML dialog surfaces the condition informationally rather than
+	-- reproducing the full path-rebinding EditControl UI (deferred — not needed
+	-- under the SHARE user-data policy). Legacy body kept for non-Qt hosts.
+	if pob and pob.pathErrorPopup then
+		pob.pathErrorPopup(tostring(invalidPath or ""), tostring(errMsg or ""))
+		return
+	end
 	local controls = { }
 	local defaultLabelPlacementX = 8
 
@@ -1701,6 +1743,15 @@ end
 function main:OpenCloudErrorPopup(fileName)
 	local provider, _, status = GetCloudProvider(fileName)
 	ConPrintf('^1Error: file offline "%s" provider: "%s" status: "%s"', fileName or "?", provider, status)
+	-- Qt host: route to a REAL QML dialog (LuaEngine::cloudErrorRequested ->
+	-- main.qml MessagePopup) instead of building the SimpleGraphic control tree
+	-- below, which draws nothing under QML AND would leave a phantom popup on the
+	-- engine's popup stack that the QML host never dismisses. When the bridge is
+	-- present we hand off and return; the legacy body remains for non-Qt hosts.
+	if pob and pob.cloudErrorPopup then
+		pob.cloudErrorPopup(tostring(fileName or ""), tostring(provider or ""), tostring(status or ""))
+		return
+	end
 	fileName = fileName and "\n\n^8'"..fileName.."'" or ""
 	local version = "^8v"..launch.versionNumber..(launch.versionBranch and " "..launch.versionBranch or "")..(launch.devMode and " (dev)" or "")
 	local title = " ^1Error "

@@ -59,6 +59,17 @@ class Theme : public QObject {
     Q_PROPERTY(QString fontFamily READ fontFamily CONSTANT)  // default "sans-serif"
     Q_PROPERTY(int fontSize READ fontSize CONSTANT)          // default 14
 
+    // --- Bundled font families (Phase 1.2a) ------------------------------
+    // Real TTFs registered in main.cpp via QFontDatabase::addApplicationFont,
+    // backing the SAME families TextMetrics measures against via the .tgf
+    // atlases (runtime/SimpleGraphic/Fonts). Use fontFor() to resolve one of
+    // the 7 legacy fontMap names (FIXED/VAR/VAR BOLD/FONTIN*) to a QML-ready
+    // {family, bold, italic} triple; Fontin names fall back to fontVar (see
+    // the Fontin-licensing decision in STATUS.md).
+    Q_PROPERTY(QString fontVar READ fontVar CONSTANT)        // "Liberation Sans"
+    Q_PROPERTY(QString fontVarBold READ fontVarBold CONSTANT)// same family; pair with font.bold
+    Q_PROPERTY(QString fontFixed READ fontFixed CONSTANT)    // "Bitstream Vera Sans Mono"
+
     // --- Item rarity colours (Phase 5a) ---------------------------------
     // Pulled from the engine's `colorCodes` global (src/Data/Global.lua),
     // which holds the canonical PoB rarity markup strings ("^RRGGBB").
@@ -123,6 +134,14 @@ public:
     // WCAG AA contrast check (ratio >= 4.5). Useful for design-token audits.
     Q_INVOKABLE bool contrastOk(const QColor& fg, const QColor& bg) const;
 
+    // Resolve one of the 7 legacy fontMap names (nil/"" -> FIXED, per legacy
+    // default) to a QML-ready { family: string, bold: bool, italic: bool }
+    // triple. FONTIN/FONTIN ITALIC/FONTIN SC/FONTIN SC ITALIC currently map to
+    // the VAR face (Fontin licensing is deferred — see STATUS.md open
+    // decisions); TextMetrics still measures those against the real bundled
+    // Fontin .tgf atlases, so this is a rendering-only approximation.
+    Q_INVOKABLE QVariantMap fontFor(const QString& legacyName) const;
+
     // --- accessors ----------------------------------------------------------
     QColor topBarBg() const { return m_topBarBg; }
     QColor topBarLine() const { return m_topBarLine; }
@@ -151,6 +170,10 @@ public:
     int controlSize() const { return m_controlSize; }
     QString fontFamily() const { return m_fontFamily; }
     int fontSize() const { return m_fontSize; }
+
+    QString fontVar() const { return m_fontVar; }
+    QString fontVarBold() const { return m_fontVarBold; }
+    QString fontFixed() const { return m_fontFixed; }
 
     QColor rarityNormal() const { return m_rarityNormal; }
     QColor rarityMagic() const { return m_rarityMagic; }
@@ -213,6 +236,8 @@ private:
     int m_controlSize = 0;
     QString m_fontFamily;
     int m_fontSize = 0;
+
+    QString m_fontVar, m_fontVarBold, m_fontFixed;
 
     QColor m_rarityNormal, m_rarityMagic, m_rarityRare, m_rarityUnique, m_rarityRelic;
 
