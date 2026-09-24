@@ -29,111 +29,23 @@ void TreeViewController::setModels(TreeModel* nodes, TreeGroupModel* groups,
     m_connectors = connectors;
 }
 
-double TreeViewController::zoom() const {
-    return std::pow(1.2, m_zoomLevel);
+double TreeViewController::extentX() const {
+    return std::max(std::abs(m_bounds.value("min_x").toDouble()),
+                    std::abs(m_bounds.value("max_x").toDouble()));
 }
 
-// Clamp pan so the tree can't be dragged into empty canvas past its border,
-// while never cropping the outermost nodes (legacy PassiveTreeView.lua limits
-// pan the same way; its literal `viewport * zoom * 2/3` formula is calibrated to
-// legacy's own tree->screen scale and does NOT transfer to ours, so this derives
-// the bound from our actual geometry instead).
-//
-// Screen mapping (must match drawTree / hitTest):
-//     screen = vp/2 + zoomOffset + scale * treeCoord,  scale = baseScale * zoom,
-//     baseScale = min(vpW,vpH) / bounds.size
-// The farthest node on an axis sits at distance `extent` tree-units from the
-// tree origin, i.e. `extent * scale` screen-px from the origin point. Allowing
-// |zoomOffset| up to `extent*scale - vp/2` lets that node travel exactly to the
-// viewport edge (fully reachable, never cropped) and no further (beyond it would
-// be void). When the whole tree fits in the viewport the bound is 0 -> locked.
-bool TreeViewController::clampPan() {
-    if (m_vpW <= 0.0 || m_vpH <= 0.0)
+double TreeViewController::extentY() const {
+    return std::max(std::abs(m_bounds.value("min_y").toDouble()),
+                    std::abs(m_bounds.value("max_y").toDouble()));
+}
+
+bool TreeViewController::nodePosition(int id, double& x, double& y) const {
+    const auto it = m_nodePos.constFind(id);
+    if (it == m_nodePos.constEnd())
         return false;
-    const double size = m_bounds.value("size").toDouble();
-    if (size <= 0.0)
-        return false;
-    const double scale = (std::min(m_vpW, m_vpH) / size) * zoom();
-    const double minx = m_bounds.value("min_x").toDouble();
-    const double maxx = m_bounds.value("max_x").toDouble();
-    const double miny = m_bounds.value("min_y").toDouble();
-    const double maxy = m_bounds.value("max_y").toDouble();
-    const double extentX = std::max(std::abs(minx), std::abs(maxx));
-    const double extentY = std::max(std::abs(miny), std::abs(maxy));
-    // Margin so the outermost node sits fully inside the border rather than
-    // half-clipped by it. Without it the edge node's CENTRE lands on the
-    // viewport edge (its outer half off-screen). Sized to a node's on-screen
-    // half-extent (largest overlay ~85 sheet-units * scale * 2.66 / 2), so it
-    // tracks zoom; the resulting sliver of canvas beyond the node is negligible
-    // versus the unbounded void this clamp removes.
-    const double nodeMargin = 85.0 * scale * 2.66 / 2.0;
-    const double maxX = std::max(0.0, extentX * scale - m_vpW / 2.0 + nodeMargin);
-    const double maxY = std::max(0.0, extentY * scale - m_vpH / 2.0 + nodeMargin);
-    const double cx = std::min(std::max(m_zoomX, -maxX), maxX);
-    const double cy = std::min(std::max(m_zoomY, -maxY), maxY);
-    if (cx != m_zoomX || cy != m_zoomY) {
-        m_zoomX = cx;
-        m_zoomY = cy;
-        return true;
-    }
-    return false;
-}
-
-void TreeViewController::setViewport(qreal w, qreal h) {
-    if (m_vpW == w && m_vpH == h)
-        return;
-    m_vpW = w;
-    m_vpH = h;
-    // A shrunk viewport (or first report) may put an existing pan out of bounds.
-    if (clampPan())
-        emit transformChanged();
-}
-
-void TreeViewController::setZoomLevel(double v) {
-    if (v < 0.0) v = 0.0;
-    if (v > 12.0) v = 12.0;
-    if (m_zoomLevel != v) {
-        m_zoomLevel = v;
-        // Zooming out shrinks the allowed pan range, so re-clamp.
-        clampPan();
-        emit transformChanged();
-    }
-}
-
-void TreeViewController::setZoomX(double v) {
-    const double old = m_zoomX;
-    m_zoomX = v;
-    clampPan();
-    if (m_zoomX != old)
-        emit transformChanged();
-}
-
-void TreeViewController::setZoomY(double v) {
-    const double old = m_zoomY;
-    m_zoomY = v;
-    clampPan();
-    if (m_zoomY != old)
-        emit transformChanged();
-}
-
-void TreeViewController::zoomBy(double delta) {
-    setZoomLevel(m_zoomLevel + delta);
-}
-
-void TreeViewController::panBy(double dx, double dy) {
-    const double oldX = m_zoomX, oldY = m_zoomY;
-    m_zoomX += dx;
-    m_zoomY += dy;
-    clampPan();
-    if (m_zoomX != oldX || m_zoomY != oldY)
-        emit transformChanged();
-}
-
-void TreeViewController::resetView() {
-    m_zoomLevel = 8.0;
-    m_zoomX = 0.0;
-    m_zoomY = 0.0;
-    emit transformChanged();
+    x = it->first;
+    y = it->second;
+    return true;
 }
 
 qint64 TreeViewController::hitCellKey(int x, int y) {
@@ -146,10 +58,14 @@ qint64 TreeViewController::hitCellKey(int x, int y) {
 void TreeViewController::rebuildHitIndex(const QVariantList& nodes) {
     m_hitNodes.clear();
     m_hitCells.clear();
+    m_nodePos.clear();
     m_hitNodes.reserve(nodes.size());
+    m_nodePos.reserve(nodes.size());
 
     for (const QVariant& row : nodes) {
         const QVariantMap node = row.toMap();
+        m_nodePos.insert(node.value("id").toInt(),
+                         qMakePair(node.value("x").toDouble(), node.value("y").toDouble()));
         // Legacy PassiveTreeView only considers nodes that have artwork sized
         // by rsq, belong to a non-proxy group, and are not proxy nodes. The
         // bridge filters proxies too; retaining these checks here makes a
@@ -241,26 +157,13 @@ void TreeViewController::refresh(LuaEngine* engine) {
              << " connectors=" << d.value("connectors").toList().size();
 }
 
-// Phase 4b: invert the treeToScreen transform to find the nearest node id.
-// Screen = vpW/2 + zoomX + scale * treeX  (and likewise for y), where
-// scale = min(vpW,vpH)/bounds.size * zoom. We solve for treeX/treeY and pick the
-// closest node inside its LEGACY hit circle (`node.rsq`). The bridge builds a
-// spatial grid at refresh time, so a mouse move no longer deep-copies and scans
-// every QVariantMap in TreeModel.
-int TreeViewController::hitTest(qreal screenX, qreal screenY, qreal vpW, qreal vpH) {
+// Pick the closest node whose LEGACY hit circle (`node.rsq`) contains the
+// tree-space point. The screen->tree inversion is per view (TreeViewport); the
+// spatial grid built at refresh time means a mouse move no longer deep-copies
+// and scans every QVariantMap in TreeModel.
+int TreeViewController::hitTestTree(double treeX, double treeY) const {
     if (!m_loaded || m_hitNodes.isEmpty())
         return -1;
-    const double size = m_bounds.value("size").toDouble();
-    if (size <= 0 || vpW <= 0 || vpH <= 0)
-        return -1;
-    const double baseScale = std::min(vpW, vpH) / size;
-    const double scale = baseScale * zoom();
-    if (scale <= 0)
-        return -1;
-    const double offsetX = m_zoomX + vpW / 2.0;
-    const double offsetY = m_zoomY + vpH / 2.0;
-    const double treeX = (screenX - offsetX) / scale;
-    const double treeY = (screenY - offsetY) / scale;
     const int cellX = static_cast<int>(std::floor(treeX / kHitCellSize));
     const int cellY = static_cast<int>(std::floor(treeY / kHitCellSize));
     const auto candidates = m_hitCells.constFind(hitCellKey(cellX, cellY));

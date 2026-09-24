@@ -35,9 +35,13 @@ ItemSlotControl, TimelessJewelSocketControl, and CalcBreakdown reuse later.
 - [x] Enable WebP decoding (qtimageformats plugin) for `ascendancy-*.webp`/
   `bloodline-*.webp`; verify all 39 versions load (5+ version-gated sprite formats
   in `PassiveTree.lua`). (S)
-- [ ] Make the tree viewer an **embeddable, parameterized component** (zoom target,
+- [x] Make the tree viewer an **embeddable, parameterized component** (zoom target,
   crosshair, compare spec) — required by ItemSlotControl jewel viewer,
   TimelessJewelSocketControl, and CalcBreakdown. (M)
+  → **DONE 2026-09-24** (session log): per-instance `TreeViewport`, `focusNodeId` +
+  `focusZoom`, crosshair, focus ring. *Compare spec moved to Part 4.3's compare
+  item:* legacy sets `viewer.compareSpec` only on the Tree-tab viewer
+  (`TreeTab.lua:472`, `CompareTab.lua:211`), never on an embed.
 
 ## Part 4.2 — Spec management
 
@@ -60,7 +64,11 @@ ItemSlotControl, TimelessJewelSocketControl, and CalcBreakdown reuse later.
   on alloc/dealloc** (Phase 2 node calculator), required gold, compare-spec status;
   jewel sockets show socketed-jewel tooltip + radius rings + "allocates in radius". (M)
 - [ ] Compare checkbox + compare-spec dropdown → overlay (green/red/blue) or the
-  compare colors in the viewer; cluster subgraphs. (M)
+  compare colors in the viewer; cluster subgraphs. (M) Includes the viewer's
+  `compareSpec` parameter (moved here from 4.1): the bridge must export the
+  compare spec's alloc/mastery/jewel state per node
+  (`PassiveTreeView:GetCompareNodeColor`), and TreeScene needs per-node tinting —
+  `QSGTextureMaterial` cannot tint, so use a vertex-colour textured material.
 - [ ] Search box (Ctrl+F, Lua patterns, `oil:` anoint prefix, `(a|b)` groups) →
   viewer highlight + optional edge-of-viewport circles. (S-M)
 - [ ] **Show Node Power** + max-depth dropdown + power-stat dropdown → heat map;
@@ -424,3 +432,59 @@ sum-preserving frontier pairs exist from a fresh Scion, so the two-node swap
 path is not exercised there; `checksumNonLinearOk` covers the class directly.
 
 Still open in 4.1: the embeddable, parameterized tree component.
+
+## Session log — 2026-09-24 (Part 4.1: embeddable tree viewer)
+
+**Problem.** `TreeViewer.qml` already had embed-ish properties, but zoom/pan/
+viewport lived on the ONE `treeViewController` (a context-property singleton),
+and every `TreeScene` pushed its own size into it via `setViewport` — two
+instances would have fought over the pan clamp and shared one framing.
+`centerOnNodeId` read a nonexistent `nodeModel` global; `targetNodeId` and
+`showCrosshair` were declared on `TreeScene` but never drawn.
+
+**Design (mirrors legacy's one-`PassiveTreeView`-per-embed over a shared spec).**
+- `app/src/TreeViewport.h` (new, header-only, no Qt Quick): per-instance zoom
+  level / raw zoom / pan / viewport, legacy screen mapping, cursor-anchored
+  `zoomAt` (legacy `PassiveTreeView:Zoom` — the port previously zoomed about the
+  centre), the geometry-derived pan clamp (moved verbatim from the controller),
+  and `focus(x, y, rawZoom)` = legacy embed framing (`viewer.zoom = z;
+  viewer.zoomX = -node.x * scale`). A raw-zoom focus is NOT pan-clamped: the
+  interactive clamp keeps the rim node at the viewport edge, so it would refuse
+  to centre an outer socket.
+- `TreeViewController` is now data-only: models, hit grid, search, alloc. New
+  `hitTestTree(treeX, treeY)` + `nodePosition(id)` (all exported nodes,
+  proxies included) + `extentX/Y`. All zoom/pan/`setViewport` API removed (its
+  only caller was `TreeViewer.qml`).
+- `TreeScene` owns a `TreeViewport`; properties `zoomLevel`/`zoomX`/`zoomY` (RW),
+  `focusNodeId` + `focusZoom` (sticky: re-applied on resize and tree refresh);
+  invokables `zoomBy(delta, cursorX, cursorY)`, `panBy`, `resetView`,
+  `hitTest(x, y)`, `nodeScreenPos(id)`, `centerOnNode(id, zoom)`. It no longer
+  accepts mouse buttons itself (would swallow clicks under a non-interactive
+  embed). Textures stay shared per window.
+- `TreeViewer.qml` API: `interactive`, `readOnly`, `showSearch`, `showTooltip`,
+  `showCrosshair` (2px 20% white, `ItemSlotHelper.DrawViewer`), `focusNodeId`,
+  `focusZoom`, `showFocusRing` (30px red ring, `CalcBreakdownControl`), `scene`
+  alias. Embed recipes are in the file header. The focus ring is a QML circle,
+  not legacy's tinted `small_ring.png` (close; revisit with the 4.3 tinting
+  material if it matters).
+
+**Gate.** New `tree-viewport` check in the shared suite (both binaries), on the
+real 3_28 tree with the rim node (x = -11400): jewel-viewer framing equals
+`ItemSlotHelper`'s formula and centres the node; Calcs framing equals
+`CalcBreakdownControl`'s; focus survives a resize; interactive pan still clamps
+with the rim node reachable exactly at the edge; `zoomAt` keeps the cursor's tree
+point fixed; returning to level zoom drops the raw zoom.
+
+```
+tree-viewport ok = true  jewelFormulaOk = true  jewelCentredOk = true  calcsFormulaOk = true
+  tabClampedOk = true  resizeFocusOk = true  independentOk = true  rimReachableOk = true
+  zoomAnchorOk = true  unfocusOk = true  rimX = -11400
+pob-selftest EXIT=0 ; pob-qt --headless EXIT=0 "SELFTEST PASSED"
+```
+
+Captures vs baseline: all 10 views SSIM 1.000 (tree MSE 0.0 — the refactor is
+pixel-identical for the Tree tab). Multi-instance proof: a temporary probe put a
+jewel-style inset (socket 26725, zoom 17, crosshair) and a Calcs-style inset
+(zoom 5, focus ring) over the Tree tab; the capture showed all three views
+rendering independently from the shared data, each correctly framed. Probe
+reverted.

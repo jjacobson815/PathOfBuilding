@@ -3,6 +3,8 @@
 #include <QString>
 #include "LuaEngine.h"
 #include "TextMetrics.h"
+#include "TreeViewport.h"
+#include <cmath>
 
 // Shared headless self-test suite for the LuaJIT bridge.
 //
@@ -786,6 +788,97 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
                  << "noSkills=" << m.value("noSkills").toBool();
         if (!m.value("ok").toBool()) {
             qCritical() << "main-skill check FAILED:" << m;
+            return false;
+        }
+    }
+
+    // Phase 4 Part 4.1: embeddable viewer. Each TreeScene owns a TreeViewport
+    // over the shared tree data; check its math against legacy's embed
+    // formulas on the real tree, including the rim node the interactive pan
+    // clamp would refuse to centre.
+    {
+        const QVariantMap d = engine.getTreeData().toMap();
+        const QVariantMap b = d.value("bounds").toMap();
+        const double size = b.value("size").toDouble();
+        const double extX = std::max(std::abs(b.value("min_x").toDouble()), std::abs(b.value("max_x").toDouble()));
+        const double extY = std::max(std::abs(b.value("min_y").toDouble()), std::abs(b.value("max_y").toDouble()));
+        // Rim node = largest |x| among real (grouped, non-proxy) nodes.
+        double rimX = 0, rimY = 0;
+        for (const QVariant& v : d.value("nodes").toList()) {
+            const QVariantMap n = v.toMap();
+            if (!n.value("hasGroup").toBool() || n.value("isProxy").toBool())
+                continue;
+            if (std::abs(n.value("x").toDouble()) > std::abs(rimX)) {
+                rimX = n.value("x").toDouble();
+                rimY = n.value("y").toDouble();
+            }
+        }
+        auto near = [](double a, double e) { return std::abs(a - e) <= 1e-6 * std::max(1.0, std::abs(e)); };
+        const bool dataOk = size > 0 && rimX != 0;
+
+        // ItemSlotHelper.DrawViewer: zoom 17, viewer.zoomX = -node.x / (size / (vp * 17)).
+        TreeViewport jewel;
+        jewel.setTreeExtent(size, extX, extY);
+        jewel.setViewport(200, 200);
+        jewel.focus(rimX, rimY, 17);
+        double sx = 0, sy = 0;
+        jewel.treeToScreen(rimX, rimY, sx, sy);
+        const bool jewelFormulaOk = near(jewel.zoom(), 17) && near(jewel.zoomX(), -rimX / (size / (200 * 17.0)))
+                                    && near(jewel.zoomY(), -rimY / (size / (200 * 17.0)));
+        const bool jewelCentredOk = near(sx, 100) && near(sy, 100);
+
+        // CalcBreakdownControl: zoom 5, scale = size / 1500, 300x300 viewport.
+        TreeViewport calcs;
+        calcs.setTreeExtent(size, extX, extY);
+        calcs.setViewport(300, 300);
+        calcs.focus(rimX, rimY, 5);
+        const bool calcsFormulaOk = near(calcs.zoomX(), -rimX / (size / 1500.0));
+
+        // A focused view stays focused through a resize (no clamp while framed),
+        // and is independent of any other instance over the same tree.
+        TreeViewport tab;
+        tab.setTreeExtent(size, extX, extY);
+        tab.setViewport(1100, 720);
+        tab.panBy(1e9, 1e9);          // interactive pan: clamped
+        const bool tabClampedOk = tab.zoomX() < 1e9 && tab.zoomX() > 0;
+        jewel.setViewport(260, 260);
+        jewel.focus(rimX, rimY, 17);
+        jewel.treeToScreen(rimX, rimY, sx, sy);
+        const bool resizeFocusOk = near(sx, 130) && near(sy, 130);
+        const bool independentOk = !near(tab.zoomX(), jewel.zoomX()) && near(calcs.zoom(), 5);
+
+        // Rim node reachable at the clamp limit: fully on screen, not past it.
+        double rx = 0, ry = 0;
+        tab.setZoomLevel(TreeViewport::kDefaultLevel);
+        tab.panBy(-1e9, 0);
+        tab.treeToScreen(extX, 0, rx, ry);
+        const bool rimReachableOk = rx <= 1100 && rx >= 1100 - 85.0 * tab.scale() * 2.66;
+
+        // Legacy PassiveTreeView:Zoom keeps the point under the cursor fixed.
+        TreeViewport z;
+        z.setTreeExtent(size, extX, extY);
+        z.setViewport(1100, 720);
+        z.setZoomLevel(6);
+        double tx0 = 0, ty0 = 0, tx1 = 0, ty1 = 0;
+        z.screenToTree(400, 300, tx0, ty0);
+        z.zoomAt(1, 400, 300);
+        z.screenToTree(400, 300, tx1, ty1);
+        const bool zoomAnchorOk = near(z.zoomLevel(), 7) && std::abs(tx1 - tx0) < 1e-6 && std::abs(ty1 - ty0) < 1e-6;
+
+        // Returning to level zoom drops the raw focus zoom.
+        jewel.setZoomLevel(3);
+        const bool unfocusOk = near(jewel.zoom(), std::pow(1.2, 3));
+
+        const bool ok = dataOk && jewelFormulaOk && jewelCentredOk && calcsFormulaOk && tabClampedOk
+                        && resizeFocusOk && independentOk && rimReachableOk && zoomAnchorOk && unfocusOk;
+        qDebug().noquote() << "tree-viewport ok =" << ok
+                 << " jewelFormulaOk =" << jewelFormulaOk << " jewelCentredOk =" << jewelCentredOk
+                 << " calcsFormulaOk =" << calcsFormulaOk << " tabClampedOk =" << tabClampedOk
+                 << " resizeFocusOk =" << resizeFocusOk << " independentOk =" << independentOk
+                 << " rimReachableOk =" << rimReachableOk << " zoomAnchorOk =" << zoomAnchorOk
+                 << " unfocusOk =" << unfocusOk << " rimX =" << rimX;
+        if (!ok) {
+            qCritical() << "tree-viewport check FAILED";
             return false;
         }
     }

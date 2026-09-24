@@ -36,17 +36,20 @@ full Save-As folder browser — all explicit long tail; Phase 3's acceptance
 gate is otherwise clear to close whenever those are judged in/out of scope.
 
 **Phase 4 — Tree Tab — IN PROGRESS.** Recon findings are at the bottom of
-`phases/PHASE-4-tree-tab.md`. **Part 4.1 — 4 of 5 items DONE.** The renderer
-decision is made AND landed (commit `7227ad42c`): the tree draws through the C++
-`QQuickItem` `TreeScene` (`app/src/TreeScene.cpp`, hosted by
+`phases/PHASE-4-tree-tab.md`. **Part 4.1 — ALL 5 items DONE (2026-09-24).**
+Embeddable viewer: each `TreeScene` owns a per-instance `TreeViewport`
+(zoom/pan) over the shared, data-only `TreeViewController`; `TreeViewer.qml`
+takes `focusNodeId`/`focusZoom`/`showCrosshair`/`showFocusRing`/`interactive`
+(embed recipes in its header). The compare-spec overlay moved to Part 4.3.
+Renderer (commit `7227ad42c`): the tree draws through the C++ `QQuickItem`
+`TreeScene` (`app/src/TreeScene.cpp`, hosted by
 `app/qml/components/TreeViewer.qml`); the old Canvas-2D path is deleted.
 Connectors are the engine's real textured orbit quads (`vert`/`uv` per connector
 — the gate counts 1828 arcs + 1233 lines, 0 bad), atlases are shared
-`QSGTexture`s (`s_textureCache`). Re-gated 2026-09-24: selftest + headless exit 0;
-tree capture vs `skill_tree/legacy.png` SSIM 0.53 / hist-corr 0.91 (the pre-
-TreeScene baseline scored 0.14 / 0.38), so the tree capture baseline was
-refreshed. Earlier items (2026-08-19):
-(evidence: the "Session log — 2026-08-19" section of the phase file): group
+`QSGTexture`s (`s_textureCache`). Tree capture vs `skill_tree/legacy.png`:
+SSIM 0.53 / hist-corr 0.91 (the pre-TreeScene baseline scored 0.14 / 0.38), so
+the tree capture baseline was refreshed. Earlier items (2026-08-19;
+evidence: the "Session log — 2026-08-19" section of the phase file): group
 backgrounds now resolve for **39/39** tree versions instead of 1 (resolved from shipped sprite
 data via the memoised `sheetInfo`; the old `_gbByVersion` table and hand-rolled
 `pngSize` reader are both deleted); the renderer
@@ -57,8 +60,7 @@ across all 39 versions decode). The real `ImageSize()` + coherent sprite-UV
 conversion is now gated (`5537` sampled sprites, `0` out of bounds), and tree
 interactions use a C++ spatial hit index with each node's legacy `rsq` radius,
 proxy rejection, and bridge-side undo snapshots (the selftest exercises
-alloc→undo→redo→dealloc). Still open in 4.1: the embeddable tree component;
-then Parts 4.2–4.5.
+alloc→undo→redo→dealloc). Next: Parts 4.2–4.5.
 Already fixed: `pob_getTreeData` rendered `latestTreeVersion` regardless of the
 spec's actual tree version (the spec fallback was dead code).
 
@@ -106,8 +108,9 @@ deploy, so this cannot silently ship again.
 EVERY compile step reports `FAILED: [code=1]` with ZERO diagnostics —
 `cc1plus.exe` cannot resolve its own DLLs and exits 127, which gcc swallows. Not
 Smart App Control, not a code error. Running `pob-selftest.exe`/`pob-qt.exe`
-needs the same PATH prefix (else exit 127). Also: `app/src/selftest_checks.h` has
-MIXED CRLF/LF line endings, so exact-string edits must match per region.
+needs the same PATH prefix (else exit 127). Several `app/` sources had MIXED
+CRLF/LF endings (breaks exact-string edits); `* text=auto` normalises on commit,
+so converting a file to LF (`sed -i 's/$//'`) is a content no-op for git.
 
 User-data policy is RESOLVED (SHARE); see resolved decision below +
 [[solo-hobby-fork-poc-scope]].

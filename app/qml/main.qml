@@ -219,7 +219,7 @@ Window {
                     visible: true
                     color: theme.background
 
-                    // Passive-tree view (Canvas renderer + hover tooltip).
+                    // Passive-tree view (TreeScene scene-graph renderer + hover tooltip).
                     TreeView {
                         visible: root.activeView === "TREE"
                     }

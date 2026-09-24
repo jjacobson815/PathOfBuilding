@@ -32,7 +32,9 @@ QString cleanPath(const QString& path) {
 
 TreeScene::TreeScene(QQuickItem* parent) : QQuickItem(parent) {
     setFlag(ItemHasContents, true);
-    setAcceptedMouseButtons(Qt::AllButtons);
+    // No accepted mouse buttons: input is handled by the TreeViewer MouseArea
+    // on top. Accepting here would swallow clicks meant for whatever sits
+    // under a non-interactive embedded viewer.
 }
 
 TreeScene::~TreeScene() = default;
@@ -45,36 +47,104 @@ void TreeScene::setController(TreeViewController* ctrl) {
     m_controller = ctrl;
     if (m_controller) {
         connect(m_controller, &TreeViewController::viewChanged, this, &TreeScene::onControllerViewChanged);
-        connect(m_controller, &TreeViewController::transformChanged, this, &TreeScene::onControllerTransformChanged);
         connect(m_controller, &TreeViewController::searchChanged, this, &TreeScene::onControllerSearchChanged);
-        if (width() > 0 && height() > 0)
-            m_controller->setViewport(width(), height());
     }
     m_dirtyGeometry = true;
     m_dirtyTransform = true;
+    syncViewport();
     emit controllerChanged();
     update();
 }
 
-double TreeScene::zoom() const {
-    return m_controller ? m_controller->zoom() : 1.0;
-}
-
-double TreeScene::zoomX() const {
-    return m_controller ? m_controller->zoomX() : 0.0;
-}
-
-double TreeScene::zoomY() const {
-    return m_controller ? m_controller->zoomY() : 0.0;
-}
-
 double TreeScene::baseScale() const {
-    if (!m_controller) return 1.0;
-    const double bsize = m_controller->boundsSize();
-    const double w = width() > 0 ? width() : 0;
-    const double h = height() > 0 ? height() : 0;
-    const double bs = (w > 0 && h > 0 && bsize > 0) ? std::min(w, h) / bsize : 1.0;
+    const double bs = m_view.baseScale();
     return (std::isfinite(bs) && bs > 0) ? bs : 1.0;
+}
+
+void TreeScene::viewMoved() {
+    m_dirtyTransform = true;
+    emit transformChanged();
+    update();
+}
+
+void TreeScene::syncViewport() {
+    if (m_controller)
+        m_view.setTreeExtent(m_controller->boundsSize(), m_controller->extentX(), m_controller->extentY());
+    m_view.setViewport(width(), height());
+    applyFocus();
+    // Size/extent changes move nodes on screen even when the pan offset is
+    // unchanged, so always notify overlays that track screen positions.
+    viewMoved();
+}
+
+bool TreeScene::applyFocus() {
+    if (m_focusNodeId < 0 || !m_controller || !m_view.valid())
+        return false;
+    double x = 0, y = 0;
+    if (!m_controller->nodePosition(m_focusNodeId, x, y))
+        return false;
+    const double oldX = m_view.zoomX(), oldY = m_view.zoomY(), oldZoom = m_view.zoom();
+    m_view.focus(x, y, m_focusZoom);
+    return m_view.zoomX() != oldX || m_view.zoomY() != oldY || m_view.zoom() != oldZoom;
+}
+
+void TreeScene::setZoomLevel(double level) {
+    if (m_view.setZoomLevel(level))
+        viewMoved();
+}
+
+void TreeScene::setZoomX(double v) {
+    if (m_view.setZoomX(v))
+        viewMoved();
+}
+
+void TreeScene::setZoomY(double v) {
+    if (m_view.setZoomY(v))
+        viewMoved();
+}
+
+void TreeScene::zoomBy(double delta, double cursorX, double cursorY) {
+    if (cursorX < 0 || cursorY < 0) {
+        cursorX = width() / 2.0;
+        cursorY = height() / 2.0;
+    }
+    if (m_view.zoomAt(delta, cursorX, cursorY))
+        viewMoved();
+}
+
+void TreeScene::panBy(double dx, double dy) {
+    if (m_view.panBy(dx, dy))
+        viewMoved();
+}
+
+void TreeScene::resetView() {
+    m_view.reset();
+    syncViewport();
+}
+
+int TreeScene::hitTest(double x, double y) const {
+    double tx = 0, ty = 0;
+    if (!m_controller || !m_view.valid() || !m_view.screenToTree(x, y, tx, ty))
+        return -1;
+    return m_controller->hitTestTree(tx, ty);
+}
+
+QVariant TreeScene::nodeScreenPos(int id) const {
+    double tx = 0, ty = 0;
+    if (!m_controller || !m_view.valid() || !m_controller->nodePosition(id, tx, ty))
+        return QVariant();
+    double sx = 0, sy = 0;
+    m_view.treeToScreen(tx, ty, sx, sy);
+    return QPointF(sx, sy);
+}
+
+bool TreeScene::centerOnNode(int id, double zoomFactor) {
+    double x = 0, y = 0;
+    if (!m_controller || !m_view.valid() || !m_controller->nodePosition(id, x, y))
+        return false;
+    m_view.focus(x, y, zoomFactor);
+    viewMoved();
+    return true;
 }
 
 void TreeScene::setHoverNodeId(int id) {
@@ -86,22 +156,22 @@ void TreeScene::setHoverNodeId(int id) {
     update();
 }
 
-void TreeScene::setTargetNodeId(int id) {
-    if (m_targetNodeId == id)
+void TreeScene::setFocusNodeId(int id) {
+    if (m_focusNodeId == id)
         return;
-    m_targetNodeId = id;
-    m_dirtyOverlay = true;
-    emit targetNodeIdChanged();
-    update();
+    m_focusNodeId = id;
+    emit focusChanged();
+    if (applyFocus())
+        viewMoved();
 }
 
-void TreeScene::setShowCrosshair(bool show) {
-    if (m_showCrosshair == show)
+void TreeScene::setFocusZoom(double z) {
+    if (m_focusZoom == z)
         return;
-    m_showCrosshair = show;
-    m_dirtyOverlay = true;
-    emit showCrosshairChanged();
-    update();
+    m_focusZoom = z;
+    emit focusChanged();
+    if (applyFocus())
+        viewMoved();
 }
 
 void TreeScene::setShowSearch(bool show) {
@@ -115,25 +185,14 @@ void TreeScene::setShowSearch(bool show) {
 
 void TreeScene::geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
-    if (newGeometry.size() != oldGeometry.size()) {
-        if (m_controller && newGeometry.width() > 0 && newGeometry.height() > 0) {
-            m_controller->setViewport(newGeometry.width(), newGeometry.height());
-        }
-        m_dirtyTransform = true;
-        update();
-    }
+    if (newGeometry.size() != oldGeometry.size())
+        syncViewport();
 }
 
 void TreeScene::onControllerViewChanged() {
     m_dirtyGeometry = true;
-    m_dirtyTransform = true;
-    update();
-}
-
-void TreeScene::onControllerTransformChanged() {
-    m_dirtyTransform = true;
-    emit transformChanged();
-    update();
+    // A refresh can change the tree version (bounds) or drop the focus node.
+    syncViewport();
 }
 
 void TreeScene::onControllerSearchChanged() {
@@ -489,11 +548,10 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
         overlayContainer = transformNode->childAtIndex(4);
     }
 
-    const double bsize = m_controller ? m_controller->boundsSize() : 0.0;
-    if (bsize <= 0)
+    if (!m_controller || !m_view.valid())
         return rootNode;
 
-    const double scale = baseScale() * zoom();
+    const double scale = m_view.scale();
     const double zx = zoomX();
     const double zy = zoomY();
     const float w = static_cast<float>(width());

@@ -11,20 +11,16 @@ class TreeModel;
 class TreeGroupModel;
 class TreeConnectorModel;
 
-// Phase 4a/4b: owns the passive-tree view state (zoom/pan) and the three tree
-// data models, and repopulates them from the Lua bridge (pob_getTreeData) on
-// demand. refresh() is throttled: it only rebuilds the models when the engine's
-// tree revision changes (or on first load), so calling it every frame is cheap.
-// Phase 4b adds hit-testing (screen->node id), allocation toggles that flow
-// through the Lua bridge and repaint the canvas, and a search-match id list.
+// Phase 4a/4b: owns the three passive-tree data models (shared by every tree
+// view of the current build) and repopulates them from the Lua bridge
+// (pob_getTreeData) on demand. View state (zoom/pan) is NOT here: it is per
+// view, in TreeScene's TreeViewport (Phase 4.1 embeddable viewer). refresh()
+// is throttled: it only rebuilds the models when the engine's tree revision
+// changes (or on first load), so calling it every frame is cheap.
+// Phase 4b adds tree-space hit-testing, allocation toggles that flow through
+// the Lua bridge, and a search-match id list.
 class TreeViewController : public QObject {
     Q_OBJECT
-    // zoom/pan transform properties notify transformChanged (NOT viewChanged) so the
-    // QML Scale/Translate bindings update without forcing a full canvas repaint.
-    Q_PROPERTY(double zoomLevel READ zoomLevel WRITE setZoomLevel NOTIFY transformChanged)
-    Q_PROPERTY(double zoom READ zoom NOTIFY transformChanged)
-    Q_PROPERTY(double zoomX READ zoomX WRITE setZoomX NOTIFY transformChanged)
-    Q_PROPERTY(double zoomY READ zoomY WRITE setZoomY NOTIFY transformChanged)
     Q_PROPERTY(QVariantMap bounds READ bounds NOTIFY viewChanged)
     // Robust, typed accessor for the tree bounds "size" (max extent in tree
     // units). Exposed separately from the QVariantMap so QML never has to rely
@@ -52,60 +48,41 @@ public:
     LuaEngine* engine() const { return m_engine; }
     QString lastRevision() const { return m_lastRevision; }
 
-    double zoomLevel() const { return m_zoomLevel; }
-    double zoom() const;
-    double zoomX() const { return m_zoomX; }
-    double zoomY() const { return m_zoomY; }
     QVariantMap bounds() const { return m_bounds; }
     double boundsSize() const { return m_bounds.value("size").toDouble(); }
+    // Per-axis max |coordinate| of the tree bounds; each TreeScene's pan clamp
+    // needs it. 0 until the first refresh.
+    double extentX() const;
+    double extentY() const;
     QVariantMap treeAssets() const { return m_assets; }
     QString assetBasePath() const { return m_assetBasePath; }
     QString backgroundUrl() const { return m_backgroundUrl; }
     QVariantList searchResults() const { return m_searchResults; }
     bool boundsValid() const { return m_boundsValid; }
 
-    void setZoomLevel(double v);
-    void setZoomX(double v);
-    void setZoomY(double v);
-
-    Q_INVOKABLE void zoomBy(double delta);
-    Q_INVOKABLE void panBy(double dx, double dy);
-    Q_INVOKABLE void resetView();
     Q_INVOKABLE void refresh(LuaEngine* engine);
 
-    // The tree view reports its pixel size here (on load + resize). It is needed
-    // to clamp panning so the tree can't be dragged off into empty canvas, and
-    // must be kept current for the clamp bounds to track the viewport.
-    Q_INVOKABLE void setViewport(qreal w, qreal h);
-
-    // Phase 4b: invert the treeToScreen transform to find the nearest node id
-    // under a screen point (screenX/screenY in the viewport's local pixels;
-    // vpW/vpH are the viewport size). Returns the node id, or -1 if none within
-    // the pixel hit threshold.
-    Q_INVOKABLE int hitTest(qreal screenX, qreal screenY, qreal vpW, qreal vpH);
+    // Nearest node id whose LEGACY hit circle (`node.rsq`) contains the tree-space
+    // point, or -1. Zoom/pan are per view (TreeScene owns a TreeViewport and
+    // converts screen -> tree before calling this), so one controller serves
+    // any number of views.
+    int hitTestTree(double treeX, double treeY) const;
+    // Tree-space position of any exported node (proxies included). False if
+    // the id is not in the current tree.
+    bool nodePosition(int id, double& x, double& y) const;
 
     // Phase 4b: allocation toggles. Each calls the Lua bridge, refreshes the
-    // models (so the canvas reflects the new alloc state) and repaints.
+    // models (so every view reflects the new alloc state) and repaints.
     Q_INVOKABLE void allocNode(int id);
     Q_INVOKABLE void deallocNode(int id);
     Q_INVOKABLE void toggleNode(int id);
 
     // Phase 4b: set the tree search string; stores the matching id list and
-    // emits searchChanged() so the canvas can highlight matches.
+    // emits searchChanged() so views can highlight matches.
     Q_INVOKABLE void setTreeSearch(const QString& str);
 
-private:
-    // Clamp m_zoomX/m_zoomY so the tree can't be panned into empty canvas,
-    // mirroring legacy (PassiveTreeView.lua): the allowed pan offset is
-    // +/- viewport * zoom * 2/3 on each axis, which grows with zoom (a larger
-    // tree needs more travel to reach its edges) and keeps the outer nodes
-    // reachable without exposing void beyond the radial border. No-op until the
-    // viewport size is known. Returns true if either value changed.
-    bool clampPan();
-
 signals:
-    void viewChanged();       // data/allocation changed -> canvas must repaint
-    void transformChanged();  // zoom/pan changed -> only the Scale/Translate updates
+    void viewChanged();       // data/allocation changed -> views must rebuild
     void searchChanged();
     void boundsValidChanged();   // bounds + assets became valid (fires once)
     void assetsInitialized();     // asset metadata ready (fires once)
@@ -128,15 +105,6 @@ private:
     TreeGroupModel* m_groups = nullptr;
     TreeConnectorModel* m_connectors = nullptr;
     LuaEngine* m_engine = nullptr;
-    // Default view opens zoomed in near the tree centre (class start), matching
-    // legacy PoB, rather than fit-whole-tree. zoom = 1.2^level, so 8 ≈ 4.3x.
-    double m_zoomLevel = 8.0;
-    double m_zoomX = 0.0;
-    double m_zoomY = 0.0;
-    // Tree-view pixel size (from setViewport); 0 until first reported. Used only
-    // for the pan clamp (see clampPan).
-    double m_vpW = 0.0;
-    double m_vpH = 0.0;
     QVariantMap m_bounds;
     QVariantMap m_assets;
     QString m_assetBasePath;
@@ -144,6 +112,7 @@ private:
     QVariantList m_searchResults;
     QVector<HitNode> m_hitNodes;
     QHash<qint64, QVector<int>> m_hitCells;
+    QHash<int, QPair<double, double>> m_nodePos;
     QString m_lastRevision;
     bool m_loaded = false;
     bool m_boundsValid = false;        // guards boundsValidChanged single emission
