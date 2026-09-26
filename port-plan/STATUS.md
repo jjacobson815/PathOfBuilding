@@ -127,10 +127,9 @@ then runs both gates with `QT_QPA_PLATFORM=offscreen`. Exit code is the
 verdict. `SKIP_DEPS=1` skips the install step.
 - `runtime/*.dll` are Windows-only; on Linux `lua-utf8` resolves through
   `pob_host.lua`'s `require("utf8")` fallback. No `.so` goes in `runtime/`.
-- Known: on a CLEAN checkout (no gitignored `src/Settings.xml`) the `options`
-  check fails on every OS — `pob_selftestOptions` reads `main.betaTest` as
-  `nil`, reverting it stores `false`, `nil ~= false`. Dev machines pass only
-  because their `Settings.xml` exists.
+- The gate must pass on a CLEAN checkout (no gitignored `src/Settings.xml`).
+  Unset options read as `nil` there; `pob_selftestOptions` now normalises to a
+  boolean (it failed `nil ~= false` before 2026-09-26, hidden on dev machines).
 
 ---
 
