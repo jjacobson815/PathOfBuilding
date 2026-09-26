@@ -117,6 +117,23 @@ User-data policy is RESOLVED (SHARE); see resolved decision below +
 
 ---
 
+## 🐧 Linux build (added 2026-09-26; cloud sessions check their work with this)
+
+Run `tools/linux-selftest.sh` from the repo root. It installs apt deps if
+missing (Ubuntu 24.04: Qt 6.4.2, LuaJIT 2.1), builds `utf8.so` from
+starwing/luautf8 into `/usr/local/lib/lua/5.1/`, builds `pob-selftest` +
+`pob-qt` into `build-linux/` (CMake + Ninja, unchanged `app/CMakeLists.txt`),
+then runs both gates with `QT_QPA_PLATFORM=offscreen`. Exit code is the
+verdict. `SKIP_DEPS=1` skips the install step.
+- `runtime/*.dll` are Windows-only; on Linux `lua-utf8` resolves through
+  `pob_host.lua`'s `require("utf8")` fallback. No `.so` goes in `runtime/`.
+- Known: on a CLEAN checkout (no gitignored `src/Settings.xml`) the `options`
+  check fails on every OS — `pob_selftestOptions` reads `main.betaTest` as
+  `nil`, reverting it stores `false`, `nil ~= false`. Dev machines pass only
+  because their `Settings.xml` exists.
+
+---
+
 ## ⛔ Hard invariants (override any older doc in the repo)
 
 Full detail in `reference/00-architecture.md`. The short list:

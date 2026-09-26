@@ -44,6 +44,7 @@ runtime/SimpleGraphic/SimpleGraphic.log
 # === Qt port (phase 0) ===
 # Build & deploy output
 build-win/
+build-linux/
 dist/
 captures/
 
