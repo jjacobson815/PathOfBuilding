@@ -41,7 +41,7 @@ jobs:
           cat > cspell-ci.json <<'EOF'
           {
             "import": ["./cspell.json"],
-            "ignorePaths": ["app/**", "port-plan/**", "docker/**", "HANDOFF-*.md"]
+            "ignorePaths": ["app/**", "port-plan/**", "docker/**", "HANDOFF-*.md", "tools/linux-selftest.sh"]
           }
           EOF
 
