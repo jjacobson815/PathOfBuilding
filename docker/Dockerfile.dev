@@ -36,6 +36,9 @@ RUN apk add --no-cache \
         # BLANK with no error logged anywhere -- and CI's offscreen GUI
         # smoke test treats a timeout/SIGKILL as success, so it would
         # degrade silently here rather than failing the job.
+        # The plugins (libqwebp.so etc.) are in the runtime package; -dev alone
+        # ships only CMake configs that point at them, so find_package(Qt6) fails.
+        qt6-qtimageformats \
         qt6-qtimageformats-dev
 
 # --- LuaJIT (same commit as the project's test Dockerfile) ------------------
