@@ -3421,7 +3421,9 @@ function pob_selftestOptions()
         if o.type == "check" and o.commit == false then boolOpt = o; break end
     end
     if not boolOpt then res.error = "no live boolean option"; return res end
-    local before = main[boolOpt.key]
+    -- Normalise: an unset option is nil (no Settings.xml on a clean checkout),
+    -- but pob_previewOption always stores a real boolean.
+    local before = not not main[boolOpt.key]
     pob_previewOption(boolOpt.key, not before)
     local flipped = main[boolOpt.key]
     pob_previewOption(boolOpt.key, before)
