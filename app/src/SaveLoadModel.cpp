@@ -77,8 +77,13 @@ QString SaveLoadModel::getBuildXML() {
 void SaveLoadModel::refresh(LuaEngine* engine) {
     if (!engine)
         return;
-    // main.modes.BUILD.unsaved is the engine's "has unsaved changes" flag.
-    const bool dirty = engine->getPath("main.modes.BUILD.unsaved").toBool();
+    // Phase 3: do NOT read main.modes.BUILD.unsaved directly. That field is
+    // assigned in exactly one place -- inside buildMode:OnFrame (Build.lua:1254)
+    // -- and the Qt host has no frame loop, so it never updates and this flag
+    // was stale essentially always. getUnsaved() ORs the ten real modFlags on
+    // demand (and writes the result back into bm.unsaved so the unmodified
+    // legacy readers, CanExit and Shutdown's dev autosave, also see the truth).
+    const bool dirty = engine->getUnsaved().toMap().value("unsaved").toBool();
     if (dirty != m_isDirty) {
         m_isDirty = dirty;
         emit dirtyChanged();

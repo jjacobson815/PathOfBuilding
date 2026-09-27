@@ -17,6 +17,7 @@ public:
 
     void setGroups(const QVariantList& groups);
     Q_INVOKABLE QVariant get(int row) const;
+    const QList<QVariantMap>& groups() const { return m_groups; }
 
 signals:
     void countChanged();

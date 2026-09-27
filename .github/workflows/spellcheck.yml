@@ -33,9 +33,21 @@ jobs:
             ${{ env.CONFIG_URL }}/extra-en-dict.txt
             ${{ env.CONFIG_URL }}/contribs-dict.txt
 
+      # Qt port: the upstream dictionaries only know PoB/PoE terms, so skip the
+      # port's own code, docs and build files. Legacy src/ is still checked.
+      # (cspell.json has comments, so wrap it via "import" instead of editing it.)
+      - name: Skip Qt port paths
+        run: |
+          cat > cspell-ci.json <<'EOF'
+          {
+            "import": ["./cspell.json"],
+            "ignorePaths": ["app/**", "port-plan/**", "docker/**", "HANDOFF-*.md", "tools/linux-selftest.sh"]
+          }
+          EOF
+
       - name: Run cspell
         uses: streetsidesoftware/cspell-action@v8
         with:
           files: '**' # needed as workaround for non-incremental runs (overrides in config still work ok)
-          config: "cspell.json"
+          config: "cspell-ci.json"
           incremental_files_only: ${{ github.event_name != 'workflow_dispatch' }}

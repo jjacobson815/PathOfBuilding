@@ -19,6 +19,7 @@ public:
     void setNodes(const QVariantList& nodes);
     // QML/Canvas helper: return the row's map by index.
     Q_INVOKABLE QVariant get(int row) const;
+    const QList<QVariantMap>& nodes() const { return m_nodes; }
 
 signals:
     void countChanged();

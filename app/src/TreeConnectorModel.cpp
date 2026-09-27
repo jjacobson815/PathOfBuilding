@@ -19,6 +19,10 @@ QHash<int, QByteArray> TreeConnectorModel::roleNames() const {
         { Y1Role, "y1" },
         { X2Role, "x2" },
         { Y2Role, "y2" },
+        { VertRole, "vert" },
+        { UvRole, "uv" },
+        { AtlasRole, "atlas" },
+        { IsArcRole, "isArc" },
     };
 }
 
@@ -36,6 +40,10 @@ QVariant TreeConnectorModel::data(const QModelIndex& index, int role) const {
         case Y1Role: return m.value("y1");
         case X2Role: return m.value("x2");
         case Y2Role: return m.value("y2");
+        case VertRole: return m.value("vert");
+        case UvRole: return m.value("uv");
+        case AtlasRole: return m.value("atlas");
+        case IsArcRole: return m.value("isArc");
         default: return QVariant();
     }
 }
