@@ -110,7 +110,8 @@ EVERY compile step reports `FAILED: [code=1]` with ZERO diagnostics —
 Smart App Control, not a code error. Running `pob-selftest.exe`/`pob-qt.exe`
 needs the same PATH prefix (else exit 127). Several `app/` sources had MIXED
 CRLF/LF endings (breaks exact-string edits); `* text=auto` normalises on commit,
-so converting a file to LF (`sed -i 's/$//'`) is a content no-op for git.
+so converting a file to LF (`sed -i 's/
+$//'`) is a content no-op for git.
 
 User-data policy is RESOLVED (SHARE); see resolved decision below +
 [[solo-hobby-fork-poc-scope]].
@@ -714,7 +715,12 @@ during the July 2026 analysis; trust code over any older plan doc.
 | 14 | Packaging, Update & Distribution | installer, updater replacement, CI matrix, gates |
 | 15 | Decommission & Final Hardening | retire SimpleGraphic contract, perf, parity sweep, upstream-sync |
 
-**Dependency spine:** 0 → 1 → 2 → 3 → {4,5,6,7,8,9 in any order, each gated} →
+**▶ PHASE ORDER (set by the user 2026-09-27 — this is the order to work in):**
+**4 → 5 → 6 → 7 → Phase 3 long tail → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.**
+("Phase 3 long tail" = Loadouts, the Spectre Library popup and the full Save-As
+folder browser, which stayed open when Phase 3's MVP closed.) When a phase's gate
+closes, the NEXT one in this list becomes ACTIVE.
+
+**Dependency spine (background):** 0 → 1 → 2 → 3 → {4,5,6,7,8,9 in any order, each gated} →
 10 → 11 → {12, 13} → 14 → 15. (Tree/Skills/Items/Config/Calcs/Notes/Party are
-independent once the shell + calc layer exist; do them in value order. Network
-before Import/Trade.)
+independent once the shell + calc layer exist. Network before Import/Trade.)

@@ -28,6 +28,7 @@ import "../components/StatDiff.js" as StatDiff
 //   + Convert / Copy + Convert (:156-175, 676-693), the "older tree version"
 //   banner with Convert / Convert all (:349-367, 695-707), and the mastery
 //   (:1038-1063) and tattoo/runegraft (:868-1017) popups opened from node clicks.
+// Phase 4 Part 4.5 — "Find Timeless Jewel" button (:187) -> TimelessJewelPopup.
 //
 // STATE MODEL: `specState` / `powerState` cache bridge reads and are refreshed
 // from engine signals only (no frame loop, invariant #7). Dropdown indices are
@@ -240,19 +241,23 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 28
+        // Wraps onto extra rows when the tab is narrow (legacy TreeTab:Draw
+        // moves its controls to a second line the same way).
+        height: barFlow.implicitHeight + 8
         color: theme.sideBarBg
 
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 4
-            anchors.rightMargin: 4
+        Flow {
+            id: barFlow
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 4
             spacing: 6
 
             Widgets.DropDownControl {
                 id: specSelect
-                Layout.preferredWidth: 190
-                Layout.preferredHeight: 20
+                width: 190
+                height: 20
                 popupMinWidth: 260
                 tooltipForItem: treeViewRoot.specTooltip
                 onSelected: function (index) {
@@ -268,23 +273,28 @@ Item {
                 }
             }
 
-            Widgets.CheckBox {
-                id: compareCheck
-                Layout.preferredHeight: 20
-                Layout.preferredWidth: 20
-                // The label draws to the LEFT of the box (legacy CheckBoxControl).
-                Layout.leftMargin: labelWidth + 12
-                label: "Compare:"
-                onToggled: function (s) {
-                    luaEngine.invoke("pob_setCompare", [s, compareSelect.currentIndex + 1])
-                    treeViewer.refreshHover()
+            // The label draws to the LEFT of the box (legacy CheckBoxControl),
+            // so the box sits at the right edge of a label-wide cell.
+            Item {
+                width: compareCheck.labelWidth + 32
+                height: 20
+                Widgets.CheckBox {
+                    id: compareCheck
+                    height: 20
+                    width: 20
+                    x: parent.width - 20
+                    label: "Compare:"
+                    onToggled: function (s) {
+                        luaEngine.invoke("pob_setCompare", [s, compareSelect.currentIndex + 1])
+                        treeViewer.refreshHover()
+                    }
                 }
             }
             Widgets.DropDownControl {
                 id: compareSelect
                 visible: compareCheck.state
-                Layout.preferredWidth: 160
-                Layout.preferredHeight: 20
+                width: 160
+                height: 20
                 popupMinWidth: 240
                 onSelected: function (index) {
                     luaEngine.invoke("pob_setCompare", [true, index + 1])
@@ -293,19 +303,21 @@ Item {
             }
 
             Widgets.Button {
-                Layout.preferredWidth: 145
-                Layout.preferredHeight: 20
+                width: 145
+                height: 20
                 label: "Reset Tree/Tattoos"
                 onClicked: resetPopup.open()
             }
             Widgets.Label {
                 label: "^7Version:"
                 size: 16
+                height: 20
+                verticalAlignment: Text.AlignVCenter
             }
             Widgets.DropDownControl {
                 id: versionSelect
-                Layout.preferredWidth: 100
-                Layout.preferredHeight: 20
+                width: 100
+                height: 20
                 popupMinWidth: 200
                 onSelected: function (index) {
                     var v = model[index]
@@ -318,28 +330,39 @@ Item {
                 }
             }
 
-            Item { Layout.fillWidth: true }
+            Widgets.Button {
+                width: 150
+                height: 20
+                label: "Find Timeless Jewel"
+                onClicked: timelessPopup.openFresh()
+            }
 
-            Widgets.CheckBox {
-                id: heatCheck
-                Layout.preferredHeight: 20
-                Layout.preferredWidth: 20
-                Layout.leftMargin: labelWidth + 12
-                label: "Show Node Power:"
-                tooltipFunc: function (tt) {
-                    var theme = (treeViewRoot.powerState.theme || "RED/BLUE").split("/")
-                    tt.addLine(14, "When enabled, an estimate of the offensive and defensive strength of")
-                    tt.addLine(14, "each unallocated passive is calculated and displayed visually.")
-                    tt.addLine(14, "Offensive power shows as " + theme[0].toLowerCase() + ", defensive power as " + theme[1].toLowerCase() + ".")
+            // The label draws to the LEFT of the box (legacy CheckBoxControl),
+            // so the box sits at the right edge of a label-wide cell.
+            Item {
+                width: heatCheck.labelWidth + 32
+                height: 20
+                Widgets.CheckBox {
+                    id: heatCheck
+                    height: 20
+                    width: 20
+                    x: parent.width - 20
+                    label: "Show Node Power:"
+                    tooltipFunc: function (tt) {
+                        var theme = (treeViewRoot.powerState.theme || "RED/BLUE").split("/")
+                        tt.addLine(14, "When enabled, an estimate of the offensive and defensive strength of")
+                        tt.addLine(14, "each unallocated passive is calculated and displayed visually.")
+                        tt.addLine(14, "Offensive power shows as " + theme[0].toLowerCase() + ", defensive power as " + theme[1].toLowerCase() + ".")
+                    }
+                    onToggled: function (s) { treeViewRoot.setHeatMap(s) }
                 }
-                onToggled: function (s) { treeViewRoot.setHeatMap(s) }
             }
             // Max-depth dropdown + Custom edit (TreeTab.lua:208-249).
             Widgets.DropDownControl {
                 id: depthSelect
                 visible: heatCheck.state
-                Layout.preferredWidth: customDepth.visible ? 70 : 60
-                Layout.preferredHeight: 20
+                width: customDepth.visible ? 70 : 60
+                height: 20
                 tooltipText: "Limit of Node distance to search (lower = faster)"
                 model: ["All", "5", "10", "15", "Custom"]
                 onSelected: function (index) {
@@ -353,8 +376,8 @@ Item {
             Widgets.EditControl {
                 id: customDepth
                 visible: false
-                Layout.preferredWidth: 40
-                Layout.preferredHeight: 20
+                width: 40
+                height: 20
                 isNumeric: true
                 onCommitted: function (text) {
                     var r = luaEngine.invoke("pob_setPowerMaxDepth", [Number(text) || 0])
@@ -364,8 +387,8 @@ Item {
             Widgets.DropDownControl {
                 id: powerStatSelect
                 visible: heatCheck.state
-                Layout.preferredWidth: 150
-                Layout.preferredHeight: 20
+                width: 150
+                height: 20
                 popupMinWidth: 220
                 onSelected: function (index) {
                     luaEngine.invoke("pob_setPowerStat", [index + 1])
@@ -376,8 +399,8 @@ Item {
             }
             Widgets.Button {
                 visible: heatCheck.state
-                Layout.preferredWidth: 130
-                Layout.preferredHeight: 20
+                width: 130
+                height: 20
                 label: treeViewRoot.showPowerReport ? "Hide Power Report" : "Show Power Report"
                 onClicked: {
                     treeViewRoot.showPowerReport = !treeViewRoot.showPowerReport
@@ -411,6 +434,11 @@ Item {
         onClosed: treeViewRoot.forceActiveFocus()
     }
 
+    Widgets.TimelessJewelPopup {
+        id: timelessPopup
+        parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
+        onClosed: treeViewRoot.forceActiveFocus()
+    }
     Widgets.MasteryPopup {
         id: masteryPopup
         parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
