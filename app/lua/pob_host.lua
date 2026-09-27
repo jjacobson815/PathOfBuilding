@@ -2232,6 +2232,10 @@ local _gbCache = { }
 -- search results are the ONLY thing that call mutates, so "it ran again" is
 -- exactly the signal, and re-running the same query is cheap to repaint.
 local _treeSearchSerial = 0
+-- Bumped on every spec switch / spec-list edit (Part 4.2). Two specs can share
+-- a version AND an identical allocation set while differing in jewels or
+-- masteries, so the alloc checksum alone cannot be trusted to see a switch.
+local _treeSpecSerial = 0
 
 -- Folds one ALLOCATED node id into the running checksum that feeds
 -- pob_getTreeData().revision. File-scope (not inline) so pob_selftestAllocChecksum
@@ -2741,6 +2745,7 @@ return {
         tostring(allocCount),
         string.format("%.0f", allocSum),
         tostring(_treeSearchSerial),
+        tostring(_treeSpecSerial),
     }, ":"),
 }
 end
@@ -4703,4 +4708,503 @@ function pob_selftestMainSkill()
         pob_recalculate()
     end
     return result
+end
+
+-- ============================================================================
+-- Phase 4 Part 4.2: spec management (TreeTab spec dropdown, Manage Trees popup,
+-- Import/Export Tree). Ports the LOGIC of TreeTab.lua / PassiveSpecListControl
+-- onto the live, unmodified `build.treeTab` object; QML owns every control.
+--
+-- Legacy re-derives the spec dropdown every Draw (TreeTab.lua:475-480). With
+-- no frame loop (invariant #7) every mutator below ends in pob_specSync, which
+-- does what the per-frame code and the list control's callbacks did: refresh
+-- the Items tab's tree selector, SyncLoadouts, and bump the renderer serial.
+-- Every mutator returns `_emit` so LuaEngine::invoke raises the right signals.
+-- ============================================================================
+
+local function pob_treeTab()
+    local bm = main and main.modes and main.modes.BUILD
+    return bm, bm and bm.treeTab
+end
+
+-- TreeTab:GetSpecList label rule (TreeTab.lua:513-519).
+local function pob_specLabel(spec)
+    local prefix = ""
+    if spec.treeVersion ~= latestTreeVersion then
+        local tv = treeVersions[spec.treeVersion]
+        prefix = "[" .. (tv and tv.display or tostring(spec.treeVersion)) .. "] "
+    end
+    return prefix .. (spec.title or "Default")
+end
+
+-- PassiveSpecListControl:UpdateItemsTabPassiveTreeDropdown (:120-128) +
+-- build:SyncLoadouts, the tail of every legacy list edit.
+local function pob_specSync(bm, tt)
+    local ctrl = bm.itemsTab and bm.itemsTab.controls and bm.itemsTab.controls.specSelect
+    if ctrl and ctrl.SetList then
+        local titles = { }
+        for _, spec in ipairs(tt.specList) do titles[#titles + 1] = spec.title or "Default" end
+        ctrl:SetList(titles)
+        ctrl.selIndex = tt.activeSpec
+    end
+    if bm.SyncLoadouts then pcall(bm.SyncLoadouts, bm) end
+    _treeSpecSerial = _treeSpecSerial + 1
+end
+
+local SPEC_EMIT = { "build", "tree", "items", "calcs" }
+
+function pob_getSpecList()
+    local bm, tt = pob_treeTab()
+    if not tt or not tt.specList then return nil end
+    local specs = { }
+    for i, spec in ipairs(tt.specList) do
+        local used, ascUsed, secondaryAscUsed, sockets = spec:CountAllocNodes()
+        local tv = treeVersions[spec.treeVersion]
+        local ascName = spec.curAscendClassName
+        specs[i] = {
+            index = i,
+            title = spec.title or "Default",
+            label = pob_specLabel(spec),
+            -- PassiveSpecListControl row label (:72-80).
+            listLabel = pob_specLabel(spec) .. " ("
+                .. ((ascName and ascName ~= "None") and ascName or (spec.curClassName or "?"))
+                .. ", " .. used .. " points)"
+                .. (i == tt.activeSpec and "  ^9(Current)" or ""),
+            treeVersion = spec.treeVersion,
+            versionDisplay = tv and tv.display or tostring(spec.treeVersion),
+            isLatest = spec.treeVersion == latestTreeVersion,
+            className = spec.curClassName,
+            ascendClassName = ascName,
+            used = used, ascUsed = ascUsed, secondaryAscUsed = secondaryAscUsed,
+            sockets = sockets,
+            isActive = i == tt.activeSpec,
+        }
+    end
+    return {
+        specs = specs,
+        count = #specs,
+        active = tt.activeSpec,
+        compare = tt.activeCompareSpec,
+        isComparing = tt.isComparing and true or false,
+        showConvert = tt.showConvert and true or false,
+        latestTreeVersion = latestTreeVersion,
+    }
+end
+
+-- TreeTab:SetActiveSpec via the spec dropdown's selFunc (TreeTab.lua:39-50):
+-- modFlag first, then the engine's own SetActiveSpec (jewel-slot swap, class
+-- dropdowns, showConvert, loadouts), then the recalc the dropdown's buildFlag
+-- would have triggered on the next frame.
+function pob_setActiveSpec(index)
+    local bm, tt = pob_treeTab()
+    index = tonumber(index)
+    if not tt or not index or not tt.specList[index] then
+        return { ok = false, error = "no such spec" }
+    end
+    if index == tt.activeSpec then return { ok = true, active = index } end
+    bm.modFlag = true
+    tt:SetActiveSpec(index)
+    pob_specSync(bm, tt)
+    bm.buildFlag = true
+    pob_recalculate()
+    return { ok = true, active = tt.activeSpec, _emit = SPEC_EMIT }
+end
+
+-- Up/Down arrow cycling (TreeTab.lua:394-410): only moves when the target
+-- exists; no wrap-around.
+function pob_cycleSpec(delta)
+    local _, tt = pob_treeTab()
+    if not tt then return { ok = false } end
+    local target = (tt.activeSpec or 1) + (tonumber(delta) or 0)
+    if not tt.specList[target] then return { ok = false, active = tt.activeSpec } end
+    return pob_setActiveSpec(target)
+end
+
+-- Hover tooltip for a spec dropdown row (TreeTab.lua:51-103), as data:
+-- class/ascendancy/points/sockets, then -- for a non-active row -- the stat
+-- diff of switching and the respec gold, then the game version.
+function pob_getSpecTooltip(index)
+    local bm, tt = pob_treeTab()
+    index = tonumber(index)
+    local spec = tt and index and tt.specList[index]
+    if not spec then return nil end
+    local used, _, _, sockets = spec:CountAllocNodes()
+    local tv = treeVersions[spec.treeVersion]
+    local res = {
+        className = spec.curClassName,
+        ascendClassName = spec.curAscendClassName,
+        used = used,
+        sockets = sockets,
+        versionDisplay = tv and tv.display or tostring(spec.treeVersion),
+        isActive = index == tt.activeSpec,
+    }
+    if index ~= tt.activeSpec then
+        local ct = bm.calcsTab
+        pob_recalculate()
+        if ct and ct.miscCalculator and ct.miscCalculator[1] then
+            local calcFunc, baseOutput = ct.miscCalculator[1], ct.miscCalculator[2]
+            local ok, output = pcall(calcFunc, { spec = spec })
+            if ok and output then
+                res.stats = pob_diffStatList(bm.displayStats, ct.mainEnv.player, baseOutput, output)
+            end
+        end
+        -- Respec gold: only across the SAME class (legacy compares curClassId).
+        if spec.curClassId == bm.spec.curClassId then
+            local respec, respecAsc = 0, 0
+            local curTree = bm.spec.tree
+            for nodeId, node in pairs(bm.spec.allocNodes) do
+                if node.type ~= "ClassStart" and node.type ~= "AscendClassStart"
+                   and (curTree.clusterNodeMap[node.dn] == nil or node.isKeystone or node.isJewelSocket)
+                   and nodeId < 65536 and not spec.allocNodes[nodeId] then
+                    if node.ascendancyName then respecAsc = respecAsc + 1 else respec = respec + 1 end
+                end
+            end
+            if respec > 0 or respecAsc > 0 then
+                local goldCost = (data.goldRespecPrices and data.goldRespecPrices[bm.characterLevel]) or 0
+                res.gold = {
+                    total = respec * goldCost + respecAsc * goldCost * 5,
+                    totalStr = formatNumSep(tostring(respec * goldCost + respecAsc * goldCost * 5)),
+                    respec = respec,
+                    respecAscendancy = respecAsc,
+                }
+            end
+        end
+    end
+    return res
+end
+
+-- Manage-trees "New" (PassiveSpecListControl.lua:36-42 + RenameSpec save):
+-- same class/ascendancies as the current spec, appended, NOT activated.
+function pob_newSpec(title)
+    local bm, tt = pob_treeTab()
+    if not tt then return { ok = false } end
+    if not title or not tostring(title):match("%S") then return { ok = false, error = "empty title" } end
+    local newSpec = new("PassiveSpec", bm, latestTreeVersion)
+    newSpec:SelectClass(bm.spec.curClassId)
+    newSpec:SelectAscendClass(bm.spec.curAscendClassId)
+    newSpec:SelectSecondaryAscendClass(bm.spec.curSecondaryAscendClassId)
+    newSpec.title = tostring(title)
+    table.insert(tt.specList, newSpec)
+    bm.modFlag = true
+    pob_specSync(bm, tt)
+    return { ok = true, index = #tt.specList, _emit = { "build" } }
+end
+
+-- Manage-trees "Copy" (PassiveSpecListControl.lua:13-20). Legacy's undo-state
+-- clone drops the secondary ascendancy (CreateUndoState stores a field that
+-- does not exist, PassiveSpec.lua:2259). That is an engine bug in src/, which
+-- this bridge may not patch (invariant #2); we reproduce the engine path as-is
+-- and restore the secondary ascendancy explicitly afterwards so a copy is a
+-- real copy.
+function pob_copySpec(index, title)
+    local bm, tt = pob_treeTab()
+    index = tonumber(index)
+    local sel = tt and index and tt.specList[index]
+    if not sel then return { ok = false, error = "no such spec" } end
+    if not title or not tostring(title):match("%S") then return { ok = false, error = "empty title" } end
+    local newSpec = new("PassiveSpec", bm, sel.treeVersion)
+    newSpec.title = sel.title
+    newSpec.jewels = copyTable(sel.jewels)
+    newSpec:RestoreUndoState(sel:CreateUndoState())
+    if sel.curSecondaryAscendClassId and newSpec.curSecondaryAscendClassId ~= sel.curSecondaryAscendClassId then
+        newSpec:SelectSecondaryAscendClass(sel.curSecondaryAscendClassId)
+    end
+    newSpec:BuildClusterJewelGraphs()
+    newSpec.title = tostring(title)
+    table.insert(tt.specList, newSpec)
+    bm.modFlag = true
+    pob_specSync(bm, tt)
+    return { ok = true, index = #tt.specList, _emit = { "build" } }
+end
+
+function pob_renameSpec(index, title)
+    local bm, tt = pob_treeTab()
+    index = tonumber(index)
+    local spec = tt and index and tt.specList[index]
+    if not spec then return { ok = false, error = "no such spec" } end
+    if not title or not tostring(title):match("%S") then return { ok = false, error = "empty title" } end
+    spec.title = tostring(title)
+    bm.modFlag = true
+    pob_specSync(bm, tt)
+    return { ok = true, _emit = { "build" } }
+end
+
+-- Manage-trees "Delete" confirm body (PassiveSpecListControl.lua:95-111).
+function pob_deleteSpec(index)
+    local bm, tt = pob_treeTab()
+    index = tonumber(index)
+    if not tt or not index or not tt.specList[index] then return { ok = false, error = "no such spec" } end
+    if #tt.specList <= 1 then return { ok = false, error = "cannot delete the only tree" } end
+    table.remove(tt.specList, index)
+    local emit = { "build" }
+    if index == tt.activeSpec then
+        tt:SetActiveSpec(math.max(1, index - 1))
+        bm.buildFlag = true
+        pob_recalculate()
+        emit = SPEC_EMIT
+    else
+        tt.activeSpec = isValueInArray(tt.specList, bm.spec)
+    end
+    -- The compare selection indexes the same list; keep it in range.
+    if tt.activeCompareSpec and tt.activeCompareSpec > #tt.specList then
+        tt:SetCompareSpec(#tt.specList)
+    end
+    bm.modFlag = true
+    pob_specSync(bm, tt)
+    return { ok = true, active = tt.activeSpec, _emit = emit }
+end
+
+-- Drag reorder (ListControl + OnOrderChange, PassiveSpecListControl.lua:82-87).
+function pob_moveSpec(from, to)
+    local bm, tt = pob_treeTab()
+    from, to = tonumber(from), tonumber(to)
+    if not tt or not from or not to or not tt.specList[from] or not tt.specList[to] then
+        return { ok = false, error = "bad index" }
+    end
+    if from == to then return { ok = true, active = tt.activeSpec } end
+    local compareSpec = tt.compareSpec
+    local spec = table.remove(tt.specList, from)
+    table.insert(tt.specList, to, spec)
+    tt.activeSpec = isValueInArray(tt.specList, bm.spec)
+    if compareSpec then tt.activeCompareSpec = isValueInArray(tt.specList, compareSpec) or tt.activeCompareSpec end
+    bm.modFlag = true
+    pob_specSync(bm, tt)
+    return { ok = true, active = tt.activeSpec, _emit = { "build" } }
+end
+
+-- Import Tree (TreeTab:OpenImportPopup, TreeTab.lua:709-837). The popup's local
+-- helpers are closures in legacy, so they are ported here verbatim in logic;
+-- `msg` replaces controls.msg.label. poeurl.com links need an HTTP redirect
+-- resolve (LaunchSubScript) -- that is Phase 10's network layer, so they are
+-- refused with a clear message instead of silently doing nothing.
+local function pob_validateTreeVersion(alternateType, major, minor)
+    if major and minor then
+        local newTreeVersionNum = tonumber(string.format("%d.%02d", major, minor))
+        if newTreeVersionNum >= treeVersions[defaultTreeVersion].num and newTreeVersionNum <= treeVersions[latestTreeVersion].num then
+            return string.format("%s_%s", major, minor) .. (alternateType and ("_" .. alternateType:gsub("-", "_")) or "")
+        end
+    end
+    return latestTreeVersion .. (alternateType and ("_" .. alternateType:gsub("-", "_")) or "")
+end
+
+local function pob_commitImportedSpec(bm, tt, newSpec)
+    table.insert(tt.specList, newSpec)
+    tt:SetActiveSpec(#tt.specList)
+    tt.modFlag = true
+    bm.modFlag = true
+    bm.spec:AddUndoState()
+    pob_specSync(bm, tt)
+    bm.buildFlag = true
+    pob_recalculate()
+    return { ok = true, index = #tt.specList, treeVersion = newSpec.treeVersion, _emit = SPEC_EMIT }
+end
+
+function pob_importTree(name, treeLink)
+    local bm, tt = pob_treeTab()
+    if not tt then return { ok = false, msg = "No build loaded" } end
+    name = tostring(name or "")
+    treeLink = tostring(treeLink or "")
+    -- Legacy enables Import only when both fields have a non-space character.
+    if not name:match("%S") or not treeLink:match("%S") then
+        return { ok = false, msg = "" }
+    end
+    local versionLookup = "tree/([0-9]+)%.([0-9]+)%.([0-9]+)/"
+    local function decodeTreeLink(link, newTreeVersion)
+        if not treeVersions[newTreeVersion] then
+            return { ok = false, msg = "^1Unknown tree version '" .. tostring(newTreeVersion) .. "'^7" }
+        end
+        local newSpec = new("PassiveSpec", bm, newTreeVersion)
+        newSpec.title = name
+        local errMsg = newSpec:DecodeURL(link)
+        if errMsg then
+            return { ok = false, msg = "^1" .. errMsg .. "^7" }
+        end
+        return pob_commitImportedSpec(bm, tt, newSpec)
+    end
+    if treeLink:match("poeurl%.com/") then
+        return { ok = false, needsNetwork = true,
+                 msg = "^1PoEURL links need network support (not available yet). Paste the full pathofexile.com link instead.^7" }
+    elseif treeLink:match("poeplanner.com/") then
+        local link = treeLink:gsub("/%?v=.+#", "/")
+        local tmpSpec = new("PassiveSpec", bm, latestTreeVersion)
+        local verOrErr = tmpSpec:DecodePoePlannerURL(link, true)
+        if type(verOrErr) ~= "string" or string.find(verOrErr, "Invalid") then
+            return { ok = false, msg = "^1" .. tostring(verOrErr) }
+        end
+        local newSpec = new("PassiveSpec", bm, verOrErr)
+        newSpec.title = name
+        newSpec:DecodePoePlannerURL(link, false)
+        return pob_commitImportedSpec(bm, tt, newSpec)
+    elseif treeLink:match("poeskilltree.com/") then
+        local oldStyleVersionLookup = "/%?v=([0-9]+)%.([0-9]+)%.([0-9]+)%-?%w?%-?%w?#"
+        local link = treeLink:gsub("/%?v=.+#", "/")
+        return decodeTreeLink(link, pob_validateTreeVersion(treeLink:match("%-(%l+%-?%l*)#"), treeLink:match(oldStyleVersionLookup)))
+    else
+        return decodeTreeLink(treeLink, pob_validateTreeVersion(treeLink:match("tree/(%l+%-?%l*)"), treeLink:match(versionLookup)))
+    end
+end
+
+-- Export Tree (TreeTab:OpenExportPopup, TreeTab.lua:839-866). "Shrink with
+-- PoEURL" is a network call (Phase 10) and is not offered.
+function pob_exportTree()
+    local bm = main and main.modes and main.modes.BUILD
+    local spec = bm and bm.spec
+    if not spec then return nil end
+    local tv = treeVersions[spec.treeVersion]
+    return { link = spec:EncodeURL(tv and tv.url or "https://www.pathofexile.com/passive-skill-tree/") }
+end
+
+-- Part 4.2 selftest. Exercises the full spec-management round trip on the live
+-- fixture and restores it: export -> import (same allocation), list/labels,
+-- switch + renderer revision, tooltip stat diff + respec gold, new/copy/rename/
+-- move/cycle/delete, Items-tab selector sync, and the refusal paths.
+local function pob_frontierNode(spec)
+    local cands = { }
+    for id, node in pairs(spec.nodes) do
+        if node.type == "Normal" and node.path and not node.alloc and not node.ascendancyName and tonumber(id) then
+            for _, ln in ipairs(node.linked) do
+                if ln.alloc then cands[#cands + 1] = id; break end
+            end
+        end
+    end
+    table.sort(cands, function(l, r) return tonumber(l) < tonumber(r) end)
+    return cands[1]
+end
+
+local function pob_allocIdSet(spec)
+    local ids = { }
+    for id in pairs(spec.allocNodes) do ids[#ids + 1] = tonumber(id) end
+    table.sort(ids)
+    return table.concat(ids, ",")
+end
+
+function pob_selftestSpecManage()
+    local res = { ok = false }
+    local bm, tt = pob_treeTab()
+    if not tt or not bm.spec then res.error = "no build"; return res end
+    local origCount, origActive = #tt.specList, tt.activeSpec
+    local origSpec = bm.spec
+    local function revision() local d = pob_getTreeData(); return d and d.revision end
+
+    -- Give the active spec one real allocation so export/import/diff have content.
+    local nodeId = pob_frontierNode(bm.spec)
+    if not nodeId then res.error = "no frontier node"; return res end
+    pob_allocNode(nodeId)
+    local origIds = pob_allocIdSet(bm.spec)
+
+    -- Export -> import round trip.
+    local exp = pob_exportTree()
+    res.exportOk = exp ~= nil and type(exp.link) == "string" and exp.link:match("^https://") ~= nil
+    local imp = exp and pob_importTree("ST Imported", exp.link)
+    res.importOk = imp ~= nil and imp.ok == true and #tt.specList == origCount + 1
+        and tt.activeSpec == origCount + 1 and bm.spec ~= origSpec
+    res.importSameAlloc = res.importOk and pob_allocIdSet(bm.spec) == origIds
+        and bm.spec.treeVersion == origSpec.treeVersion
+    res.importEmitsTree = imp ~= nil and type(imp._emit) == "table" and isValueInArray(imp._emit, "tree") ~= nil
+
+    -- Refusals: poeurl is network-gated, a garbage link reports the engine error.
+    local pu = pob_importTree("x", "http://poeurl.com/abcd")
+    res.poeurlRefused = pu.ok == false and pu.needsNetwork == true
+    local bad = pob_importTree("x", "https://www.pathofexile.com/passive-skill-tree/3.25.0/AAA")
+    res.badLinkRefused = bad.ok == false and tostring(bad.msg):find("Invalid") ~= nil
+    res.countAfterRefusals = #tt.specList == origCount + 1
+
+    -- Version detection (validateTreeVersion): an older x.y.0 link lands on that
+    -- version, a /ruthless/ link on the latest ruthless tree. Each import is
+    -- deleted again straight away.
+    local function importedVersion(link)
+        local r = pob_importTree("ST Ver", link)
+        if not r.ok then return "ERR:" .. tostring(r.msg) end
+        local v = bm.spec.treeVersion
+        pob_deleteSpec(r.index)
+        return v
+    end
+    local payload = exp.link:match("/([^/]+)$")
+    res.versionOldOk = importedVersion("https://www.pathofexile.com/passive-skill-tree/3.25.0/" .. payload) == "3_25"
+    if treeVersions[latestTreeVersion .. "_ruthless"] then
+        res.versionRuthlessOk = importedVersion("https://www.pathofexile.com/passive-skill-tree/ruthless/" .. payload) == latestTreeVersion .. "_ruthless"
+    else
+        res.versionRuthlessOk = true
+    end
+    res.versionClampOk = importedVersion("https://www.pathofexile.com/passive-skill-tree/9.99.0/" .. payload) == latestTreeVersion
+    pob_setActiveSpec(origCount + 1)
+
+    -- Switch back to the original and check the renderer revision moves even
+    -- though version + alloc set are identical (spec serial).
+    local rev0 = revision()
+    local sw = pob_setActiveSpec(origActive)
+    res.switchOk = sw.ok == true and bm.spec == origSpec and tt.activeSpec == origActive
+    res.revisionMoves = rev0 ~= nil and revision() ~= rev0
+
+    -- New blank spec: tooltip from the current spec shows the refund and a diff.
+    local nw = pob_newSpec("ST Blank")
+    local blankIdx = nw.index
+    res.newOk = nw.ok == true and tt.specList[blankIdx].title == "ST Blank" and tt.activeSpec == origActive
+    local tip = pob_getSpecTooltip(blankIdx)
+    res.tooltipGold = tip ~= nil and tip.gold ~= nil and tip.gold.respec >= 1
+        and tip.gold.total == tip.gold.respec * (data.goldRespecPrices[bm.characterLevel] or 0)
+    res.tooltipStats = tip ~= nil and type(tip.stats) == "table" and #tip.stats > 0
+    local tipSelf = pob_getSpecTooltip(tt.activeSpec)
+    res.tooltipSelfNoDiff = tipSelf ~= nil and tipSelf.stats == nil and tipSelf.gold == nil
+        and tipSelf.used == select(1, bm.spec:CountAllocNodes())
+    local blankEmpty = pob_newSpec("")
+    res.emptyTitleRefused = blankEmpty.ok == false
+
+    -- Copy + rename.
+    local cp = pob_copySpec(origActive, "ST Copy")
+    res.copyOk = cp.ok == true and tt.specList[cp.index].title == "ST Copy"
+        and pob_allocIdSet(tt.specList[cp.index]) == origIds
+        and tt.specList[cp.index].curSecondaryAscendClassId == origSpec.curSecondaryAscendClassId
+    local rn = pob_renameSpec(cp.index, "ST Copy Renamed")
+    res.renameOk = rn.ok == true and tt.specList[cp.index].title == "ST Copy Renamed"
+
+    -- Reorder: move the active spec to the end; activeSpec must follow it.
+    local mv = pob_moveSpec(origActive, #tt.specList)
+    res.moveOk = mv.ok == true and tt.specList[#tt.specList] == origSpec and tt.activeSpec == #tt.specList
+    pob_moveSpec(#tt.specList, origActive)
+    res.moveBackOk = tt.specList[origActive] == origSpec and tt.activeSpec == origActive
+
+    -- Items tab tree selector mirrors the list (UpdateItemsTabPassiveTreeDropdown).
+    local sel = bm.itemsTab.controls.specSelect
+    res.itemsSelectorOk = sel ~= nil and #sel.list == #tt.specList and sel.selIndex == tt.activeSpec
+
+    -- List payload.
+    local lst = pob_getSpecList()
+    res.listOk = lst ~= nil and lst.count == #tt.specList and lst.active == tt.activeSpec
+        and lst.specs[origActive].isActive == true and lst.specs[blankIdx].title == "ST Blank"
+        and lst.specs[origActive].listLabel:find("%(Current%)") ~= nil
+
+    -- Cycle: Down moves to the next spec, Up returns; no wrap at the ends.
+    local down = pob_cycleSpec(1)
+    local up = pob_cycleSpec(-1)
+    res.cycleOk = down.ok == true and up.ok == true and tt.activeSpec == origActive
+    if origActive == 1 then res.cycleNoWrap = pob_cycleSpec(-1).ok == false else res.cycleNoWrap = true end
+
+    -- Delete everything this test added (highest index first), including the
+    -- ACTIVE-spec path: activate the imported spec, then delete it.
+    local importedIdx
+    for i, s in ipairs(tt.specList) do if s.title == "ST Imported" then importedIdx = i end end
+    pob_setActiveSpec(importedIdx)
+    local delActive = pob_deleteSpec(importedIdx)
+    res.deleteActiveOk = delActive.ok == true and tt.activeSpec == math.max(1, importedIdx - 1)
+    for i = #tt.specList, 1, -1 do
+        local t = tt.specList[i].title
+        if t == "ST Blank" or t == "ST Copy Renamed" then pob_deleteSpec(i) end
+    end
+    pob_setActiveSpec(origActive)
+    res.restored = #tt.specList == origCount and bm.spec == origSpec and tt.activeSpec == origActive
+    if origCount == 1 then res.deleteLastRefused = pob_deleteSpec(1).ok == false else res.deleteLastRefused = true end
+
+    pob_deallocNode(nodeId)
+    bm.spec:ResetUndo()
+
+    res.ok = res.exportOk and res.importOk and res.importSameAlloc and res.importEmitsTree
+        and res.poeurlRefused and res.badLinkRefused and res.countAfterRefusals
+        and res.versionOldOk and res.versionRuthlessOk and res.versionClampOk
+        and res.switchOk and res.revisionMoves and res.newOk and res.tooltipGold
+        and res.tooltipStats and res.tooltipSelfNoDiff and res.emptyTitleRefused
+        and res.copyOk and res.renameOk and res.moveOk and res.moveBackOk
+        and res.itemsSelectorOk and res.listOk and res.cycleOk and res.cycleNoWrap
+        and res.deleteActiveOk and res.restored and res.deleteLastRefused
+    return res
 end

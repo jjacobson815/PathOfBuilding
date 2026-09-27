@@ -34,6 +34,9 @@ Item {
 
     readonly property alias scene: sceneGraph
 
+    // Raised on any mouse press on the tree (hosts use it to take key focus).
+    signal activated()
+
     function centerOnNode(nodeId, zoomFactor) {
         return sceneGraph.centerOnNode(nodeId, zoomFactor === undefined ? 0 : zoomFactor)
     }
@@ -71,6 +74,7 @@ Item {
 
             onPressed: function(mouse) {
                 lastPos = Qt.point(mouse.x, mouse.y)
+                treeViewerRoot.activated()
                 dragMoved = false
             }
 

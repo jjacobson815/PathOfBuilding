@@ -16,6 +16,7 @@
 #include <QStandardPaths>
 #include <QImageReader>
 #include <QHash>
+#include <QSet>
 #include <QSize>
 #include <lauxlib.h>
 
@@ -1306,6 +1307,35 @@ QVariant LuaEngine::convertBuild() {
     emit currentModeChanged();
     emit currentViewChanged();
     return r;
+}
+
+QVariant LuaEngine::invoke(const QString& name, const QVariantList& args) {
+    if (!name.startsWith("pob_") || name.startsWith("pob_selftest")) {
+        qCritical() << "invoke: refused" << name;
+        return {};
+    }
+    QVariant r = callGlobal(name, args);
+    if (r.typeId() != QMetaType::QVariantMap)
+        return r;
+    const QVariantList emits = r.toMap().value("_emit").toList();
+    QSet<QString> seen;
+    for (const QVariant& e : emits) seen.insert(e.toString());
+    // Fixed order: build/tree state first, calcs last, so a listener that
+    // refreshes on calcsChanged sees every other model already current.
+    if (seen.contains("build")) emit buildDataChanged();
+    if (seen.contains("tree")) emit treeChanged();
+    if (seen.contains("items")) emit itemsChanged();
+    if (seen.contains("skills")) emit skillsChanged();
+    if (seen.contains("config")) emit configChanged();
+    if (seen.contains("calcs")) emit calcsChanged();
+    return r;
+}
+
+void LuaEngine::copyText(const QString& text) {
+#ifndef POB_NO_GUI
+    if (qGuiApp && qGuiApp->clipboard())
+        qGuiApp->clipboard()->setText(text);
+#endif
 }
 
 // Phase 5d: ConfigTab (CONFIG view) bridge. Delegates to the top-level Lua

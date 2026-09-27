@@ -257,6 +257,18 @@ public:
     Q_INVOKABLE QVariant getConversionState();
     Q_INVOKABLE QVariant convertBuild();
 
+    // Phase 4: generic bridge entry for the Tree tab's growing surface (spec
+    // management, popups, power report, timeless finder). Calls the top-level
+    // Lua global `name` (must start with "pob_" and must not be a selftest) and
+    // then emits the change signals the LUA side reports in the result's
+    // `_emit` list ("build", "tree", "items", "skills", "config", "calcs") --
+    // the function that performed the mutation is the one that knows what it
+    // touched, so signal selection lives next to it rather than being guessed
+    // here. A result without `_emit` emits nothing (pure getters).
+    Q_INVOKABLE QVariant invoke(const QString& name, const QVariantList& args = {});
+    // Clipboard write for QML (Export Tree "Copy", Ctrl+C on a node).
+    Q_INVOKABLE void copyText(const QString& text);
+
     // full list of config option descriptors (QVariantList of QVariantMap with
     // name/label/type/value/options/section/tooltip); setConfigOption writes a
     // value back into the active config set and triggers a rebuild.

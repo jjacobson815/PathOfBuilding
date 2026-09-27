@@ -1,6 +1,6 @@
 # Phase 4 — Tree Tab (finish & harden)
 
-**Status:** IN PROGRESS — Part 4.1 4/5 done (renderer landed as `TreeScene`); latest evidence in "Session log — 2026-09-24". See "Recon findings" at the bottom before starting.
+**Status:** IN PROGRESS — Part 4.1 done, Part 4.2 done (2026-09-27); latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
 **Goal:** Finish the passive-tree tab — the one view that already renders. Harden
 the renderer, make the tree viewer an embeddable multi-instance component, and add
 the missing interactive features (spec management, compare overlay, search, node
@@ -45,14 +45,19 @@ ItemSlotControl, TimelessJewelSocketControl, and CalcBreakdown reuse later.
 
 ## Part 4.2 — Spec management
 
-- [ ] Spec dropdown with respec-gold tooltip (class/asc/points/sockets, switch
+- [x] Spec dropdown with respec-gold tooltip (class/asc/points/sockets, switch
   stat-diff, per-node refund cost). Up/Down cycle specs. (M)
-- [ ] Manage-trees popup (generic set-manager component): new/copy/delete/rename/
+  → **DONE 2026-09-27** (session log): bottom strip of `views/TreeView.qml`.
+- [x] Manage-trees popup (generic set-manager component): new/copy/delete/rename/
   reorder; reorder syncs the itemsTab tree selector + loadouts. (M)
-- [ ] **Import Tree** (pathofexile.com incl. ruthless/alternate URLs, poeurl
+  → **DONE 2026-09-27**: `SpecManagePopup.qml`; reorder by Up/Down buttons
+  (legacy drags — documented deviation).
+- [x] **Import Tree** (pathofexile.com incl. ruthless/alternate URLs, poeurl
   resolve [needs Phase 10 network], poeplanner decode, poeskilltree; version
   validation) and **Export Tree** (encode URL, PoEURL shrink, copy). (M — the
   poeurl/network path is gated on Phase 10; local encode/decode works now.)
+  → **DONE 2026-09-27** except the two network paths (poeurl resolve, PoEURL
+  shrink), which wait for Phase 10; poeurl links get a clear refusal message.
 
 ## Part 4.3 — Interaction & display
 
@@ -488,3 +493,52 @@ jewel-style inset (socket 26725, zoom 17, crosshair) and a Calcs-style inset
 (zoom 5, focus ring) over the Tree tab; the capture showed all three views
 rendering independently from the shared data, each correctly framed. Probe
 reverted.
+
+## Session log — 2026-09-27 (Part 4.2: spec management) — Linux cloud session
+
+Gate first (never run after the last build, per `HANDOFF-phase4.md`):
+`tools/linux-selftest.sh` → `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0`.
+
+**Bridge** (`app/lua/pob_host.lua`, new section at the end): `pob_getSpecList`,
+`pob_setActiveSpec`, `pob_cycleSpec`, `pob_getSpecTooltip`, `pob_newSpec`,
+`pob_copySpec`, `pob_renameSpec`, `pob_deleteSpec`, `pob_moveSpec`,
+`pob_importTree`, `pob_exportTree`. They drive the live `build.treeTab`
+(`SetActiveSpec`, `specList`) and end in `pob_specSync` — the Items-tab tree
+selector refresh + `SyncLoadouts` that legacy ran from the list control's
+callbacks and the per-frame Draw. The renderer revision gained a spec serial
+(a switch between two specs with the same version and allocation set was
+otherwise invisible to the rebuild throttle).
+- Tooltip = legacy TreeTab.lua:51-103 as data: switch stat-diff via the misc
+  calculator (`{ spec = spec }` override → `pob_diffStatList`), respec gold
+  = `goldRespecPrices[level]` per node, ×5 for ascendancy nodes, same-class only.
+- Copy: legacy's `CreateUndoState` drops the secondary ascendancy (it stores a
+  field that does not exist, `PassiveSpec.lua:2259`). `src/` may not be patched,
+  so the bridge restores it after the engine's copy path.
+- Import: GGG (versioned / ruthless / alternate / fullscreen), poeskilltree and
+  poeplanner decode offline; version clamp to latest as legacy. poeurl →
+  refused with a message (Phase 10). poeplanner has no golden fixture link, so
+  that branch is ported but not exercised by the selftest.
+
+**C++**: `LuaEngine::invoke(name, args)` — generic `pob_*` call that emits the
+signals the Lua result lists in `_emit` (so the function that mutated decides
+what changed); `LuaEngine::copyText`. `selftest_checks.h` gained
+`pob_run_lua_check`, which prints every scalar field a Lua check returns.
+
+**QML**: `TreeView.qml` bottom strip (spec dropdown + "Manage trees... (ctrl-m)"
+row + per-row tooltip, Up/Down cycling when the tree has focus, Ctrl+M);
+`SpecManagePopup.qml`, `TreeImportPopup.qml`, `TreeExportPopup.qml`,
+`StatDiff.js` (shared stat-diff tooltip lines, reused by 4.3 node tooltips).
+
+**Gate:** new `spec-manage` check (29 flags) — export→import round trip keeps
+the allocation, list/labels, switch + revision move, tooltip gold + diff,
+new/copy/rename/move/cycle/delete (incl. deleting the active spec), Items
+selector sync, version detection (3.25 link → `3_25`, ruthless, 9.99 clamp),
+poeurl/garbage refusals, full restore. Teeth: removing the reorder's activeSpec
+fix-up fails it (`moveOk=false`, exit 1). `pob-selftest EXIT=0`,
+`pob-qt --headless EXIT=0`.
+
+**Linux visual check:** plain `QT_QPA_PLATFORM=offscreen` capture draws the
+tree area BLANK on Linux (no GL → TreeScene's geometry nodes are not drawn);
+run the capture under `xvfb-run` with `QT_QPA_PLATFORM=xcb` (Mesa llvmpipe)
+instead — tree SSIM 0.994 vs the committed baseline. Probe capture of the
+Manage popup (3 trees, one `[3.25]`) looked right; probe reverted.

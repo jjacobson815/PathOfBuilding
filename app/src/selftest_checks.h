@@ -15,6 +15,30 @@
 //
 // Returns true only if every check passed; prints progress via qDebug and
 // failures via qCritical.
+// Phase 4+: run one Lua selftest global and print every scalar field it
+// returns (sorted), failing on `ok ~= true`. The per-check blocks above print
+// hand-picked fields; newer checks return self-describing flags instead, so
+// the printout is always the full evidence and cannot drift from the check.
+inline bool pob_run_lua_check(LuaEngine& engine, const char* fn, const char* label) {
+    QVariant v = engine.callGlobal(fn);
+    if (v.typeId() != QMetaType::QVariantMap) {
+        qCritical() << fn << "missing or wrong type:" << v.typeName();
+        return false;
+    }
+    const QVariantMap m = v.toMap();
+    QStringList parts;
+    for (auto it = m.constBegin(); it != m.constEnd(); ++it) {
+        if (it.key() == "ok") continue;
+        const int t = it.value().typeId();
+        if (t == QMetaType::QVariantMap || t == QMetaType::QVariantList) continue;
+        parts << it.key() + "=" + it.value().toString();
+    }
+    const bool ok = m.value("ok").toBool();
+    qDebug().noquote() << label << "ok =" << ok << "" << parts.join("  ");
+    if (!ok) qCritical().noquote() << label << "check FAILED";
+    return ok;
+}
+
 inline bool pob_run_all_selftests(LuaEngine& engine) {
     QStringList modes = engine.modeNames();
     qDebug() << "modes:" << modes;
@@ -901,6 +925,10 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
             return false;
         }
     }
+
+    // Phase 4 Part 4.2: spec management (list, switch, tooltip, new/copy/
+    // rename/move/delete, import/export round trip, Items selector sync).
+    if (!pob_run_lua_check(engine, "pob_selftestSpecManage", "spec-manage")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;
