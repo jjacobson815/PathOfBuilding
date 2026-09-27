@@ -5,6 +5,7 @@
 #include <QString>
 #include <QHash>
 #include <QVector>
+#include <QSet>
 
 class LuaEngine;
 class TreeModel;
@@ -61,6 +62,17 @@ public:
     bool boundsValid() const { return m_boundsValid; }
 
     Q_INVOKABLE void refresh(LuaEngine* engine);
+    // Phase 4 Part 4.3: shared per-build overlays that do NOT move the tree
+    // revision -- the compare spec's allocation and the node-power heat map.
+    // Refetched on every refresh() (cheap: two small Lua reads), and on
+    // demand (a finished power job, a compare toggle).
+    Q_INVOKABLE void refreshOverlays();
+    bool heatMapOn() const { return m_heatOn; }
+    // RGBA (0xRRGGBBAA) heat colour for an unallocated node, or 0 if none.
+    quint32 heatColor(int id) const { return m_heat.value(id, 0); }
+    bool compareActive() const { return m_compareActive; }
+    bool compareAlloc(int id) const { return m_compareAlloc.contains(id); }
+    bool compareBlue(int id) const { return m_compareBlue.contains(id); }
 
     // Nearest node id whose LEGACY hit circle (`node.rsq`) contains the tree-space
     // point, or -1. Zoom/pan are per view (TreeScene owns a TreeViewport and
@@ -86,6 +98,7 @@ signals:
     void searchChanged();
     void boundsValidChanged();   // bounds + assets became valid (fires once)
     void assetsInitialized();     // asset metadata ready (fires once)
+    void overlaysChanged();       // heat map / compare overlay data changed
 
 private:
     // Hit-test rows are kept separately from TreeModel so mouse movement does
@@ -114,6 +127,11 @@ private:
     QHash<qint64, QVector<int>> m_hitCells;
     QHash<int, QPair<double, double>> m_nodePos;
     QString m_lastRevision;
+    bool m_heatOn = false;
+    QHash<int, quint32> m_heat;
+    bool m_compareActive = false;
+    QSet<int> m_compareAlloc;
+    QSet<int> m_compareBlue;
     bool m_loaded = false;
     bool m_boundsValid = false;        // guards boundsValidChanged single emission
     bool m_assetsInitialized = false;  // guards assetsInitialized single emission

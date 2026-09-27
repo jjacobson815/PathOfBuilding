@@ -2456,10 +2456,14 @@ end
 -- `frame` sprite sheet (frame-3.png). Masteries have no frame ring.
 local function nodeFrame(node, alloc)
     if node.type == "Mastery" or not node.overlay then return nil end
-    local key = (alloc and "alloc" or "unalloc")
+    -- `alloc` is a boolean (alloc/unalloc) or a legacy frame STATE string
+    -- ("alloc" / "path" / "unalloc", PassiveTreeView.lua:788-797) -- Part 4.3's
+    -- hover preview draws the "path" frame, the heat map the "alloc" one.
+    local state = type(alloc) == "string" and alloc or (alloc and "alloc" or "unalloc")
+    local key = state
         .. (node.ascendancyName and "Ascend" or "")
         .. (node.isBlighted and "Blighted" or "")
-    local frameName = node.overlay[key] or node.overlay[alloc and "alloc" or "unalloc"]
+    local frameName = node.overlay[key] or node.overlay[state]
     if not frameName then return nil end
     local sprites = loadSourceSprites()
     local grp = sprites and sprites.frame
@@ -2614,6 +2618,11 @@ for id, node in pairs(tree.nodes) do
             groupIsProxy = node.group.isProxy or false,
             iconSprite = nodeSprite(node, alloc),
             frameSprite = nodeFrame(node, alloc),
+            -- Part 4.3: the frame art for the two other legacy states, so the
+            -- renderer can show the hover path ("path") and heat map ("alloc")
+            -- without a round trip. Only unallocated nodes ever need them.
+            framePathSprite = (not alloc) and nodeFrame(node, "path") or nil,
+            frameAllocSprite = (not alloc) and nodeFrame(node, "alloc") or nil,
             sd = sd,
         }
     end
@@ -2635,8 +2644,18 @@ for id, group in pairs(tree.groups) do
     end
 end
 
+local _connAtlasMemo = { }
+local resolveConnectorAtlasRaw
 local function resolveConnectorAtlas(cType, state)
     local assetName = (cType or "LineConnector") .. (state or "Normal")
+    local hit = _connAtlasMemo[assetName]
+    if hit == nil then
+        hit = resolveConnectorAtlasRaw(assetName) or false
+        _connAtlasMemo[assetName] = hit
+    end
+    return hit or nil
+end
+function resolveConnectorAtlasRaw(assetName)
     local asset = tree.assets and tree.assets[assetName]
     if asset and asset.handle and asset.handle.fileName then
         local fn = asset.handle.fileName:gsub("\\", "/")
@@ -2673,6 +2692,15 @@ local function addConnectorRecord(c)
             tonumber(cTable[15]) or 0, tonumber(cTable[16]) or 0,
         }
         local isArc = (c.type and tostring(c.type):sub(1, 5) == "Orbit") or false
+        -- Part 4.3: the Intermediate (hover path) and Active (compare) states
+        -- use their own art AND their own quad (connector.vert[state]); the
+        -- UVs are shared. Exported only when they differ from the drawn state.
+        local function stateVert(st)
+            if st == state or not c.vert or not c.vert[st] then return nil end
+            local v = c.vert[st]
+            return { tonumber(v[1]) or 0, tonumber(v[2]) or 0, tonumber(v[3]) or 0, tonumber(v[4]) or 0,
+                     tonumber(v[5]) or 0, tonumber(v[6]) or 0, tonumber(v[7]) or 0, tonumber(v[8]) or 0 }
+        end
         connectors[#connectors + 1] = {
             nodeId1 = c.nodeId1,
             nodeId2 = c.nodeId2,
@@ -2685,6 +2713,10 @@ local function addConnectorRecord(c)
             vert = vertArr,
             uv = uvArr,
             atlas = resolveConnectorAtlas(c.type, state),
+            vertIntermediate = stateVert("Intermediate"),
+            atlasIntermediate = state ~= "Intermediate" and resolveConnectorAtlas(c.type, "Intermediate") or nil,
+            vertActive = stateVert("Active"),
+            atlasActive = state ~= "Active" and resolveConnectorAtlas(c.type, "Active") or nil,
         }
     end
 end
@@ -5206,5 +5238,846 @@ function pob_selftestSpecManage()
         and res.copyOk and res.renameOk and res.moveOk and res.moveBackOk
         and res.itemsSelectorOk and res.listOk and res.cycleOk and res.cycleNoWrap
         and res.deleteActiveOk and res.restored and res.deleteLastRefused
+    return res
+end
+
+-- ============================================================================
+-- Phase 4 Part 4.3: tree interaction & display.
+--
+-- The legacy PassiveTreeView object (build.treeTab.viewer) is live under Qt --
+-- it is simply never Draw()n. Where its logic is a plain method that builds
+-- data (AddNodeTooltip, DoesNodeMatchSearchParams) the bridge CALLS it, so the
+-- Qt tooltip/search are legacy's own output rather than a re-derivation. The
+-- per-frame parts of Draw (hover path, trace mode, compare/heat colours) are
+-- ported here as data for TreeScene to draw.
+-- ============================================================================
+
+local function pob_viewerCtx()
+    local bm, tt = pob_treeTab()
+    local viewer = tt and tt.viewer
+    if not viewer or not bm.spec then return nil end
+    -- TreeTab:Draw assigned this every frame (TreeTab.lua:472).
+    viewer.compareSpec = tt.isComparing and tt.specList[tt.activeCompareSpec] or nil
+    return bm, tt, viewer, bm.spec
+end
+
+local function pob_nodeIds(list)
+    local ids = { }
+    for _, n in ipairs(list or { }) do ids[#ids + 1] = n.id end
+    return ids
+end
+
+local function pob_nodesFromIds(spec, ids)
+    local out = { }
+    if type(ids) ~= "table" then return out end
+    for _, id in ipairs(ids) do
+        local n = spec.nodes[tonumber(id) or id]
+        if n then out[#out + 1] = n end
+    end
+    return out
+end
+
+-- "^xRRGGBB" / "^7" legacy colour code -> "#RRGGBB" for QML/C++.
+local function pob_hexColor(code)
+    local hex = type(code) == "string" and code:match("^%^x(%x%x%x%x%x%x)")
+    return hex and ("#" .. hex) or "#FFFFFF"
+end
+
+-- Node tooltip lines: legacy PassiveTreeView:AddNodeTooltip into a real
+-- Tooltip object, marshalled line by line. `traceIds` is the Shift trace path
+-- (the stat diff then uses it as the path, PassiveTreeView.lua:1609).
+function pob_getNodeTooltipLines(id, traceIds)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then return nil end
+    local node = spec.nodes[tonumber(id) or id]
+    if not node then return nil end
+    if node.type == "Mastery" and not node.masteryEffects then return { show = false } end
+    local trace = pob_nodesFromIds(spec, traceIds)
+    viewer.tracePath = #trace > 0 and trace or nil
+    pob_recalculate()
+    local tip = new("Tooltip")
+    local ok, err = pcall(viewer.AddNodeTooltip, viewer, tip, node, bm)
+    viewer.tracePath = nil
+    if not ok then return { show = true, lines = { { size = 16, text = "^1Tooltip error: " .. tostring(err) } } } end
+    local lines = { }
+    for _, l in ipairs(tip.lines or { }) do
+        if l.text == nil then
+            lines[#lines + 1] = { sep = true, size = l.size or 10 }
+        else
+            lines[#lines + 1] = { size = l.size or 14, text = l.text, center = l.center and true or false }
+        end
+    end
+    return {
+        show = true,
+        lines = lines,
+        header = tip.tooltipHeader,
+        -- Legacy hides a socket's tooltip while Shift is held (rings stay).
+        isSocket = node.type == "Socket",
+    }
+end
+
+-- Hover preview (PassiveTreeView.lua:268-361, 917-957, 1122-1152).
+-- Returns the path to highlight, the dependents to draw red, the updated
+-- Shift trace path, and -- for a jewel socket -- its radius rings and the
+-- per-node radius colours. `id = -1` in the result means legacy dropped the
+-- hover (trace mode over a node that cannot extend the trace).
+function pob_getHoverInfo(id, traceIds, shift)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then return nil end
+    local node = spec.nodes[tonumber(id) or id]
+    if not node then return { id = -1, path = { }, depends = { }, trace = traceIds or { } } end
+    local res = { id = node.id, path = { }, depends = { } }
+    if shift then
+        local trace = pob_nodesFromIds(spec, traceIds)
+        local drop = false
+        if not node.path then
+            drop = true
+        elseif #trace == 0 then
+            for _, pn in ipairs(node.path) do table.insert(trace, 1, pn) end
+        else
+            local last = trace[#trace]
+            if node ~= last then
+                if isValueInArray(node.linked, last) then
+                    local idx = isValueInArray(trace, node)
+                    if idx then
+                        table.remove(trace, idx)
+                        table.insert(trace, node)
+                    elseif last.type == "Mastery" then
+                        drop = true
+                    else
+                        table.insert(trace, node)
+                    end
+                else
+                    drop = true
+                end
+            end
+        end
+        res.trace = pob_nodeIds(trace)
+        res.path = res.trace
+        if drop then res.id = -1 end
+    else
+        res.trace = { }
+        if node.path then
+            if #(node.intuitiveLeapLikesAffecting or { }) == 0 then res.path = pob_nodeIds(node.path) end
+            res.depends = pob_nodeIds(node.depends)
+        end
+    end
+    -- Jewel radius preview for a socket (not Charm sockets, and only the
+    -- largest cluster expansion sockets).
+    if node.type == "Socket" and node.nodesInRadius and node.name ~= "Charm Socket"
+       and (not node.expansionJewel or node.expansionJewel.size == 2) and data.jewelRadius then
+        local _, jewel = bm.itemsTab:GetSocketAndJewelForNodeID(node.id)
+        local variable = jewel and jewel.jewelRadiusLabel == "Variable"
+        local rings, colored, radiusNodes = { }, { }, { }
+        for index, radData in ipairs(data.jewelRadius) do
+            if (variable and radData.inner ~= 0) or (not variable and radData.inner == 0) then
+                local col = pob_hexColor(radData.col)
+                rings[#rings + 1] = { outer = radData.outer, inner = radData.inner, color = col }
+                for nid in pairs(node.nodesInRadius[index] or { }) do
+                    if not colored[nid] then
+                        colored[nid] = true
+                        radiusNodes[#radiusNodes + 1] = { id = nid, color = col }
+                    end
+                end
+            end
+        end
+        res.radius = { x = node.x, y = node.y, rings = rings, nodes = radiusNodes }
+    end
+    return res
+end
+
+-- Search (PassiveTreeView prepSearch :738-760 + DoesNodeMatchSearchParams
+-- :1275-1348). Tokenising is ported (it was a Draw-local closure); matching
+-- is the engine's own method, so Lua patterns, "oil:" and (a|b) groups
+-- behave exactly as legacy.
+local function pob_prepSearch(str)
+    local s = tostring(str or ""):lower()
+    local params = { }
+    s = s:gsub('"([^"]*)"', function(p)
+        if p ~= "" then params[#params + 1] = p end
+        return ""
+    end)
+    for w in s:gmatch("%S+") do params[#params + 1] = w end
+    return params
+end
+
+function pob_setTreeSearch(str)
+    _treeSearchSerial = _treeSearchSerial + 1
+    treeSearchResults = { }
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then return treeSearchResults end
+    viewer.searchStr = tostring(str or "")
+    local params = pob_prepSearch(str)
+    if #params == 0 then return treeSearchResults end
+    viewer.searchParams = params
+    for id, node in pairs(spec.nodes) do
+        if node.group and not node.isProxy and not node.group.isProxy then
+            local ok, match = pcall(viewer.DoesNodeMatchSearchParams, viewer, node)
+            if ok and match then treeSearchResults[#treeSearchResults + 1] = id end
+        end
+    end
+    table.sort(treeSearchResults)
+    return treeSearchResults
+end
+
+-- Compare checkbox + compare-spec dropdown (TreeTab.lua:106-124).
+function pob_setCompare(enabled, index)
+    local bm, tt = pob_treeTab()
+    if not tt then return { ok = false } end
+    tt.isComparing = enabled and true or false
+    if index and tt.specList[tonumber(index)] then tt:SetCompareSpec(tonumber(index)) end
+    pob_viewerCtx()
+    _treeSpecSerial = _treeSpecSerial + 1
+    return { ok = true, isComparing = tt.isComparing, compare = tt.activeCompareSpec, _emit = { "tree" } }
+end
+
+-- Compare overlay data (PassiveTreeView:GetCompareNodeColor :149-170):
+-- the compare spec's allocated ids (C++ colours nodes green/red from these and
+-- forces "Active" green / red connectors) and the ids legacy tints BLUE
+-- (a mastery allocated in both trees with a different effect). Legacy's
+-- socket blue compares the SAME build's socket for both sides in the Tree tab,
+-- so it can never fire there; it is not reproduced.
+function pob_getCompareState()
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    local cs = viewer and viewer.compareSpec
+    if not cs then return { active = false } end
+    local alloc, blue = { }, { }
+    for nid, cn in pairs(cs.allocNodes) do
+        alloc[#alloc + 1] = nid
+        local n = spec.nodes[nid]
+        if n and n.alloc and n.type == "Mastery" and n.sd ~= cn.sd then blue[#blue + 1] = nid end
+    end
+    return { active = true, alloc = alloc, blue = blue, compare = tt.activeCompareSpec }
+end
+
+-- Heat map colours (PassiveTreeView.lua:855-882), for unallocated,
+-- non-start nodes, per main.nodePowerTheme. Legacy leaves values > 1 to the
+-- renderer to clip and divides by a zero max (inf/nan); both are clamped here.
+local function pob_clamp01(v)
+    if v ~= v or v == nil then return 0 end
+    if v < 0 then return 0 elseif v > 1 then return 1 end
+    return v
+end
+
+function pob_getHeatMap()
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then return { on = false, nodes = { } } end
+    local ct = bm.calcsTab
+    local res = { on = viewer.showHeatMap and true or false, nodes = { } }
+    local powerMax = ct.powerMax
+    if not viewer.showHeatMap or not powerMax then return res end
+    local powerStat = ct.powerStat
+    local theme = main.nodePowerTheme or "RED/BLUE"
+    for id, node in pairs(spec.nodes) do
+        if node.group and not node.isProxy and not node.group.isProxy and not node.alloc
+           and node.type ~= "ClassStart" and node.type ~= "AscendClassStart" and node.power then
+            local r, g, b
+            if powerStat and powerStat.stat then
+                local stat = math.max(node.power.singleStat or 0, 0)
+                local statCol = (stat / powerMax.singleStat * 1.5) ^ 0.5
+                if theme == "RED/GREEN" then r, g, b = 0, statCol, 0
+                elseif theme == "GREEN/BLUE" then r, g, b = 0, 0, statCol
+                else r, g, b = statCol, 0, 0 end
+            else
+                local offence = math.max(node.power.offence or 0, 0)
+                local defence = math.max(node.power.defence or 0, 0)
+                local dpsCol = (offence / powerMax.offence * 1.5) ^ 0.5
+                local defCol = (defence / powerMax.defence * 1.5) ^ 0.5
+                local mixCol = (math.max(dpsCol - 0.5, 0) + math.max(defCol - 0.5, 0)) / 2
+                if theme == "RED/GREEN" then r, g, b = dpsCol, defCol, mixCol
+                elseif theme == "GREEN/BLUE" then r, g, b = mixCol, dpsCol, defCol
+                else r, g, b = dpsCol, mixCol, defCol end
+            end
+            res.nodes[#res.nodes + 1] = { id = id, r = pob_clamp01(r), g = pob_clamp01(g), b = pob_clamp01(b) }
+        end
+    end
+    return res
+end
+
+-- ---------------------------------------------------------------------------
+-- Node power job (Show Node Power / Power Report). Legacy resumes
+-- calcsTab:BuildPower() once per drawn frame while the heat map is shown
+-- (PassiveTreeView.lua:731-735); each resume runs ~100ms of wall clock before
+-- the coroutine yields (CalcsTab.lua:634). With no frame loop, QML drives
+-- pob_powerStep from a Timer. Invalidation is the engine's own: BuildOutput
+-- sets powerBuildFlag, so the next step after ANY recalc starts a fresh
+-- coroutine against the new calculators -- a stale builder is never resumed.
+-- pob_powerStep runs pob_recalculate FIRST (legacy's Build OnFrame did the
+-- buildFlag rebuild before the tree drew), which is what keeps the builder and
+-- a rebuild from ever interleaving.
+-- ---------------------------------------------------------------------------
+local _powerProgress = 0
+local _powerDoneSerial = 0
+local _powerProgressWrap, _powerDoneWrap
+
+local function pob_powerHooks(bm)
+    if bm.powerBuilderProgressCallback ~= _powerProgressWrap then
+        local orig = bm.powerBuilderProgressCallback
+        _powerProgressWrap = function(percent)
+            _powerProgress = percent or 0
+            if orig then return orig(percent) end
+        end
+        bm.powerBuilderProgressCallback = _powerProgressWrap
+    end
+    if bm.powerBuilderCallback ~= _powerDoneWrap then
+        local orig = bm.powerBuilderCallback
+        _powerDoneWrap = function(...)
+            _powerProgress = 100
+            _powerDoneSerial = _powerDoneSerial + 1
+            if orig then return orig(...) end
+        end
+        bm.powerBuilderCallback = _powerDoneWrap
+    end
+end
+
+local function pob_powerStatIndex(tt, ct)
+    local ps = ct.powerStat
+    if not ps then return 1 end
+    for i, s in ipairs(tt.powerStatList or { }) do
+        if s == ps or (s.stat and s.stat == ps.stat) then return i end
+    end
+    return 1
+end
+
+function pob_getPowerState()
+    local bm, tt, viewer = pob_viewerCtx()
+    if not viewer then return nil end
+    local ct = bm.calcsTab
+    local labels = { }
+    for i, s in ipairs(tt.powerStatList or { }) do labels[i] = s.label end
+    return {
+        showHeatMap = viewer.showHeatMap and true or false,
+        statLabels = labels,
+        statIndex = pob_powerStatIndex(tt, ct),
+        maxDepth = ct.nodePowerMaxDepth or 0,
+        running = (viewer.showHeatMap and (ct.powerBuildFlag or ct.powerBuilder ~= nil)) and true or false,
+        progress = _powerProgress,
+        doneSerial = _powerDoneSerial,
+        hasMax = ct.powerMax ~= nil,
+        theme = main.nodePowerTheme or "RED/BLUE",
+        showStatDifferences = viewer.showStatDifferences and true or false,
+    }
+end
+
+-- "Show Node Power" checkbox / 'p' key (TreeTab.lua:195-205, PTV:189).
+function pob_setHeatMap(on)
+    local bm, tt, viewer = pob_viewerCtx()
+    if not viewer then return { ok = false } end
+    viewer.showHeatMap = on and true or false
+    if not on and tt.controls.powerReportList then tt.controls.powerReportList.shown = false end
+    _treeSpecSerial = _treeSpecSerial + 1
+    return { ok = true, showHeatMap = viewer.showHeatMap, _emit = { "tree" } }
+end
+
+-- Power-stat dropdown -> TreeTab:SetPowerCalc (TreeTab.lua:1065-1077).
+function pob_setPowerStat(index)
+    local bm, tt, viewer = pob_viewerCtx()
+    local stat = tt and tt.powerStatList and tt.powerStatList[tonumber(index) or 1]
+    if not stat then return { ok = false } end
+    tt:SetPowerCalc(stat)
+    _powerProgress = 0
+    pob_recalculate()
+    _treeSpecSerial = _treeSpecSerial + 1
+    return { ok = true, _emit = { "tree", "calcs" } }
+end
+
+-- Max-depth dropdown / custom edit (TreeTab.lua:208-249). 0 or nil = "All".
+-- Legacy only restarts the build when the limit GROWS (a shallower search is
+-- a subset of the one already done).
+function pob_setPowerMaxDepth(depth)
+    local bm, tt, viewer = pob_viewerCtx()
+    if not viewer then return { ok = false } end
+    local ct = bm.calcsTab
+    local oldMax = ct.nodePowerMaxDepth
+    depth = tonumber(depth)
+    if depth and depth <= 0 then depth = nil end
+    ct.nodePowerMaxDepth = depth
+    local restarted = false
+    if oldMax ~= depth and viewer.showHeatMap then
+        if oldMax ~= nil and (depth == nil or depth > oldMax) then
+            tt:SetPowerCalc(ct.powerStat)
+            pob_recalculate()
+            restarted = true
+        end
+    end
+    return { ok = true, restarted = restarted, _emit = restarted and { "tree", "calcs" } or nil }
+end
+
+-- One Timer tick: process a pending rebuild, then one BuildPower resume.
+function pob_powerStep()
+    local bm, tt, viewer = pob_viewerCtx()
+    if not viewer then return { running = false } end
+    local ct = bm.calcsTab
+    if not viewer.showHeatMap then return { running = false, progress = _powerProgress } end
+    pob_powerHooks(bm)
+    pob_recalculate()
+    local before = _powerDoneSerial
+    if ct.powerBuildFlag or ct.powerBuilder then
+        local ok, err = pcall(ct.BuildPower, ct)
+        if not ok then return { running = false, error = tostring(err) } end
+    end
+    local running = (ct.powerBuildFlag or ct.powerBuilder ~= nil) and true or false
+    local finished = _powerDoneSerial ~= before
+    return {
+        running = running,
+        finished = finished,
+        progress = running and _powerProgress or 100,
+        _emit = finished and { "tree" } or nil,
+    }
+end
+
+-- Power Report rows (TreeTab:BuildPowerReportList, TreeTab.lua:1260-1367).
+function pob_getPowerReport()
+    local bm, tt, viewer = pob_viewerCtx()
+    if not viewer then return nil end
+    local ct = bm.calcsTab
+    local stat = ct.powerStat or (tt.powerStatList and tt.powerStatList[1])
+    local building = viewer.showHeatMap and (ct.powerBuildFlag or ct.powerBuilder ~= nil)
+    local res = { statLabel = stat and stat.label or "", rows = { }, supported = stat and stat.stat ~= nil or false }
+    if not res.supported then
+        res.label = '"' .. res.statLabel .. '" not supported.  Select a specific stat from the dropdown.'
+        return res
+    end
+    if building or not ct.powerMax then
+        res.label = "Building Tree..."
+        return res
+    end
+    local ok, report = pcall(tt.BuildPowerReportList, tt, stat)
+    if not ok or type(report) ~= "table" then
+        res.label = "Report error: " .. tostring(report)
+        return res
+    end
+    for _, r in ipairs(report) do
+        local sd = { }
+        for _, line in ipairs(r.sd or { }) do sd[#sd + 1] = tostring(line) end
+        res.rows[#res.rows + 1] = {
+            id = r.id, name = r.name, type = r.type,
+            power = tonumber(r.power) or 0, powerStr = r.powerStr,
+            pathPower = tonumber(r.pathPower) or 0, pathPowerStr = r.pathPowerStr,
+            pathDist = r.pathDist, allocated = r.allocated and true or false,
+            x = r.x, y = r.y, sd = sd,
+        }
+    end
+    res.label = "Click to focus node on tree"
+    return res
+end
+
+-- Hotkey helpers (PassiveTreeView.lua:182-205).
+function pob_toggleStatDifferences()
+    local _, _, viewer = pob_viewerCtx()
+    if not viewer then return { ok = false } end
+    viewer.showStatDifferences = not viewer.showStatDifferences
+    return { ok = true, showStatDifferences = viewer.showStatDifferences }
+end
+
+-- Ctrl+C: "# name\n" + each stat line; sockets are excluded like legacy.
+function pob_getNodeCopyText(id)
+    local _, _, viewer, spec = pob_viewerCtx()
+    local node = spec and spec.nodes[tonumber(id) or id]
+    if not node or node.type == "Socket" then return nil end
+    local result = "# " .. node.dn .. "\n"
+    for _, line in ipairs(node.sd or { }) do result = result .. line .. "\n" end
+    return result
+end
+
+-- F1 (itemLib.wiki, ItemTools.lua:367-396).
+function pob_getNodeWikiUrl(id)
+    local _, _, viewer, spec = pob_viewerCtx()
+    local node = spec and spec.nodes[tonumber(id) or id]
+    if not node then return nil end
+    local name = node.name or node.dn
+    return "https://www.poewiki.net/wiki/" .. tostring(name):gsub(" ", "_")
+end
+
+-- Part 4.3 selftest (bridge half): tooltip lines from the engine's own
+-- AddNodeTooltip, Ctrl+D toggle, hover path/dependents, Shift trace, socket
+-- radius preview, legacy search syntax, compare state, and a full node-power
+-- job driven step by step to completion (heat map + Power Report). Restores
+-- every toggle it touches.
+function pob_selftestTreeDisplay()
+    local res = { ok = false }
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then res.error = "no viewer"; return res end
+    local function anyLine(lines, pat)
+        for _, l in ipairs(lines or { }) do if l.text and l.text:find(pat) then return true end end
+        return false
+    end
+
+    -- A far notable: has a multi-node path, so the path/gold/tip lines all show.
+    local far
+    for id, n in pairs(spec.nodes) do
+        if n.type == "Notable" and n.path and #n.path > 3 and not n.ascendancyName and not n.alloc
+           and (not far or id < far.id) then far = n end
+    end
+    if not far then res.error = "no far notable"; return res end
+
+    local tip = pob_getNodeTooltipLines(far.id)
+    res.tooltipLines = tip and tip.lines and #tip.lines or 0
+    res.tooltipNameOk = tip ~= nil and tip.lines[1] and tip.lines[1].text:find(far.dn, 1, true) ~= nil
+    res.tooltipPathOk = anyLine(tip and tip.lines, "points to node")
+    res.tooltipDiffOn = anyLine(tip and tip.lines, "Ctrl%+D to disable")
+    local wasDiff = viewer.showStatDifferences
+    pob_toggleStatDifferences()
+    local tipOff = pob_getNodeTooltipLines(far.id)
+    res.tooltipDiffToggle = anyLine(tipOff and tipOff.lines, "Ctrl%+D to enable")
+    viewer.showStatDifferences = wasDiff
+
+    -- Hover preview: unallocated -> path = node.path, no dependents.
+    local h = pob_getHoverInfo(far.id, { }, false)
+    res.hoverPathOk = h ~= nil and #h.path == #far.path and #h.depends == #(far.depends or { })
+
+    -- Shift trace: seeding reverses the path (start -> node) ...
+    local t1 = pob_getHoverInfo(far.id, { }, true)
+    res.traceSeedOk = t1 ~= nil and t1.id == far.id and #t1.trace == #far.path and t1.trace[#t1.trace] == far.id
+    -- ... a linked, unallocated neighbour extends it ...
+    local nb
+    for _, ln in ipairs(far.linked) do
+        if not ln.alloc and ln.type ~= "Mastery" and not isValueInArray(far.path, ln) and ln.path then nb = ln break end
+    end
+    if nb then
+        local t2 = pob_getHoverInfo(nb.id, t1.trace, true)
+        res.traceExtendOk = t2.id == nb.id and #t2.trace == #t1.trace + 1 and t2.trace[#t2.trace] == nb.id
+    else
+        res.traceExtendOk = true
+    end
+    -- ... and a node not linked to the trace's end drops the hover.
+    local lastNode = spec.nodes[t1.trace[#t1.trace]]
+    local stranger
+    for id, n in pairs(spec.nodes) do
+        if n.path and n ~= lastNode and not isValueInArray(lastNode.linked, n)
+           and not isValueInArray(t1.trace, id) and (not stranger or id < stranger.id) then stranger = n end
+    end
+    local t3 = stranger and pob_getHoverInfo(stranger.id, t1.trace, true)
+    res.traceDropOk = t3 ~= nil and t3.id == -1 and #t3.trace == #t1.trace
+
+    -- Socket radius preview.
+    local sock
+    for id, n in pairs(spec.nodes) do
+        if n.type == "Socket" and n.nodesInRadius and not n.expansionJewel and (not sock or id < sock.id) then sock = n end
+    end
+    local hs = sock and pob_getHoverInfo(sock.id, { }, false)
+    res.radiusOk = hs ~= nil and hs.radius ~= nil and #hs.radius.rings == 5 and #hs.radius.nodes > 0
+        and hs.radius.rings[1].color:match("^#%x%x%x%x%x%x$") ~= nil
+
+    -- Search: plain, quoted phrase, (a|b) group, oil:, bad pattern.
+    local function count(str) return #pob_setTreeSearch(str) end
+    local nLife = count("life")
+    local nMaxLife = count('"maximum life"')
+    local nFire, nCold, nEither = count("fire"), count("cold"), count("(fire|cold)")
+    res.searchPlainOk = nLife > 0
+    res.searchQuotedOk = nMaxLife > 0 and nMaxLife <= nLife
+    res.searchGroupOk = nEither >= math.max(nFire, nCold) and nEither <= nFire + nCold and nEither > 0
+    res.searchAndOk = count("fire cold") <= math.min(nFire, nCold)
+    res.searchOilOk = count("oil: amber") > 0
+    local okBad = pcall(count, "[")
+    res.searchBadPatternOk = okBad
+    res.searchClassStartExcluded = true
+    for _, id in ipairs(pob_setTreeSearch("start")) do
+        if spec.nodes[id].type == "ClassStart" then res.searchClassStartExcluded = false end
+    end
+    pob_setTreeSearch("")
+
+    -- Compare: a copy with one extra allocation shows up as compare-only.
+    local nodeId = pob_frontierNode(spec)
+    local cp = pob_copySpec(tt.activeSpec, "ST Cmp")
+    local cmpSpec = tt.specList[cp.index]
+    cmpSpec:AllocNode(cmpSpec.nodes[nodeId])
+    pob_setCompare(true, cp.index)
+    local cs = pob_getCompareState()
+    res.compareOk = cs.active == true and isValueInArray(cs.alloc, nodeId) ~= nil and not spec.nodes[nodeId].alloc
+    pob_setCompare(false)
+    res.compareOffOk = pob_getCompareState().active == false
+    pob_deleteSpec(cp.index)
+
+    -- Node power: depth-limited so the job is quick; step until done.
+    local lifeIdx
+    for i, s in ipairs(tt.powerStatList) do if s.stat == "Life" then lifeIdx = i end end
+    pob_setPowerMaxDepth(3)
+    pob_setPowerStat(lifeIdx)
+    local st = pob_getPowerState()
+    res.powerStarted = st.showHeatMap and st.running and st.statIndex == lifeIdx
+    local steps, finished = 0, false
+    while steps < 2000 do
+        steps = steps + 1
+        local r = pob_powerStep()
+        if r.finished then finished = true end
+        if not r.running then break end
+    end
+    res.powerSteps = steps
+    res.powerFinished = finished and not pob_getPowerState().running
+    local hm = pob_getHeatMap()
+    local lit = 0
+    for _, n in ipairs(hm.nodes) do if n.r > 0 then lit = lit + 1 end end
+    res.heatMapLit = lit
+    res.heatMapOk = hm.on and lit > 0
+    local rep = pob_getPowerReport()
+    res.reportRows = rep and #rep.rows or 0
+    res.reportOk = rep ~= nil and rep.supported and #rep.rows > 0 and rep.label == "Click to focus node on tree"
+    -- A rebuild invalidates: the next step starts a fresh job.
+    bm.buildFlag = true
+    local again = pob_powerStep()
+    res.powerRestartsOnRebuild = again.running == true
+    pob_setHeatMap(false)
+    res.heatOffOk = pob_powerStep().running == false and pob_getHeatMap().on == false
+    bm.calcsTab.nodePowerMaxDepth = nil
+    bm.calcsTab.powerStat = nil
+    -- Offence/Defence (index 1) has no report.
+    res.reportUnsupportedOk = pob_getPowerReport().supported == false
+
+    -- Hotkey helpers.
+    local cpy = pob_getNodeCopyText(far.id)
+    res.copyOk = cpy ~= nil and cpy:sub(1, 2 + #far.dn) == "# " .. far.dn
+    res.copySocketNil = sock == nil or pob_getNodeCopyText(sock.id) == nil
+    res.wikiOk = (pob_getNodeWikiUrl(far.id) or ""):find("^https://www%.poewiki%.net/wiki/") ~= nil
+
+    res.ok = res.tooltipNameOk and res.tooltipPathOk and res.tooltipDiffOn and res.tooltipDiffToggle
+        and res.hoverPathOk and res.traceSeedOk and res.traceExtendOk and res.traceDropOk and res.radiusOk
+        and res.searchPlainOk and res.searchQuotedOk and res.searchGroupOk and res.searchAndOk
+        and res.searchOilOk and res.searchBadPatternOk and res.searchClassStartExcluded
+        and res.compareOk and res.compareOffOk
+        and res.powerStarted and res.powerFinished and res.heatMapOk and res.reportOk
+        and res.powerRestartsOnRebuild and res.heatOffOk and res.reportUnsupportedOk
+        and res.copyOk and res.copySocketNil and res.wikiOk
+    return res
+end
+
+-- Left click on a node (PassiveTreeView.lua:366-495). Returns what happened
+-- so QML can open the follow-up UI legacy opened inline:
+--   { action = "dealloc" | "alloc" | "ascendancy" | "none" }
+--   { action = "mastery", nodeId }            -> mastery popup (Part 4.4)
+--   { action = "classConfirm", ... }          -> Class Change confirm; answer
+--                                                with pob_confirmNodeClassChange
+-- `traceIds` is the Shift trace path: it is the alternate path only when the
+-- clicked node is its last element (legacy :489).
+local function pob_clickDone(spec, bm, action, extra)
+    spec:AddUndoState()
+    spec:SetWindowTitleWithBuildClass()
+    bm.buildFlag = true
+    pob_recalculate()
+    local r = extra or { }
+    r.action = action
+    r.used = select(1, spec:CountAllocNodes())
+    r._emit = { "build", "tree", "calcs" }
+    return r
+end
+
+function pob_clickNode(id, traceIds)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then return { action = "none" } end
+    local node = spec.nodes[tonumber(id) or id]
+    if not node then return { action = "none" } end
+    if node.alloc then
+        spec:DeallocNode(node)
+        return pob_clickDone(spec, bm, "dealloc")
+    end
+    local switched = false
+    if node.ascendancyName then
+        if node.isBloodline and spec.tree.alternate_ascendancies then
+            local isDifferentBloodline = not spec.curSecondaryAscendClass or node.ascendancyName ~= spec.curSecondaryAscendClass.id
+            if isDifferentBloodline then
+                for bloodlineId, bloodlineData in pairs(spec.tree.alternate_ascendancies) do
+                    if bloodlineData.id == node.ascendancyName then
+                        spec:SelectSecondaryAscendClass(bloodlineId)
+                        spec:AddUndoState()
+                        spec:SetWindowTitleWithBuildClass()
+                        bm.buildFlag = true
+                        switched = true
+                        break
+                    end
+                end
+            end
+        else
+            local isDifferentAscendancy = false
+            if spec.curAscendClassId == 0 or node.ascendancyName ~= spec.curAscendClassBaseName then
+                if not (spec.curSecondaryAscendClass and node.ascendancyName == spec.curSecondaryAscendClass.id) then
+                    isDifferentAscendancy = true
+                end
+            end
+            if isDifferentAscendancy then
+                local targetAscendClassId
+                for ascendClassId, ascendClass in pairs(spec.curClass.classes) do
+                    if ascendClass.id == node.ascendancyName then targetAscendClassId = ascendClassId break end
+                end
+                if targetAscendClassId then
+                    spec:SelectAscendClass(targetAscendClassId)
+                    spec:AddUndoState()
+                    spec:SetWindowTitleWithBuildClass()
+                    bm.buildFlag = true
+                    switched = true
+                else
+                    local targetBaseClassId, targetBaseClass
+                    for classId, classData in pairs(spec.tree.classes) do
+                        for ascendClassId, ascendClass in pairs(classData.classes) do
+                            if ascendClass.id == node.ascendancyName then
+                                targetBaseClassId, targetBaseClass, targetAscendClassId = classId, classData, ascendClassId
+                                break
+                            end
+                        end
+                        if targetBaseClassId then break end
+                    end
+                    if targetBaseClassId then
+                        local used = spec:CountAllocNodes()
+                        if used == 0 or spec:IsClassConnected(targetBaseClassId) then
+                            return pob_confirmNodeClassChange(node.id, targetBaseClassId, targetAscendClassId, "continue")
+                        end
+                        return {
+                            action = "classConfirm",
+                            nodeId = node.id,
+                            targetClassId = targetBaseClassId,
+                            targetAscendClassId = targetAscendClassId,
+                            title = "Class Change",
+                            message = "Changing class to " .. targetBaseClass.name .. " will reset your passive tree.\nThis can be avoided by connecting one of the " .. targetBaseClass.name .. " starting nodes to your tree.",
+                        }
+                    end
+                end
+            end
+        end
+    end
+    if node.path and not node.alloc then
+        if node.type == "Mastery" and node.masteryEffects then
+            if switched then pob_recalculate() end
+            return { action = "mastery", nodeId = node.id, _emit = switched and { "build", "tree", "calcs" } or nil }
+        end
+        local trace = pob_nodesFromIds(spec, traceIds)
+        local altPath = (#trace > 0 and node == trace[#trace]) and trace or nil
+        spec:AllocNode(node, altPath)
+        return pob_clickDone(spec, bm, "alloc", { usedTrace = altPath ~= nil })
+    end
+    if switched then
+        pob_recalculate()
+        return { action = "ascendancy", _emit = { "build", "tree", "calcs" } }
+    end
+    return { action = "none" }
+end
+
+-- Answer to the Class Change confirm (legacy's Continue / Connect Path).
+function pob_confirmNodeClassChange(nodeId, targetClassId, targetAscendClassId, mode)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then return { action = "none" } end
+    targetClassId, targetAscendClassId = tonumber(targetClassId), tonumber(targetAscendClassId)
+    if mode == "connect" then
+        if not spec:ConnectToClass(targetClassId) then return { action = "none" } end
+    end
+    spec:SelectClass(targetClassId)
+    spec:SelectAscendClass(targetAscendClassId)
+    local targetNode = spec.nodes[tonumber(nodeId) or nodeId]
+    if targetNode and not targetNode.alloc then spec:AllocNode(targetNode) end
+    return pob_clickDone(spec, bm, "classChange")
+end
+
+-- Right click (PassiveTreeView.lua:496-518): which popup/navigation applies.
+--   { action = "items", slotName }  allocated jewel socket -> Items tab
+--   { action = "modify", nodeId }   tattoo / runegraft popup (Part 4.4)
+--   { action = "mastery", nodeId }  allocated mastery -> mastery popup (Part 4.4)
+function pob_rightClickNode(id)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then return { action = "none" } end
+    local node = spec.nodes[tonumber(id) or id]
+    if not node then return { action = "none" } end
+    if node.alloc and node.type == "Socket" then
+        local slot = bm.itemsTab.sockets[node.id]
+        if slot and slot:IsEnabled() then
+            slot.dropped = true
+            bm.itemsTab:SelectControl(slot)
+            bm.viewMode = "ITEMS"
+            return { action = "items", slotName = slot.slotName }
+        end
+        return { action = "none" }
+    elseif (node.isTattoo
+        or (node.type == "Normal" and (node.dn == "Strength" or node.dn == "Dexterity" or node.dn == "Intelligence"))
+        or (node.type == "Notable" and #node.sd > 0 and (node.sd[1]:match("+30 to Dexterity") or node.sd[1]:match("+30 to Strength") or node.sd[1]:match("+30 to Intelligence")))
+        or node.type == "Keystone") and not node.expansionSkill then
+        return { action = "modify", nodeId = node.id }
+    elseif node.alloc and node.type == "Mastery" and node.masteryEffects then
+        return { action = "mastery", nodeId = node.id }
+    elseif not node.alloc and node.type == "Mastery" and node.masteryEffects then
+        return { action = "modify", nodeId = node.id }
+    end
+    return { action = "none" }
+end
+
+function pob_selftestTreeClick()
+    local res = { ok = false }
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then res.error = "no viewer"; return res end
+    local before = spec:CreateUndoState()
+    local function restore()
+        spec:RestoreUndoState(before)
+        bm.buildFlag = true
+        pob_recalculate()
+    end
+    local used0 = select(1, spec:CountAllocNodes())
+
+    local fid = pob_frontierNode(spec)
+    local a = pob_clickNode(fid)
+    res.allocOk = a.action == "alloc" and spec.nodes[fid].alloc == true and a.used == used0 + 1
+    local d = pob_clickNode(fid)
+    res.deallocOk = d.action == "dealloc" and not spec.nodes[fid].alloc and d.used == used0
+
+    -- Shift-trace allocation: the trace becomes the path.
+    local far
+    for id, n in pairs(spec.nodes) do
+        if n.type == "Notable" and n.path and #n.path > 3 and not n.ascendancyName and not n.alloc
+           and (not far or id < far.id) then far = n end
+    end
+    local tr = pob_getHoverInfo(far.id, { }, true)
+    local t = pob_clickNode(far.id, tr.trace)
+    res.traceAllocOk = t.action == "alloc" and t.usedTrace == true and far.alloc == true
+        and t.used == used0 + #tr.trace
+    restore()
+    res.restoreOk = select(1, spec:CountAllocNodes()) == used0 and not far.alloc
+
+    -- Same-class ascendancy node: selects the ascendancy, then allocates.
+    local ascNode
+    for _, asc in pairs(spec.curClass.classes) do
+        for id, n in pairs(spec.nodes) do
+            if asc.id and n.ascendancyName == asc.id and n.type ~= "AscendClassStart" and not n.isMultipleChoiceOption
+               and (not ascNode or id < ascNode.id) then ascNode = n end
+        end
+        if ascNode then break end
+    end
+    if ascNode and spec.curAscendClassId == 0 then
+        local r = pob_clickNode(ascNode.id)
+        res.ascendSwitchOk = spec.curAscendClassId ~= 0 and spec.curAscendClassBaseName == ascNode.ascendancyName
+            and (r.action == "alloc" or r.action == "ascendancy")
+        res.ascendSample = tostring(r.action) .. "|" .. tostring(spec.curAscendClassId) .. "|" .. tostring(spec.curAscendClassBaseName) .. "|" .. tostring(ascNode.ascendancyName) .. "|" .. tostring(ascNode.dn)
+        restore()
+    else
+        res.ascendSwitchOk = true
+    end
+
+    -- Another class's ascendancy with points spent and no connection: confirm.
+    local otherAsc
+    for classId, classData in pairs(spec.tree.classes) do
+        if classId ~= spec.curClassId and not spec:IsClassConnected(classId) then
+            for _, asc in pairs(classData.classes) do
+                for id, n in pairs(spec.nodes) do
+                    if asc.id and n.ascendancyName == asc.id and n.type ~= "AscendClassStart" and not n.isBloodline
+                       and (not otherAsc or id < otherAsc.id) then otherAsc = n end
+                end
+            end
+            if otherAsc then break end
+        end
+    end
+    pob_clickNode(fid)
+    local classBefore = spec.curClassId
+    local cc = otherAsc and pob_clickNode(otherAsc.id)
+    res.classConfirmSample = otherAsc and (tostring(cc.action) .. "|" .. tostring(otherAsc.ascendancyName) .. "|" .. tostring(otherAsc.dn) .. "|used=" .. tostring(select(1, spec:CountAllocNodes())) .. "|cls=" .. tostring(spec.curClassId)) or "none"
+    res.classConfirmOk = otherAsc == nil or (cc.action == "classConfirm" and cc.targetClassId ~= nil
+        and spec.curClassId == classBefore)
+    restore()
+
+    -- Right-click routing.
+    local keystone
+    for id, n in pairs(spec.nodes) do
+        if n.type == "Keystone" and not n.expansionSkill and (not keystone or id < keystone.id) then keystone = n end
+    end
+    res.rightKeystoneOk = keystone ~= nil and pob_rightClickNode(keystone.id).action == "modify"
+    res.rightPlainOk = pob_rightClickNode(far.id).action == "none"
+
+    res.restoredCount = select(1, spec:CountAllocNodes()) == used0 and spec.curClassId == classBefore
+    spec:ResetUndo()
+    res.ok = res.allocOk and res.deallocOk and res.traceAllocOk and res.restoreOk and res.ascendSwitchOk
+        and res.classConfirmOk and res.rightKeystoneOk and res.rightPlainOk and res.restoredCount
     return res
 end

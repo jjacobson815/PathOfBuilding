@@ -1,6 +1,6 @@
 # Phase 4 — Tree Tab (finish & harden)
 
-**Status:** IN PROGRESS — Part 4.1 done, Part 4.2 done (2026-09-27); latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
+**Status:** IN PROGRESS — Parts 4.1–4.3 done (4.2/4.3 on 2026-09-27); latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
 **Goal:** Finish the passive-tree tab — the one view that already renders. Harden
 the renderer, make the tree viewer an embeddable multi-instance component, and add
 the missing interactive features (spec management, compare overlay, search, node
@@ -61,22 +61,24 @@ ItemSlotControl, TimelessJewelSocketControl, and CalcBreakdown reuse later.
 
 ## Part 4.3 — Interaction & display
 
-- [ ] Viewer: pan/zoom/alloc/dealloc with dependent-node handling, path tracing +
+- [x] Viewer: pan/zoom/alloc/dealloc with dependent-node handling, path tracing +
   hover preview, path drag (Shift alternate-path mode). Hotkeys: `p` heat map,
   Ctrl+D stat-diff tooltips, Ctrl+C copy hovered node, PgUp/PgDn zoom, Shift-socket
   jewel compare, wiki hotkey. (M)
-- [ ] Node tooltips: name, stats (unsupported flagged), reminder text, **stat-diff
+  → **DONE 2026-09-27** (session log). "Shift-socket jewel compare" does not exist in
+  legacy: Shift over a socket only hides its tooltip so the radius rings show — ported.
+- [x] Node tooltips: name, stats (unsupported flagged), reminder text, **stat-diff
   on alloc/dealloc** (Phase 2 node calculator), required gold, compare-spec status;
   jewel sockets show socketed-jewel tooltip + radius rings + "allocates in radius". (M)
-- [ ] Compare checkbox + compare-spec dropdown → overlay (green/red/blue) or the
+- [x] Compare checkbox + compare-spec dropdown → overlay (green/red/blue) or the
   compare colors in the viewer; cluster subgraphs. (M) Includes the viewer's
   `compareSpec` parameter (moved here from 4.1): the bridge must export the
   compare spec's alloc/mastery/jewel state per node
   (`PassiveTreeView:GetCompareNodeColor`), and TreeScene needs per-node tinting —
   `QSGTextureMaterial` cannot tint, so use a vertex-colour textured material.
-- [ ] Search box (Ctrl+F, Lua patterns, `oil:` anoint prefix, `(a|b)` groups) →
+- [x] Search box (Ctrl+F, Lua patterns, `oil:` anoint prefix, `(a|b)` groups) →
   viewer highlight + optional edge-of-viewport circles. (S-M)
-- [ ] **Show Node Power** + max-depth dropdown + power-stat dropdown → heat map;
+- [x] **Show Node Power** + max-depth dropdown + power-stat dropdown → heat map;
   **Power Report drawer** (PowerReportListControl, sortable, click-to-recenter);
   progress toast while the PowerBuilder coroutine runs (drive resume from a Qt
   timer/idle hook, never concurrent with a rebuild). (M — uses Phase 2 node power.)
@@ -542,3 +544,63 @@ tree area BLANK on Linux (no GL → TreeScene's geometry nodes are not drawn);
 run the capture under `xvfb-run` with `QT_QPA_PLATFORM=xcb` (Mesa llvmpipe)
 instead — tree SSIM 0.994 vs the committed baseline. Probe capture of the
 Manage popup (3 trees, one `[3.25]`) looked right; probe reverted.
+
+## Session log — 2026-09-27 (Part 4.3: interaction & display)
+
+**Approach:** the legacy `PassiveTreeView` object (`build.treeTab.viewer`) is
+live under Qt, just never drawn. Its data-building methods are CALLED, not
+re-derived: the node tooltip is `viewer:AddNodeTooltip` into a real `Tooltip`
+object (`pob_getNodeTooltipLines` marshals `tip.lines`), and search is the
+engine's `DoesNodeMatchSearchParams` (only the Draw-local tokeniser was ported).
+The per-frame Draw logic became data: `pob_getHoverInfo` (hover path, dependents,
+Shift trace extension, socket radius rings + in-radius colours), `pob_clickNode`
+/ `pob_confirmNodeClassChange` / `pob_rightClickNode` (PassiveTreeView.lua:366-518
+incl. bloodline / same-class / cross-class ascendancy branches and the Class
+Change confirm), `pob_getCompareState`, `pob_getHeatMap` (legacy colour formula
+per `main.nodePowerTheme`), hotkey helpers.
+
+**Node power job:** `pob_powerStep` = `pob_recalculate()` then ONE
+`calcsTab:BuildPower()` resume (~100ms, the engine's own yield). QML `Timer`
+drives it while the heat map is on. No new abort logic was needed:
+`CalcsTab:BuildOutput` itself sets `powerBuildFlag`, so the step after any
+recalc starts a fresh coroutine on the new calculators (stale builder never
+resumed; selftest `powerRestartsOnRebuild`). Progress toast = legacy's own
+ToastNotification through the existing toast mirror. Power Report drawer =
+`PowerReportPanel.qml` over `TreeTab:BuildPowerReportList` rows (filter,
+masteries toggle, sortable columns, click → focus at zoom level 12).
+
+**Renderer (`TreeScene`):** new `TintedTextureMaterial` (per-vertex colour ×
+texture = legacy `SetDrawColor`) with PRE-BAKED shaders (`app/shaders/*.qsb`,
+GLSL/HLSL/MSL/SPIR-V; source + rebuild command next to them) so no build machine
+needs Qt Shader Tools. Tree payload is parsed once per revision into structs;
+connectors/icons/frames are rebuilt from the structs on hover / overlay change.
+Draws: hover path (Intermediate connector art + "path" frames), dependents red,
+radius rings (`Assets/ring.png`) + in-radius frame colours, compare tints
+(green/red/blue, compare-only connectors forced Active + green), heat map tints
++ "alloc" frames, search circles (`Assets/small_ring.png`, red,
+175·scale/zoom^0.4, edge-clamped at 2/3 size — screen space). `pob_getTreeData`
+now also exports per-node `framePathSprite`/`frameAllocSprite` and per-connector
+`vertIntermediate`/`vertActive` + atlases. Search no longer emits `treeChanged`
+(it re-ran `pob_getTreeData` on every keystroke).
+
+**Also fixed:** `Tooltip.qml` sized itself from font sizes, so tall/wide
+tooltips overflowed their box; it now also measures the laid-out lines.
+
+**Gate:** `tree-display` (34 flags: tooltip lines/diff toggle, hover path,
+trace seed/extend/drop, radius, search plain/quoted/group/AND/oil:/bad pattern/
+ClassStart excluded, compare on/off, power job start→finish, heat map lit,
+report rows, restart on rebuild, copy/wiki) and `tree-click` (alloc, dealloc,
+trace alloc along the path, same-class ascendancy switch, cross-class confirm,
+right-click routing, full restore). Both binaries EXIT=0. Probe captures under
+Xvfb confirmed: engine tooltip (unsupported-mod flag, stat diffs, tips), heat
+map (legacy black/red look), search + edge circles, Power Report, red
+dependents chain. Probes reverted.
+
+**Not done / deviations (documented):** the gem sub-tooltip beside a node
+tooltip (`skillTooltip`); rotating shaded radius rings on ALLOCATED jewels
+(only the hovered socket's rings); compare-only cluster subgraph nodes (the
+renderer draws `tree.nodes` only); other-ascendancy grey connectors / 25%
+backgrounds; mastery hover art (`masteryConnected`). Capture: tree view differs
+from the Windows baseline only by the new bottom strip — re-baseline on Windows.
+**Needs Windows:** the tint shader's HLSL path (D3D11) has only run on Linux
+(OpenGL via Mesa).

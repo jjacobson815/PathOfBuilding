@@ -929,6 +929,10 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Phase 4 Part 4.2: spec management (list, switch, tooltip, new/copy/
     // rename/move/delete, import/export round trip, Items selector sync).
     if (!pob_run_lua_check(engine, "pob_selftestSpecManage", "spec-manage")) return false;
+    // Phase 4 Part 4.3: tooltip / hover / trace / radius / search / compare /
+    // node-power job / hotkey helpers.
+    if (!pob_run_lua_check(engine, "pob_selftestTreeDisplay", "tree-display")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestTreeClick", "tree-click")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

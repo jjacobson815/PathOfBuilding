@@ -42,8 +42,10 @@ add_executable(pob-qt
     src/CompareModel.cpp
     src/PartyModel.cpp
     src/TreeScene.cpp
+    src/TintedTextureMaterial.cpp
     src/luabridge.cpp
     qml/qml.qrc
+    shaders/shaders.qrc
 )
 target_include_directories(pob-qt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src

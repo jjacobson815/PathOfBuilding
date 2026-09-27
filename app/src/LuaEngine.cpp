@@ -1002,8 +1002,10 @@ QVariant LuaEngine::getNodeTooltip(int id) {
 }
 
 QVariantList LuaEngine::setTreeSearch(const QString& str) {
+    // No treeChanged: a search only changes the highlight, which
+    // TreeViewController delivers through searchChanged. Emitting treeChanged
+    // here re-ran pob_getTreeData (~100ms) on every keystroke.
     QVariant v = callGlobal("pob_setTreeSearch", { str });
-    emit treeChanged();
     return v.toList();
 }
 

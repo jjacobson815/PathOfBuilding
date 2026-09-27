@@ -13,10 +13,20 @@ import "../components/StatDiff.js" as StatDiff
 //     points/sockets, switch stat-diff, respec gold, game version (:51-103).
 //   * Up/Down cycle trees while the tree has focus (:394-405); Ctrl+M opens
 //     the Manage Trees popup (:408).
+// Phase 4 Part 4.3 — interaction & display:
+//   * Compare checkbox + compare-tree dropdown (:106-124) -> green/red/blue
+//     node tints and forced-active connectors in the renderer;
+//   * Show Node Power + power-stat + max-depth dropdowns (:195-265), the
+//     node-power job driven by a Timer (one BuildPower resume per tick; the
+//     legacy progress toast comes through the toast mirror), Power Report
+//     drawer (:268-294, 194px bottom drawer);
+//   * hotkeys (PassiveTreeView.lua:182-205, TreeTab.lua:393-410): p heat map,
+//     Ctrl+D stat diffs, Ctrl+C copy node, PgUp/PgDn zoom (Shift x3), F1 wiki,
+//     Ctrl+F search; node-click follow-ups (class-change confirm, Items tab).
 //
-// STATE MODEL: `specState` caches pob_getSpecList() and is refreshed from the
-// engine signals only (no frame loop, invariant #7). The dropdown's
-// currentIndex is pushed imperatively for the same reason TopBar does it.
+// STATE MODEL: `specState` / `powerState` cache bridge reads and are refreshed
+// from engine signals only (no frame loop, invariant #7). Dropdown indices are
+// pushed imperatively for the same reason TopBar does it.
 Item {
     id: treeViewRoot
     anchors.fill: parent
@@ -25,16 +35,42 @@ Item {
     property var specState: ({})
     readonly property var specs: (specState && specState.specs && specState.specs.length !== undefined)
                                  ? specState.specs : []
+    property var powerState: ({})
+    property bool showPowerReport: false
+    readonly property var depthValues: [0, 5, 10, 15]   // 0 = "All"
 
     function refreshSpecs() {
         if (luaEngine.currentMode !== "BUILD") return
         var st = luaEngine.invoke("pob_getSpecList", [])
         specState = st ? st : ({})
         var items = []
-        for (var i = 0; i < specs.length; i++) items.push({ label: specs[i].label, specIndex: i + 1 })
+        var labels = []
+        for (var i = 0; i < specs.length; i++) {
+            items.push({ label: specs[i].label, specIndex: i + 1 })
+            labels.push(specs[i].label)
+        }
         items.push({ label: "Manage trees... (ctrl-m)", specIndex: -1 })
         specSelect.model = items
         specSelect.currentIndex = (specState.active || 1) - 1
+        compareSelect.model = labels
+        compareSelect.currentIndex = (specState.compare || 1) - 1
+        compareCheck.state = !!specState.isComparing
+    }
+
+    function refreshPower() {
+        if (luaEngine.currentMode !== "BUILD") return
+        var p = luaEngine.invoke("pob_getPowerState", [])
+        powerState = p ? p : ({})
+        if (!p) return
+        powerStatSelect.model = p.statLabels
+        powerStatSelect.currentIndex = (p.statIndex || 1) - 1
+        var d = depthValues.indexOf(p.maxDepth || 0)
+        if (d < 0) { customDepth.visible = true; customDepth.text = String(p.maxDepth); d = 4 }
+        depthSelect.currentIndex = d
+        heatCheck.state = !!p.showHeatMap
+        if (p.showHeatMap && p.running && !powerTimer.running) powerTimer.start()
+        if (!p.showHeatMap) showPowerReport = false
+        if (showPowerReport && !p.running) reportPanel.setReport(luaEngine.invoke("pob_getPowerReport", []))
     }
 
     function cycleSpec(delta) {
@@ -43,6 +79,12 @@ Item {
     }
 
     function openManage() { managePopup.openFresh() }
+
+    function setHeatMap(on) {
+        luaEngine.invoke("pob_setHeatMap", [on])
+        refreshPower()
+        if (on) powerTimer.start()
+    }
 
     // Spec-row tooltip (TreeTab.lua:51-103).
     function specTooltip(item, tt) {
@@ -66,10 +108,45 @@ Item {
         tt.addLine(16, "^7Game Version: " + t.versionDisplay)
     }
 
+    // Follow-ups of a node click that need UI (pob_clickNode / pob_rightClickNode).
+    function handleNodeAction(r) {
+        if (r.action === "items") {
+            luaEngine.setActiveView("ITEMS")
+        } else if (r.action === "classConfirm") {
+            classConfirm.pending = r
+            classConfirm.message = r.message
+            classConfirm.open()
+        } else if (r.action === "mastery" || r.action === "modify") {
+            nodePopupRequested(r)
+        }
+    }
+    // Part 4.4 hooks the mastery / tattoo popups here.
+    signal nodePopupRequested(var r)
+
     focus: true
     Keys.onPressed: function (event) {
-        if (event.key === Qt.Key_Up) { cycleSpec(-1); event.accepted = true }
-        else if (event.key === Qt.Key_Down) { cycleSpec(1); event.accepted = true }
+        var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
+        var shift = (event.modifiers & Qt.ShiftModifier) !== 0
+        var hover = treeViewer.hoverNodeId
+        if (event.key === Qt.Key_Up && !ctrl) { cycleSpec(-1) }
+        else if (event.key === Qt.Key_Down && !ctrl) { cycleSpec(1) }
+        else if (event.key === Qt.Key_P && !ctrl) { setHeatMap(!powerState.showHeatMap) }
+        else if (event.key === Qt.Key_D && ctrl) {
+            luaEngine.invoke("pob_toggleStatDifferences", [])
+            treeViewer.refreshHover()
+        }
+        else if (event.key === Qt.Key_C && ctrl && hover >= 0) {
+            var txt = luaEngine.invoke("pob_getNodeCopyText", [hover])
+            if (txt) luaEngine.copyText(txt)
+        }
+        else if (event.key === Qt.Key_PageUp) { treeViewer.zoomStep(shift ? 3 : 1) }
+        else if (event.key === Qt.Key_PageDown) { treeViewer.zoomStep(shift ? -3 : -1) }
+        else if (event.key === Qt.Key_F1 && hover >= 0) {
+            var url = luaEngine.invoke("pob_getNodeWikiUrl", [hover])
+            if (url) luaEngine.openURL(url)
+        }
+        else return
+        event.accepted = true
     }
 
     Shortcut {
@@ -77,13 +154,18 @@ Item {
         enabled: treeViewRoot.visible && luaEngine.currentMode === "BUILD"
         onActivated: treeViewRoot.openManage()
     }
+    Shortcut {
+        sequence: "Ctrl+F"
+        enabled: treeViewRoot.visible && luaEngine.currentMode === "BUILD"
+        onActivated: treeViewer.focusSearch()
+    }
 
     Widgets.TreeViewer {
         id: treeViewer
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.bottom: bottomBar.top
+        anchors.bottom: reportPanel.visible ? reportPanel.top : bottomBar.top
         controller: treeViewController
         interactive: true
         readOnly: false
@@ -91,6 +173,18 @@ Item {
         // Clicking the tree gives it key focus back (legacy routes unhandled
         // keys to the tab), so Up/Down cycle trees after using a text field.
         onActivated: treeViewRoot.forceActiveFocus()
+        onNodeAction: function (r) { treeViewRoot.handleNodeAction(r) }
+    }
+
+    Widgets.PowerReportPanel {
+        id: reportPanel
+        visible: treeViewRoot.showPowerReport
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: bottomBar.top
+        height: 194
+        // Legacy Focus() jumps to zoom level 12 (PassiveTreeView.lua:1264).
+        onNodeSelected: function (id) { treeViewer.centerOnNode(id, Math.pow(1.2, 12)) }
     }
 
     Rectangle {
@@ -126,7 +220,113 @@ Item {
                 }
             }
 
+            Widgets.CheckBox {
+                id: compareCheck
+                Layout.preferredHeight: 20
+                Layout.preferredWidth: 20
+                // The label draws to the LEFT of the box (legacy CheckBoxControl).
+                Layout.leftMargin: labelWidth + 12
+                label: "Compare:"
+                onToggled: function (s) {
+                    luaEngine.invoke("pob_setCompare", [s, compareSelect.currentIndex + 1])
+                    treeViewer.refreshHover()
+                }
+            }
+            Widgets.DropDownControl {
+                id: compareSelect
+                visible: compareCheck.state
+                Layout.preferredWidth: 160
+                Layout.preferredHeight: 20
+                popupMinWidth: 240
+                onSelected: function (index) {
+                    luaEngine.invoke("pob_setCompare", [true, index + 1])
+                    treeViewRoot.forceActiveFocus()
+                }
+            }
+
             Item { Layout.fillWidth: true }
+
+            Widgets.CheckBox {
+                id: heatCheck
+                Layout.preferredHeight: 20
+                Layout.preferredWidth: 20
+                Layout.leftMargin: labelWidth + 12
+                label: "Show Node Power:"
+                tooltipFunc: function (tt) {
+                    var theme = (treeViewRoot.powerState.theme || "RED/BLUE").split("/")
+                    tt.addLine(14, "When enabled, an estimate of the offensive and defensive strength of")
+                    tt.addLine(14, "each unallocated passive is calculated and displayed visually.")
+                    tt.addLine(14, "Offensive power shows as " + theme[0].toLowerCase() + ", defensive power as " + theme[1].toLowerCase() + ".")
+                }
+                onToggled: function (s) { treeViewRoot.setHeatMap(s) }
+            }
+            // Max-depth dropdown + Custom edit (TreeTab.lua:208-249).
+            Widgets.DropDownControl {
+                id: depthSelect
+                visible: heatCheck.state
+                Layout.preferredWidth: customDepth.visible ? 70 : 60
+                Layout.preferredHeight: 20
+                tooltipText: "Limit of Node distance to search (lower = faster)"
+                model: ["All", "5", "10", "15", "Custom"]
+                onSelected: function (index) {
+                    if (index === 4) { customDepth.visible = true; return }
+                    customDepth.visible = false
+                    var r = luaEngine.invoke("pob_setPowerMaxDepth", [treeViewRoot.depthValues[index]])
+                    if (r && r.restarted) powerTimer.start()
+                    treeViewRoot.forceActiveFocus()
+                }
+            }
+            Widgets.EditControl {
+                id: customDepth
+                visible: false
+                Layout.preferredWidth: 40
+                Layout.preferredHeight: 20
+                isNumeric: true
+                onCommitted: function (text) {
+                    var r = luaEngine.invoke("pob_setPowerMaxDepth", [Number(text) || 0])
+                    if (r && r.restarted) powerTimer.start()
+                }
+            }
+            Widgets.DropDownControl {
+                id: powerStatSelect
+                visible: heatCheck.state
+                Layout.preferredWidth: 150
+                Layout.preferredHeight: 20
+                popupMinWidth: 220
+                onSelected: function (index) {
+                    luaEngine.invoke("pob_setPowerStat", [index + 1])
+                    treeViewRoot.refreshPower()
+                    powerTimer.start()
+                    treeViewRoot.forceActiveFocus()
+                }
+            }
+            Widgets.Button {
+                visible: heatCheck.state
+                Layout.preferredWidth: 130
+                Layout.preferredHeight: 20
+                label: treeViewRoot.showPowerReport ? "Hide Power Report" : "Show Power Report"
+                onClicked: {
+                    treeViewRoot.showPowerReport = !treeViewRoot.showPowerReport
+                    if (treeViewRoot.showPowerReport)
+                        reportPanel.setReport(luaEngine.invoke("pob_getPowerReport", []))
+                }
+            }
+        }
+    }
+
+    // One BuildPower resume per tick (~100ms of work each, as legacy per
+    // frame). Stops itself when the job is done or the heat map is off; any
+    // edit restarts it (BuildOutput re-arms powerBuildFlag).
+    Timer {
+        id: powerTimer
+        interval: 1
+        repeat: true
+        onTriggered: {
+            var r = luaEngine.invoke("pob_powerStep", [])
+            if (!r || !r.running) {
+                stop()
+                treeViewRoot.refreshPower()
+            }
         }
     }
 
@@ -137,11 +337,37 @@ Item {
         onClosed: treeViewRoot.forceActiveFocus()
     }
 
-    Component.onCompleted: refreshSpecs()
+    // Class Change confirm for an ascendancy node of another class
+    // (PassiveTreeView.lua:459-476): Continue / Connect Path / Cancel.
+    Widgets.ConfirmPopup {
+        id: classConfirm
+        property var pending: null
+        parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
+        title: "Class Change"
+        confirmLabel: "Continue"
+        extraLabel: "Connect Path"
+        onAccepted: {
+            var p = pending
+            if (p) luaEngine.invoke("pob_confirmNodeClassChange", [p.nodeId, p.targetClassId, p.targetAscendClassId, "continue"])
+            pending = null
+        }
+        onExtraClicked: {
+            var p = pending
+            classConfirm.close()
+            if (p) luaEngine.invoke("pob_confirmNodeClassChange", [p.nodeId, p.targetClassId, p.targetAscendClassId, "connect"])
+            pending = null
+        }
+        onRejected: pending = null
+    }
+
+    Component.onCompleted: { refreshSpecs(); refreshPower() }
+
     Connections {
         target: luaEngine
-        function onTreeChanged() { treeViewRoot.refreshSpecs() }
+        function onTreeChanged() { treeViewRoot.refreshSpecs(); treeViewRoot.refreshPower() }
         function onBuildDataChanged() { treeViewRoot.refreshSpecs() }
-        function onModeChanged() { treeViewRoot.refreshSpecs() }
+        function onModeChanged() { treeViewRoot.refreshSpecs(); treeViewRoot.refreshPower() }
+        // Any recalc re-arms the power job (CalcsTab:BuildOutput).
+        function onCalcsChanged() { if (treeViewRoot.powerState.showHeatMap) powerTimer.start() }
     }
 }
