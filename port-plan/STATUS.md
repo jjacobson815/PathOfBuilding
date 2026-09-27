@@ -18,14 +18,15 @@ All five parts are ticked in `phases/PHASE-4-tree-tab.md` (session logs at its
 bottom have per-item evidence). Gate on Linux: `tools/linux-selftest.sh` →
 `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0`, with the new checks
 `spec-manage` (29 flags), `tree-display` (34), `tree-click`, `tree-popups` (14),
-`timeless` (45). Versions verified rendering under Xvfb: 3_28, 3_25, 3_25_ruthless.
+`timeless` (45), `tree-version-art`. Versions verified rendering under Xvfb: 3_28, 3_25, 3_25_ruthless, 3_20, 3_16.
 **Open follow-ups carried out of Phase 4 (none block Phase 5):**
-- **≤3_24 trees render wrong art (PRE-EXISTING — same on the pre-session base):**
-  node icons show as coloured squares and frame rings are missing on e.g. 3_20.
-  Cause found: `skillSprites[state].filename` is nil on those trees, so
-  `nodeSprite` falls back to `skills-3.jpg` for every state (inactive art lives in
-  `skills-disabled-3.jpg`, and the engine normalised the UVs against the sheet
-  IT loaded); `nodeFrame` only resolves frames from `sprites.lua` (3_25+ only).
+- ~~≤3_24 trees render wrong art~~ **FIXED 2026-09-27** (follow-up branch
+  `cloud/phase-4`): sprites now use the image the ENGINE loaded
+  (`sprite.handle.fileName`, e.g. `skills-disabled-3.jpg` for *Inactive), frames
+  fall back to the standalone `tree.assets[name]` image when there is no
+  `sprites.lua`, and cluster/Charm jewel sockets use their `JewelSocketAlt*` /
+  `Azmeri*` frames. Sweep: all 39 shipped versions resolve every icon + frame,
+  0 out of bounds; `tree-version-art` selftest gates 3_16/3_20/3_25_ruthless/3_28.
 - **Needs Windows:** the tint shader's HLSL (D3D11) path; re-baseline
   `app/tests/capture-baseline/tree.png` (differs only by the new bottom strip).
 - Documented deviations (phase file): gem sub-tooltip beside node tooltips,

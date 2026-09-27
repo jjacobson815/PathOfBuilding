@@ -2273,6 +2273,32 @@ end
 -- assumed, because now that ImageSize() is real the DENOMINATOR of every UV comes
 -- from the file the engine measured and the NUMERATOR from the file we measure;
 -- if those two ever diverge, every sprite silently samples the wrong rectangle.
+-- The image an engine handle actually loaded (handle.fileName, relative to
+-- _SRC_DIR) -> absolute path + PIXEL dimensions, memoised per file (negative
+-- results too). Used for old (<= 3_24) trees, whose skillSprites carry no
+-- filename and whose frame art is whole standalone images (tree.assets).
+local _imageCache = { }
+local function imageInfo(fileName)
+    if type(fileName) ~= "string" or fileName == "" then return nil end
+    local hit = _imageCache[fileName]
+    if hit ~= nil then
+        if hit == false then return nil end
+        return hit.path, hit.w, hit.h
+    end
+    local path = fileName:gsub("\\", "/")
+    if not path:match("^/") and not path:match("^%a:") then path = _SRC_DIR .. "/" .. path end
+    local f = io.open(path, "r")
+    if not f then _imageCache[fileName] = false; return nil end
+    f:close()
+    local w, h = 0, 0
+    if pob and pob.imageSize then
+        local rw, rh = pob.imageSize(path)
+        w, h = tonumber(rw) or 0, tonumber(rh) or 0
+    end
+    _imageCache[fileName] = { path = path, w = w, h = h }
+    return path, w, h
+end
+
 local _sheetCache = { }
 local function sheetInfo(ver, base)
     if not ver or not base then return nil end
@@ -2403,6 +2429,17 @@ local function nodeSprite(node, alloc)
         else base = "skills-3.jpg" end
     end
     local localPath, sheetW, sheetH = sheetInfo(tree.treeVersion, base)
+    -- The image the ENGINE loaded for this sprite wins: its UVs were
+    -- normalised against exactly that file. On <= 3_24 trees skillSprites
+    -- carries no filename, so the basename above is only a guess -- and it
+    -- was wrong for every *Inactive state (the engine loads
+    -- skills-disabled-3.jpg there, whose layout differs from skills-3.jpg),
+    -- which drew unallocated nodes as scraps of other icons.
+    local handleFile = sp.handle and (sp.handle.fileName or sp.handle.filename)
+    if handleFile then
+        local hp, hw, hh = imageInfo(handleFile)
+        if hp and hw > 0 and hh > 0 then localPath, sheetW, sheetH = hp, hw, hh end
+    end
     if not localPath or sheetW <= 0 or sheetH <= 0 then return nil end
 
     -- De-normalise back to sheet pixels, which is what the QML canvas samples in.
@@ -2460,15 +2497,32 @@ local function nodeFrame(node, alloc)
     -- ("alloc" / "path" / "unalloc", PassiveTreeView.lua:788-797) -- Part 4.3's
     -- hover preview draws the "path" frame, the heat map the "alloc" one.
     local state = type(alloc) == "string" and alloc or (alloc and "alloc" or "unalloc")
-    local key = state
-        .. (node.ascendancyName and "Ascend" or "")
-        .. (node.isBlighted and "Blighted" or "")
-    local frameName = node.overlay[key] or node.overlay[state]
+    local frameName
+    if node.type == "Socket" then
+        -- Jewel sockets (PassiveTreeView.lua:798-804): cluster (expansion)
+        -- sockets use the JewelSocketAlt* frames, and Charm sockets the
+        -- Azmeri-prefixed art.
+        frameName = node.overlay[state .. (node.expansionJewel and "Alt" or "")] or node.overlay[state]
+        if frameName and node.name == "Charm Socket" then frameName = "Azmeri" .. frameName end
+    else
+        local key = state
+            .. (node.ascendancyName and "Ascend" or "")
+            .. (node.isBlighted and "Blighted" or "")
+        frameName = node.overlay[key] or node.overlay[state]
+    end
     if not frameName then return nil end
     local sprites = loadSourceSprites()
     local grp = sprites and sprites.frame
     local rect = grp and grp.coords and grp.coords[frameName]
-    if not rect or not rect.w or rect.w <= 0 or not rect.h or rect.h <= 0 then return nil end
+    if not rect or not rect.w or rect.w <= 0 or not rect.h or rect.h <= 0 then
+        -- <= 3_24 trees ship no sprites.lua: each frame is a whole standalone
+        -- image (e.g. TreeData/PSSkillFrame.png) behind tree.assets[name].
+        local asset = tree.assets and tree.assets[frameName]
+        local fn = asset and asset.handle and (asset.handle.fileName or asset.handle.filename)
+        local path, w, h = imageInfo(fn)
+        if not path or w <= 0 or h <= 0 then return nil end
+        return { atlas = "file:///" .. path, sx = 0, sy = 0, sw = w, sh = h }
+    end
     local base = grp.filename and (grp.filename:match("([^/]+)%?") or grp.filename:match("([^/]+)$"))
     if not base then return nil end
     -- Memoised: this ran an io.open per NODE for one of ~2 distinct sheets.
@@ -6420,3 +6474,83 @@ end
 -- (app/lua/pob_timeless.lua, on package.path via _POB_LUA_DIR; installed by
 -- the same *.lua rule as this file). It defines the pob_timeless* globals.
 require("pob_timeless")
+
+-- Old-tree art (follow-up to Phase 4): every data era must resolve node icons
+-- and frames. <= 3_24 trees carry no sprites.lua and no skillSprites filenames,
+-- which used to draw unallocated nodes from the wrong sheet (coloured scraps)
+-- with no frame rings. Covers one version per era: 3_16 (skillSprites in
+-- tree.lua), 3_20 (sprites keyed by zoom in tree.lua), 3_25_ruthless and 3_28
+-- (sprites.lua). Each is checked on a converted COPY of the active spec, which
+-- is deleted again.
+function pob_selftestTreeVersionArt()
+    local res = { ok = false }
+    local bm, tt = pob_treeTab()
+    if not tt then res.error = "no build"; return res end
+    local origActive, origCount = tt.activeSpec, #tt.specList
+    local dimsMemo = { }
+    local function dims(atlas)
+        local p = atlas:gsub("^file:///", "")
+        if not dimsMemo[p] then
+            local w, h = pob.imageSize(p)
+            dimsMemo[p] = { tonumber(w) or 0, tonumber(h) or 0 }
+        end
+        return dimsMemo[p][1], dimsMemo[p][2]
+    end
+    local allOk = true
+    for _, ver in ipairs({ "3_16", "3_20", "3_25_ruthless", "3_28" }) do
+        if treeVersions[ver] then
+            pob_convertTree(ver, false, false)
+            local spec = bm.spec
+            local d = pob_getTreeData()
+            local nodes, icons, frames, needFrames, oob = 0, 0, 0, 0, 0
+            local inactiveOnDisabled, inactiveChecked, altSockets, altOk = 0, 0, 0, 0
+            for _, n in ipairs(d.nodes) do
+                nodes = nodes + 1
+                local sp = n.iconSprite
+                if sp then
+                    icons = icons + 1
+                    local w, h = dims(sp.atlas)
+                    if sp.sx < 0 or sp.sy < 0 or sp.sx + sp.sw > w + 1 or sp.sy + sp.sh > h + 1 then oob = oob + 1 end
+                    -- The defect's tell: an unallocated Normal/Notable must be
+                    -- drawn from the sheet the engine loaded for *Inactive.
+                    local tn = spec.nodes[n.id]
+                    local want = tn and not n.allocated and (n.type == "Normal" or n.type == "Notable")
+                        and tn.sprites and tn.sprites[n.type:lower() .. "Inactive"]
+                    if want and want.handle and want.handle.fileName then
+                        inactiveChecked = inactiveChecked + 1
+                        if sp.atlas:sub(-#want.handle.fileName) == want.handle.fileName then
+                            inactiveOnDisabled = inactiveOnDisabled + 1
+                        end
+                    end
+                end
+                if n.type ~= "Mastery" then needFrames = needFrames + 1 end
+                local fr = n.frameSprite
+                if fr then
+                    frames = frames + 1
+                    local w, h = dims(fr.atlas)
+                    if fr.sx < 0 or fr.sy < 0 or fr.sx + fr.sw > w + 1 or fr.sy + fr.sh > h + 1 then oob = oob + 1 end
+                end
+                local tn = spec.nodes[n.id]
+                if n.type == "Socket" and tn and tn.expansionJewel then
+                    altSockets = altSockets + 1
+                    -- JewelSocketAlt* art is ~76-77px; the plain jewel frame is 58px.
+                    if fr and fr.sw >= 70 then altOk = altOk + 1 end
+                end
+            end
+            local vOk = nodes > 0 and icons == nodes and frames == needFrames and oob == 0
+                and inactiveOnDisabled == inactiveChecked and altOk == altSockets
+            res[ver .. "_icons"] = icons .. "/" .. nodes
+            res[ver .. "_frames"] = frames .. "/" .. needFrames
+            res[ver .. "_oob"] = oob
+            res[ver .. "_inactiveSheet"] = inactiveOnDisabled .. "/" .. inactiveChecked
+            res[ver .. "_altSockets"] = altOk .. "/" .. altSockets
+            res[ver .. "_ok"] = vOk
+            allOk = allOk and vOk
+            pob_deleteSpec(tt.activeSpec)
+            pob_setActiveSpec(origActive)
+        end
+    end
+    res.restored = #tt.specList == origCount and tt.activeSpec == origActive
+    res.ok = allOk and res.restored
+    return res
+end
