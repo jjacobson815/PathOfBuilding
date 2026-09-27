@@ -1,6 +1,6 @@
 # Phase 4 — Tree Tab (finish & harden)
 
-**Status:** IN PROGRESS — Parts 4.1–4.3 done (4.2/4.3 on 2026-09-27); latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
+**Status:** IN PROGRESS — Parts 4.1–4.4 done (4.2–4.4 on 2026-09-27); latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
 **Goal:** Finish the passive-tree tab — the one view that already renders. Harden
 the renderer, make the tree viewer an embeddable multi-instance component, and add
 the missing interactive features (spec management, compare overlay, search, node
@@ -85,12 +85,12 @@ ItemSlotControl, TimelessJewelSocketControl, and CalcBreakdown reuse later.
 
 ## Part 4.4 — Popups
 
-- [ ] **Mastery-effect popup** (right-click mastery): per-effect stat-diff preview
+- [x] **Mastery-effect popup** (right-click mastery): per-effect stat-diff preview
   (PassiveMasteryControl with embedded node tooltip). (S-M)
-- [ ] **Tattoo popup** (right-click tattooable node): eligible tattoos by target
+- [x] **Tattoo popup** (right-click tattooable node): eligible tattoos by target
   type/connections, legacy toggle, tattoo count x/50, Add/Reset Node. (M)
-- [ ] **Reset popup**: Reset Tree / Remove All Tattoos / Cancel. (S)
-- [ ] Version dropdown + **Convert** popup (Convert / Copy+Convert / Cancel) +
+- [x] **Reset popup**: Reset Tree / Remove All Tattoos / Cancel. (S)
+- [x] Version dropdown + **Convert** popup (Convert / Copy+Convert / Cancel) +
   "convert all trees" banner for outdated specs. (S-M)
 
 ## Part 4.5 — Timeless Jewel finder (large sub-feature)
@@ -604,3 +604,31 @@ backgrounds; mastery hover art (`masteryConnected`). Capture: tree view differs
 from the Windows baseline only by the new bottom strip — re-baseline on Windows.
 **Needs Windows:** the tint shader's HLSL path (D3D11) has only run on Linux
 (OpenGL via Mesa).
+
+## Session log — 2026-09-27 (Part 4.4: popups)
+
+Bridge (`pob_host.lua`, "Phase 4 Part 4.4" section) ported from TreeTab.lua
+(verbatim copies read via subagent): `pob_getMasteryEffects` /
+`pob_previewMasteryEffect` / `pob_selectMasteryEffect` (the last calls the
+engine's own `TreeTab:SaveMasteryPopup`; the preview temporarily applies the
+effect, marshals `AddNodeTooltip`, and restores the node — with a dummy entry in
+`main.popups` so the tooltip takes legacy's "Reallocating" branch),
+`pob_getTattooOptions` / `pob_applyTattoo` / `pob_resetTattooNode` (buildMods
+eligibility, tattoo count x/50 + per-effect breakdown, Show Legacy Tattoos),
+`pob_resetTree` / `pob_removeAllTattoos`, `pob_getVersionState` /
+`pob_convertTree` / `pob_convertAllTrees` (engine `ConvertToVersion` /
+`ConvertAllToVersion`; the banner's "Tree Converted" message is returned as
+data because legacy's `OpenMessagePopup` is inert under Qt).
+
+QML: `MasteryPopup.qml` (effect rows; hover = full node tooltip for that effect,
+drawn in the popup's layer above the modal dim; click = select + allocate),
+`TattooPopup.qml` ("Replace Modifier of Node"), Reset / Convert / Convert-all
+via `ConfirmPopup` 3-button layouts, "Version:" dropdown and the older-version
+banner in `TreeView.qml`. Left-click on an unallocated mastery and right-click
+routing (mastery / tattoo / runegraft) open them.
+
+**Gate:** new `tree-popups` check (14 flags: mastery list/preview-restores-node/
+select/restore, tattoo options/apply/count/reset/remove-all, reset tree, version
+state, copy+convert to 3_25 with banner, convert all, banner message, restore).
+Both binaries EXIT=0. Probe captures (reverted): tattoo popup + `[3.25]` spec +
+version dropdown + banner; mastery popup with preview tooltip.

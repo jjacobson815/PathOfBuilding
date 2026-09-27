@@ -24,6 +24,11 @@ import "../components/StatDiff.js" as StatDiff
 //     Ctrl+D stat diffs, Ctrl+C copy node, PgUp/PgDn zoom (Shift x3), F1 wiki,
 //     Ctrl+F search; node-click follow-ups (class-change confirm, Items tab).
 //
+// Phase 4 Part 4.4 — popups: Reset Tree/Tattoos (:129-154), Version dropdown
+//   + Convert / Copy + Convert (:156-175, 676-693), the "older tree version"
+//   banner with Convert / Convert all (:349-367, 695-707), and the mastery
+//   (:1038-1063) and tattoo/runegraft (:868-1017) popups opened from node clicks.
+//
 // STATE MODEL: `specState` / `powerState` cache bridge reads and are refreshed
 // from engine signals only (no frame loop, invariant #7). Dropdown indices are
 // pushed imperatively for the same reason TopBar does it.
@@ -55,6 +60,16 @@ Item {
         compareSelect.model = labels
         compareSelect.currentIndex = (specState.compare || 1) - 1
         compareCheck.state = !!specState.isComparing
+    }
+
+    property var versionState: ({})
+    function refreshVersion() {
+        if (luaEngine.currentMode !== "BUILD") return
+        var v = luaEngine.invoke("pob_getVersionState", [])
+        versionState = v ? v : ({})
+        if (!v) return
+        versionSelect.model = v.versions
+        versionSelect.currentIndex = v.current - 1
     }
 
     function refreshPower() {
@@ -116,12 +131,12 @@ Item {
             classConfirm.pending = r
             classConfirm.message = r.message
             classConfirm.open()
-        } else if (r.action === "mastery" || r.action === "modify") {
-            nodePopupRequested(r)
+        } else if (r.action === "mastery") {
+            masteryPopup.openFor(r.nodeId, treeViewer.tracePath)
+        } else if (r.action === "modify") {
+            tattooPopup.openFor(r.nodeId)
         }
     }
-    // Part 4.4 hooks the mastery / tattoo popups here.
-    signal nodePopupRequested(var r)
 
     focus: true
     Keys.onPressed: function (event) {
@@ -165,7 +180,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.bottom: reportPanel.visible ? reportPanel.top : bottomBar.top
+        anchors.bottom: reportPanel.visible ? reportPanel.top : convertBanner.top
         controller: treeViewController
         interactive: true
         readOnly: false
@@ -181,10 +196,43 @@ Item {
         visible: treeViewRoot.showPowerReport
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: bottomBar.top
+        anchors.bottom: convertBanner.top
         height: 194
         // Legacy Focus() jumps to zoom level 12 (PassiveTreeView.lua:1264).
         onNodeSelected: function (id) { treeViewer.centerOnNode(id, Math.pow(1.2, 12)) }
+    }
+
+    // "Older tree version" banner (TreeTab.lua:349-367).
+    Rectangle {
+        id: convertBanner
+        visible: !!treeViewRoot.versionState.showConvert
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: bottomBar.top
+        height: visible ? 26 : 0
+        color: theme.sideBarBg
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 4
+            spacing: 8
+            Widgets.Label { label: treeViewRoot.versionState.bannerText || ""; size: 16 }
+            Widgets.Button {
+                Layout.preferredWidth: textMetrics.width(16, "VAR", label) + 20
+                Layout.preferredHeight: 20
+                label: treeViewRoot.versionState.convertLabel || ""
+                onClicked: {
+                    var r = luaEngine.invoke("pob_convertTree", [treeViewRoot.versionState.convertTarget, false, true])
+                    if (r && r.message) { convertDone.title = r.messageTitle; convertDone.message = r.message; convertDone.open() }
+                }
+            }
+            Widgets.Button {
+                Layout.preferredWidth: textMetrics.width(16, "VAR", label) + 20
+                Layout.preferredHeight: 20
+                label: treeViewRoot.versionState.convertAllLabel || ""
+                onClicked: convertAllPopup.open()
+            }
+            Item { Layout.fillWidth: true }
+        }
     }
 
     Rectangle {
@@ -240,6 +288,32 @@ Item {
                 popupMinWidth: 240
                 onSelected: function (index) {
                     luaEngine.invoke("pob_setCompare", [true, index + 1])
+                    treeViewRoot.forceActiveFocus()
+                }
+            }
+
+            Widgets.Button {
+                Layout.preferredWidth: 145
+                Layout.preferredHeight: 20
+                label: "Reset Tree/Tattoos"
+                onClicked: resetPopup.open()
+            }
+            Widgets.Label {
+                label: "^7Version:"
+                size: 16
+            }
+            Widgets.DropDownControl {
+                id: versionSelect
+                Layout.preferredWidth: 100
+                Layout.preferredHeight: 20
+                popupMinWidth: 200
+                onSelected: function (index) {
+                    var v = model[index]
+                    if (v && v.value !== treeViewRoot.versionState.treeVersion) {
+                        convertPopup.version = v.value
+                        convertPopup.title = "Convert to Version " + v.label
+                        convertPopup.open()
+                    }
                     treeViewRoot.forceActiveFocus()
                 }
             }
@@ -337,6 +411,57 @@ Item {
         onClosed: treeViewRoot.forceActiveFocus()
     }
 
+    Widgets.MasteryPopup {
+        id: masteryPopup
+        parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
+        onClosed: treeViewRoot.forceActiveFocus()
+    }
+    Widgets.TattooPopup {
+        id: tattooPopup
+        parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
+        onClosed: treeViewRoot.forceActiveFocus()
+    }
+
+    // Reset Tree/Tattoos (TreeTab.lua:129-154).
+    Widgets.ConfirmPopup {
+        id: resetPopup
+        parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
+        title: "Reset Tree/Tattoos"
+        message: "^7Warning: resetting your passive tree or removing all tattoos cannot be undone."
+        confirmLabel: "Reset Tree"
+        extraLabel: "Remove All Tattoos"
+        onAccepted: luaEngine.invoke("pob_resetTree", [])
+        onExtraClicked: { resetPopup.close(); luaEngine.invoke("pob_removeAllTattoos", []) }
+    }
+
+    // Version dropdown -> OpenVersionConvertPopup (TreeTab.lua:676-693).
+    Widgets.ConfirmPopup {
+        id: convertPopup
+        property string version: ""
+        parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
+        message: "^7Warning: some or all of the passives may be de-allocated due to changes in the tree.\n\nConvert will replace your current tree.\nCopy + Convert will backup your current tree."
+        confirmLabel: "Convert"
+        extraLabel: "Copy + Convert"
+        onAccepted: luaEngine.invoke("pob_convertTree", [version, true, false])
+        onExtraClicked: { convertPopup.close(); luaEngine.invoke("pob_convertTree", [version, false, false]) }
+        onRejected: treeViewRoot.refreshVersion()
+    }
+
+    // Banner "Convert all" (TreeTab.lua:695-707).
+    Widgets.ConfirmPopup {
+        id: convertAllPopup
+        parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
+        title: "Convert all to Version " + (treeViewRoot.versionState.convertTargetDisplay || "")
+        message: "^7Warning: some or all of the passives may be de-allocated due to changes in the tree.\n\nConvert will replace all trees that are not Version " + (treeViewRoot.versionState.convertTargetDisplay || "") + ".\nThis action cannot be undone."
+        confirmLabel: "Convert"
+        onAccepted: luaEngine.invoke("pob_convertAllTrees", [treeViewRoot.versionState.convertTarget])
+    }
+
+    Widgets.MessagePopup {
+        id: convertDone
+        parent: treeViewRoot._win ? treeViewRoot._win.contentItem : treeViewRoot
+    }
+
     // Class Change confirm for an ascendancy node of another class
     // (PassiveTreeView.lua:459-476): Continue / Connect Path / Cancel.
     Widgets.ConfirmPopup {
@@ -360,13 +485,13 @@ Item {
         onRejected: pending = null
     }
 
-    Component.onCompleted: { refreshSpecs(); refreshPower() }
+    Component.onCompleted: { refreshSpecs(); refreshPower(); refreshVersion() }
 
     Connections {
         target: luaEngine
-        function onTreeChanged() { treeViewRoot.refreshSpecs(); treeViewRoot.refreshPower() }
+        function onTreeChanged() { treeViewRoot.refreshSpecs(); treeViewRoot.refreshPower(); treeViewRoot.refreshVersion() }
         function onBuildDataChanged() { treeViewRoot.refreshSpecs() }
-        function onModeChanged() { treeViewRoot.refreshSpecs(); treeViewRoot.refreshPower() }
+        function onModeChanged() { treeViewRoot.refreshSpecs(); treeViewRoot.refreshPower(); treeViewRoot.refreshVersion() }
         // Any recalc re-arms the power job (CalcsTab:BuildOutput).
         function onCalcsChanged() { if (treeViewRoot.powerState.showHeatMap) powerTimer.start() }
     }

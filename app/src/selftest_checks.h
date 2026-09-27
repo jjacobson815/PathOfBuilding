@@ -933,6 +933,8 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // node-power job / hotkey helpers.
     if (!pob_run_lua_check(engine, "pob_selftestTreeDisplay", "tree-display")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestTreeClick", "tree-click")) return false;
+    // Phase 4 Part 4.4: mastery / tattoo / reset / version-convert popups.
+    if (!pob_run_lua_check(engine, "pob_selftestTreePopups", "tree-popups")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

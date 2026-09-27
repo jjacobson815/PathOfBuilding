@@ -6081,3 +6081,337 @@ function pob_selftestTreeClick()
         and res.classConfirmOk and res.rightKeystoneOk and res.rightPlainOk and res.restoredCount
     return res
 end
+
+-- ============================================================================
+-- Phase 4 Part 4.4: popups (mastery, tattoo/runegraft, reset, version convert).
+-- Popup LOGIC ported from TreeTab.lua (OpenMasteryPopup :1038-1063,
+-- SaveMasteryPopup :1019-1036, ModifyNodePopup :868-1017, the reset button's
+-- popup :129-154, ConvertToVersion :615-639, OpenVersionConvert[All]Popup
+-- :676-707); QML owns every control. Where a legacy method is pure logic ending
+-- in main:ClosePopup() (a no-op with no legacy popup open) it is called as is.
+-- ============================================================================
+
+-- Mastery popup: the effects not already taken by another mastery.
+function pob_getMasteryEffects(id)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    local node = spec and spec.nodes[tonumber(id) or id]
+    if not node or node.type ~= "Mastery" or not node.masteryEffects then return nil end
+    local effects = { }
+    for _, effect in pairs(node.masteryEffects) do
+        local assignedNodeId = isValueInTable(spec.masterySelections, effect.effect)
+        if not assignedNodeId or assignedNodeId == node.id then
+            effects[#effects + 1] = { id = effect.effect, label = table.concat(effect.stats, " / "),
+                                      selected = spec.masterySelections[node.id] == effect.effect }
+        end
+    end
+    return { name = node.name, nodeId = node.id, alloc = node.alloc and true or false, effects = effects }
+end
+
+-- Row hover (PassiveMasteryControl:AddValueTooltip): the node's tooltip as if
+-- the effect were chosen -- including its stat diff. The node is restored
+-- afterwards (legacy restores on Cancel; the preview must not leak).
+function pob_previewMasteryEffect(id, effectId, traceIds)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    local node = spec and spec.nodes[tonumber(id) or id]
+    local effect = node and spec.tree.masteryEffects[tonumber(effectId) or effectId]
+    if not effect then return nil end
+    local cachedSd, cachedAll = node.sd, node.allMasteryOptions
+    node.sd = effect.sd
+    node.allMasteryOptions = false
+    spec.tree:ProcessStats(node)
+    -- AddNodeTooltip's "Reallocating this node" branch keys off an open popup.
+    local pushed = false
+    if main.popups and not main.popups[1] then main.popups[1] = { }; pushed = true end
+    local ok, res = pcall(pob_getNodeTooltipLines, node.id, traceIds)
+    if pushed then table.remove(main.popups, 1) end
+    node.sd, node.allMasteryOptions = cachedSd, cachedAll
+    spec.tree:ProcessStats(node)
+    return ok and res or nil
+end
+
+-- Row click -> TreeTab:SaveMasteryPopup (allocates along the trace if any).
+function pob_selectMasteryEffect(id, effectId, traceIds)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    local node = spec and spec.nodes[tonumber(id) or id]
+    if not node or not spec.tree.masteryEffects[tonumber(effectId) or effectId] then return { ok = false } end
+    local trace = pob_nodesFromIds(spec, traceIds)
+    viewer.tracePath = #trace > 0 and trace or nil
+    tt:SaveMasteryPopup(node, { selValue = { id = tonumber(effectId) or effectId } })
+    viewer.tracePath = nil
+    pob_recalculate()
+    return { ok = true, alloc = node.alloc and true or false, _emit = { "build", "tree", "calcs" } }
+end
+
+-- Tattoo / runegraft popup (ModifyNodePopup's buildMods, :873-905).
+local function pob_tattooMods(tt, spec, node)
+    local treeNodes = spec.tree.nodes
+    local nodeName = treeNodes[node.id].dn
+    local numLinkedNodes = node.linkedId and #node.linkedId or 0
+    local nodeValue = treeNodes[node.id].sd[1] or ""
+    local modGroups = { }
+    for tid, tnode in pairs(spec.tree.tattoo and spec.tree.tattoo.nodes or { }) do
+        if (nodeName:match(tnode.targetType:gsub("^Small ", "")) or (tnode.targetValue ~= "" and nodeValue:match(tnode.targetValue)) or
+                (tnode.targetType == "Small Attribute" and (nodeName == "Intelligence" or nodeName == "Strength" or nodeName == "Dexterity"))
+                or (tnode.targetType == "Keystone" and treeNodes[node.id].type == tnode.targetType))
+                and tnode.MinimumConnected <= numLinkedNodes and ((tnode.legacy == nil or tnode.legacy == false) or tnode.legacy == tt.showLegacyTattoo) then
+            local combine = false
+            for sid in pairs(tnode.stats) do
+                combine = (sid:match("^local_display.*") and #tnode.stats == (#tnode.sd - 1)) or combine
+                if combine then break end
+            end
+            local descriptions = combine and { [1] = table.concat(tnode.sd, " ") } or copyTable(tnode.sd)
+            if tnode.reminderText then table.insert(descriptions, tnode.reminderText[1]) end
+            table.insert(modGroups, {
+                label = tnode.dn .. "                                                " .. table.concat(tnode.sd, ","),
+                name = tnode.dn,
+                descriptions = descriptions,
+                id = tid,
+            })
+        end
+    end
+    table.sort(modGroups, function(a, b) return a.label < b.label end)
+    return modGroups, nodeName
+end
+
+-- getTattooCount (:973-1005): tattoos in the spec, runegrafts excluded, with
+-- the per-effect breakdown the count button's tooltip shows.
+local function pob_tattooCount(spec)
+    local count, map = 0, { }
+    for _, n in pairs(spec.hashOverrides) do
+        if n.isTattoo and not n.dn:find("Runegraft") then
+            local combined = ""
+            for _, line in ipairs(n.sd) do
+                if not (line:match("Limited") or line:match("Requires")) then combined = combined .. " " .. line end
+            end
+            map[combined] = (map[combined] or 0) + 1
+            count = count + 1
+        end
+    end
+    local lines = { }
+    for line, mult in pairs(map) do lines[#lines + 1] = colorCodes.COLD .. "(" .. mult .. ") ^7" .. line end
+    table.sort(lines)
+    return count, lines
+end
+
+function pob_getTattooOptions(id, showLegacy)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    local node = spec and spec.nodes[tonumber(id) or id]
+    if not node then return nil end
+    if showLegacy ~= nil then tt.showLegacyTattoo = showLegacy and true or false end
+    local mods, nodeName = pob_tattooMods(tt, spec, node)
+    local options = { }
+    for i, m in ipairs(mods) do
+        options[i] = { index = i, name = m.name, descriptions = m.descriptions }
+    end
+    local count, lines = pob_tattooCount(spec)
+    tt.defaultTattoo = tt.defaultTattoo or { }
+    local def = tt.defaultTattoo[nodeName] or 1
+    if def > #options then def = 1 end
+    return {
+        nodeId = node.id, nodeName = nodeName, options = options, defaultIndex = def,
+        isRunegraft = node.type == "Mastery",
+        tattooCount = count, tattooCountStr = (count > 50 and colorCodes.NEGATIVE or "^7") .. count,
+        tattooLines = lines, showLegacy = tt.showLegacyTattoo and true or false,
+    }
+end
+
+-- "Add" (addModifier + the button's bookkeeping, :906-912 / :953-960).
+function pob_applyTattoo(id, optionIndex)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    local node = spec and spec.nodes[tonumber(id) or id]
+    if not node then return { ok = false } end
+    local mods, nodeName = pob_tattooMods(tt, spec, node)
+    local pick = mods[tonumber(optionIndex) or 0]
+    if not pick then return { ok = false, error = "no such option" } end
+    local newTattooNode = spec.tree.tattoo.nodes[pick.id]
+    newTattooNode.id = node.id
+    spec.hashOverrides[node.id] = newTattooNode
+    spec:ReplaceNode(node, newTattooNode)
+    spec:BuildAllDependsAndPaths()
+    spec:AddUndoState()
+    tt.modFlag = true
+    tt.defaultTattoo = tt.defaultTattoo or { }
+    tt.defaultTattoo[nodeName] = tonumber(optionIndex)
+    bm.buildFlag = true
+    pob_recalculate()
+    _treeSpecSerial = _treeSpecSerial + 1
+    return { ok = true, _emit = { "build", "tree", "calcs" } }
+end
+
+-- "Reset Node" (:961-968).
+function pob_resetTattooNode(id)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    local node = spec and spec.nodes[tonumber(id) or id]
+    if not node then return { ok = false } end
+    local nodeName = spec.tree.nodes[node.id].dn
+    tt:RemoveTattooFromNode(node)
+    spec:AddUndoState()
+    tt.modFlag = true
+    if tt.defaultTattoo then tt.defaultTattoo[nodeName] = nil end
+    bm.buildFlag = true
+    pob_recalculate()
+    _treeSpecSerial = _treeSpecSerial + 1
+    return { ok = true, _emit = { "build", "tree", "calcs" } }
+end
+
+-- Reset popup buttons (:133-149).
+function pob_resetTree()
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not spec then return { ok = false } end
+    spec:ResetNodes()
+    spec:BuildAllDependsAndPaths()
+    spec:AddUndoState()
+    bm.buildFlag = true
+    pob_recalculate()
+    return { ok = true, _emit = { "build", "tree", "calcs" } }
+end
+
+function pob_removeAllTattoos()
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not spec then return { ok = false } end
+    local removed = 0
+    for nid, node in pairs(copyTable(spec.hashOverrides, true)) do
+        if node.isTattoo then
+            tt:RemoveTattooFromNode(spec.nodes[nid])
+            removed = removed + 1
+        end
+    end
+    tt.modFlag = true
+    bm.buildFlag = true
+    pob_recalculate()
+    _treeSpecSerial = _treeSpecSerial + 1
+    return { ok = true, removed = removed, _emit = { "build", "tree", "calcs" } }
+end
+
+-- Version dropdown (:156-175) + convert banner (:349-367).
+function pob_getVersionState()
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not spec then return nil end
+    local versions, current = { }, 1
+    for i, num in ipairs(treeVersionList) do
+        versions[i] = { value = num, label = treeVersions[num].display }
+        if num == spec.treeVersion then current = i end
+    end
+    local latest = latestTreeVersion .. (spec.treeVersion:match("^" .. latestTreeVersion .. "(.*)") or "")
+    local latestDisplay = treeVersions[latest] and treeVersions[latest].display or latest
+    return {
+        versions = versions, current = current, treeVersion = spec.treeVersion,
+        showConvert = tt.showConvert and true or false,
+        convertTarget = latest,
+        convertTargetDisplay = latestDisplay,
+        convertLabel = colorCodes.POSITIVE .. "Convert to " .. latestDisplay,
+        convertAllLabel = colorCodes.POSITIVE .. "Convert all trees to " .. latestDisplay,
+        bannerText = "^7This is an older tree version, which may not be fully compatible with the current game version.",
+    }
+end
+
+-- Convert / Copy + Convert (TreeTab:ConvertToVersion). `fromBanner` is the
+-- banner's Convert button (subtype kept, success message); the version
+-- dropdown's popup passes ignoreTreeSubType = true like legacy.
+function pob_convertTree(version, remove, fromBanner)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not spec or not treeVersions[version] then return { ok = false, error = "unknown version" } end
+    tt:ConvertToVersion(version, remove and true or false, false, not fromBanner)
+    pob_specSync(bm, tt)
+    bm.buildFlag = true
+    pob_recalculate()
+    local res = { ok = true, treeVersion = bm.spec.treeVersion, _emit = SPEC_EMIT }
+    if fromBanner then
+        res.messageTitle = "Tree Converted"
+        res.message = "The tree has been converted to " .. treeVersions[version].display .. ".\nNote that some or all of the passives may have been de-allocated due to changes in the tree.\n\nYou can switch back to the old tree using the tree selector at the bottom left."
+    end
+    return res
+end
+
+function pob_convertAllTrees(version)
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not spec or not treeVersions[version] then return { ok = false, error = "unknown version" } end
+    tt:ConvertAllToVersion(version)
+    pob_specSync(bm, tt)
+    bm.buildFlag = true
+    pob_recalculate()
+    return { ok = true, _emit = SPEC_EMIT }
+end
+
+function pob_selftestTreePopups()
+    local res = { ok = false }
+    local bm, tt, viewer, spec = pob_viewerCtx()
+    if not viewer then res.error = "no viewer"; return res end
+    local before = spec:CreateUndoState()
+    local origActive, origCount = tt.activeSpec, #tt.specList
+    local function restore()
+        spec:RestoreUndoState(before)
+        bm.buildFlag = true
+        pob_recalculate()
+    end
+
+    -- Mastery: a reachable mastery with free effects.
+    local mastery
+    for id, n in pairs(spec.nodes) do
+        if n.type == "Mastery" and n.masteryEffects and n.path and not n.alloc and (not mastery or id < mastery.id) then mastery = n end
+    end
+    local me = mastery and pob_getMasteryEffects(mastery.id)
+    res.masteryListOk = me ~= nil and #me.effects > 0
+    if res.masteryListOk then
+        local eff = me.effects[1]
+        local sdBefore = mastery.sd
+        local pv = pob_previewMasteryEffect(mastery.id, eff.id)
+        res.masteryPreviewOk = pv ~= nil and pv.lines ~= nil and #pv.lines > 0 and mastery.sd == sdBefore
+        local sel = pob_selectMasteryEffect(mastery.id, eff.id)
+        res.masterySelectOk = sel.ok and mastery.alloc and spec.masterySelections[mastery.id] == eff.id
+        -- The chosen effect is now unavailable to OTHER masteries of the same group.
+        restore()
+        res.masteryRestoreOk = not spec.nodes[mastery.id].alloc
+    end
+
+    -- Tattoo on a small attribute node.
+    local attr
+    for id, n in pairs(spec.nodes) do
+        if n.type == "Normal" and n.dn == "Strength" and not n.expansionSkill and (not attr or id < attr.id) then attr = n end
+    end
+    local to = attr and pob_getTattooOptions(attr.id)
+    res.tattooOptionsOk = to ~= nil and #to.options > 0 and to.tattooCount == 0
+    if res.tattooOptionsOk then
+        local ap = pob_applyTattoo(attr.id, 1)
+        local after = pob_getTattooOptions(attr.id)
+        res.tattooApplyOk = ap.ok and spec.hashOverrides[attr.id] ~= nil and spec.nodes[attr.id].isTattoo == true
+            and after.tattooCount == 1 and #after.tattooLines == 1
+        local rn = pob_resetTattooNode(attr.id)
+        res.tattooResetOk = rn.ok and spec.hashOverrides[attr.id] == nil and pob_getTattooOptions(attr.id).tattooCount == 0
+        pob_applyTattoo(attr.id, 1)
+        local ra = pob_removeAllTattoos()
+        res.tattooRemoveAllOk = ra.ok and ra.removed == 1 and spec.hashOverrides[attr.id] == nil
+    end
+
+    -- Reset tree.
+    local fid = pob_frontierNode(spec)
+    pob_clickNode(fid)
+    local rt = pob_resetTree()
+    res.resetTreeOk = rt.ok and select(1, spec:CountAllocNodes()) == 0
+    restore()
+
+    -- Version state + Copy + Convert to an older version, then convert all back.
+    local vs = pob_getVersionState()
+    res.versionStateOk = vs ~= nil and #vs.versions > 3 and vs.versions[vs.current].value == spec.treeVersion
+        and vs.showConvert == false
+    local cv = pob_convertTree("3_25", false, false)
+    res.convertCopyOk = cv.ok and #tt.specList == origCount + 1 and bm.spec.treeVersion == "3_25"
+        and tt.activeSpec == origActive + 1 and pob_getVersionState().showConvert == true
+    local ca = pob_convertAllTrees(latestTreeVersion)
+    local allLatest = true
+    for _, s in ipairs(tt.specList) do if s.treeVersion ~= latestTreeVersion then allLatest = false end end
+    res.convertAllOk = ca.ok and allLatest and #tt.specList == origCount + 1
+    local bn = pob_convertTree(latestTreeVersion, true, true)
+    res.bannerMessageOk = bn.ok and bn.messageTitle == "Tree Converted" and #tt.specList == origCount + 1
+    pob_deleteSpec(origActive + 1)
+    pob_setActiveSpec(origActive)
+    res.restoredOk = #tt.specList == origCount and tt.activeSpec == origActive
+    spec = bm.spec
+    spec:ResetUndo()
+
+    res.ok = res.masteryListOk and res.masteryPreviewOk and res.masterySelectOk and res.masteryRestoreOk
+        and res.tattooOptionsOk and res.tattooApplyOk and res.tattooResetOk and res.tattooRemoveAllOk
+        and res.resetTreeOk and res.versionStateOk and res.convertCopyOk and res.convertAllOk
+        and res.bannerMessageOk and res.restoredOk
+    return res
+end

@@ -45,6 +45,8 @@
         <file>components/TreeImportPopup.qml</file>
         <file>components/TreeExportPopup.qml</file>
         <file>components/PowerReportPanel.qml</file>
+        <file>components/MasteryPopup.qml</file>
+        <file>components/TattooPopup.qml</file>
         <file>views/TreeView.qml</file>
         <file>views/SkillsView.qml</file>
         <file>views/ItemsView.qml</file>
