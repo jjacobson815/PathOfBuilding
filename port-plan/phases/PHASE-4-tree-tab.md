@@ -1,6 +1,6 @@
 # Phase 4 — Tree Tab (finish & harden)
 
-**Status:** IN PROGRESS — Parts 4.1–4.4 done (4.2–4.4 on 2026-09-27); latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
+**Status:** Parts 4.1–4.5 done (4.2–4.5 on 2026-09-27); latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
 **Goal:** Finish the passive-tree tab — the one view that already renders. Harden
 the renderer, make the tree viewer an embeddable multi-instance component, and add
 the missing interactive features (spec management, compare overlay, search, node
@@ -95,7 +95,7 @@ ItemSlotControl, TimelessJewelSocketControl, and CalcBreakdown reuse later.
 
 ## Part 4.5 — Timeless Jewel finder (large sub-feature)
 
-- [ ] Full popup: 6 jewel types + conqueror/devotion dropdowns; jewel-socket
+- [x] Full popup: 6 jewel types + conqueror/devotion dropdowns; jewel-socket
   dropdown (+ "All Sockets" multi-search) with **mini tree preview**
   (TimelessJewelSocketControl); Filter Nodes + distance slider + protect-notables
   list; weight sliders; node search dropdown; Desired/Fallback node CSV edits +
@@ -632,3 +632,47 @@ select/restore, tattoo options/apply/count/reset/remove-all, reset tree, version
 state, copy+convert to 3_25 with banner, convert all, banner message, restore).
 Both binaries EXIT=0. Probe captures (reverted): tattoo popup + `[3.25]` spec +
 version dropdown + banner; mastery popup with preview tooltip.
+
+## Session log — 2026-09-27 (Part 4.5: Timeless Jewel finder)
+
+The whole legacy finder is one closure (`TreeTab:FindTimelessJewel`,
+TreeTab.lua:1369-2891) whose helpers all read `controls.*`, so nothing in it is
+callable. It was LIFTED verbatim (with `-- TreeTab.lua:NNNN` refs) into a new
+module **`app/lua/pob_timeless.lua`** (loaded by `require` at the end of
+`pob_host.lua`; `app/lua/*.lua` is already installed by CMake). Only three
+control reads were substituted (filter checkbox -> `timelessData.socketFilter`,
+fallback list selection -> `fallbackWeightMode.idx`, slider labels -> numbers
+from QML re-rendered into the exact legacy label strings). The draft was written
+by a subagent from the legacy source and reviewed/integrated here. Globals:
+`pob_timelessGetState/Set/SelectNode/SetWeights/Protect/GenerateFallback/Search/
+Reset/AddJewel/TradeUrl/GetResults`. Results are paged to QML
+(`pob_timelessGetResults`) — a multi-socket Militant Faith search produced
+168k rows in testing. Deliberate changes vs legacy are listed in the module
+(e.g. the `for k, v in legionAddition.stats do` missing-`pairs` bug fixed,
+crash guards on hand-typed list rows, bad saved ids fall back to defaults).
+
+`TimelessJewelPopup.qml` ("Find a Timeless Jewel"): type / conqueror / devotion,
+socket + mini tree preview (TreeViewer embed, zoom 5, crosshair), Filter Nodes +
+distance + protect notables, node search + 3 weight sliders, fallback weight
+mode + Generate, total minimum weight, Desired / Fallback lists, results
+(double-click adds the jewel item; Shift+click range; tooltip node lists), trade
+URL (realm / league / listing type / search max -> opens + copies the URL).
+
+**Gate:** new `timeless` check (45 flags): all 6 LUTs load (Glorious Vanity's
+5-part archive included), Lethal Pride search on the Marauder socket (5660
+results, sorted, seeds in range), **independent cross-check** of the top seed
+(15910) re-counted straight from `data.readLUT` = the search's total (7 = 7),
+Elegant Hubris seeds all multiples of 20, trade URL decodes to JSON with the
+`pseudo_timeless_jewel_` filters, `<TimelessData>` save/load round trip through
+`build:Save`/`build:Load`, full restore (byte-identical save before/after).
+Teeth: an EH seed step of 10 instead of 20 fails it. Probe capture (reverted):
+5,648 Lethal Pride results with node-list tooltips.
+
+**Not done / deviations:** the league list is a text field (legacy fetches it —
+network, Phase 10/12); the socket preview follows the SELECTED socket, not the
+hovered dropdown row; the `.bin` LUT cache is still written next to the install
+(`src/Data/TimelessJewelData/*.bin`, gitignored) because moving it means
+changing `Modules/DataLegionLookUpTableHelper.lua` (invariant #2) — on a
+read-only install the LUTs re-inflate each session, as in legacy. "Matches
+legacy for a known seed" is established by the verbatim port + the independent
+readLUT cross-check; there is no legacy binary to diff against on Linux.

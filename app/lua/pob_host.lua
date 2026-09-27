@@ -6415,3 +6415,8 @@ function pob_selftestTreePopups()
         and res.bannerMessageOk and res.restoredOk
     return res
 end
+
+-- Phase 4 Part 4.5: the Timeless Jewel finder bridge lives in its own module
+-- (app/lua/pob_timeless.lua, on package.path via _POB_LUA_DIR; installed by
+-- the same *.lua rule as this file). It defines the pob_timeless* globals.
+require("pob_timeless")

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Window
 import QtQuick.Controls as QC
 
 // TimelessJewelPopup — Phase 4 Part 4.5, ports TreeTab:FindTimelessJewel
@@ -26,9 +27,21 @@ PopupBase {
     property bool _syncing: false
     property int selIndex: -1
     property int highlightIndex: -1
-    property int nextTradeStart: -1
 
-    readonly property var results: (st.results && st.results.length !== undefined) ? st.results : []
+    // Results can run to 100k+ rows: the list model is just the COUNT and rows
+    // are fetched a page at a time (pob_timelessGetResults) as they scroll in.
+    readonly property int resultCount: st.resultCount || 0
+    property var _rowCache: ({})
+    function rowAt(i) {
+        if (_rowCache[i] === undefined) {
+            const page = Math.floor(i / 200) * 200
+            const r = luaEngine.invoke("pob_timelessGetResults", [page + 1, 200])
+            const rows = (r && r.rows && r.rows.length !== undefined) ? r.rows : []
+            for (let k = 0; k < rows.length; k++) _rowCache[page + k] = rows[k]
+        }
+        return _rowCache[i] || ({ label: "", tooltip: [] })
+    }
+    property bool tradeStarted: false
     readonly property var nodeOptions: (st.nodeOptions && st.nodeOptions.length !== undefined) ? st.nodeOptions : []
 
     title: "Find a Timeless Jewel"
@@ -39,6 +52,9 @@ PopupBase {
     function apply(s) {
         if (!s) return
         _syncing = true
+        _rowCache = ({})
+        const first = (s.results && s.results.length !== undefined) ? s.results : []
+        for (let k = 0; k < first.length; k++) _rowCache[k] = first[k]
         st = s
         jewelSelect.model = _arr(s.jewelTypes)
         jewelSelect.currentIndex = (s.jewelTypeIndex || 1) - 1
@@ -68,7 +84,7 @@ PopupBase {
     function set(field, value) { apply(luaEngine.invoke("pob_timelessSet", [field, value])) }
 
     function openFresh() {
-        selIndex = -1; highlightIndex = -1; nextTradeStart = -1
+        selIndex = -1; highlightIndex = -1; tradeStarted = false
         refresh()
         open()
     }
@@ -302,7 +318,7 @@ PopupBase {
                     }
                 }
 
-                Label { label: "^7Results (" + root.results.length + "):"; size: 14 }
+                Label { label: "^7Results (" + root.resultCount + "):"; size: 14 }
                 Rectangle {
                     Layout.preferredWidth: 440; Layout.preferredHeight: 160
                     color: "transparent"
@@ -312,11 +328,12 @@ PopupBase {
                         id: resultList
                         anchors.fill: parent
                         anchors.margins: 2
-                        model: root.results
+                        model: root.resultCount
                         boundsBehavior: Flickable.StopAtBounds
                         QC.ScrollBar.vertical: QC.ScrollBar {}
                         delegate: Rectangle {
                             id: resRow
+                            readonly property var modelData: root.rowAt(index)
                             width: resultList.width
                             height: 16
                             readonly property bool inRange: root.highlightIndex >= 0 && root.selIndex >= 0
@@ -330,7 +347,7 @@ PopupBase {
                                 onClicked: function (m) {
                                     if (m.modifiers & Qt.ShiftModifier) root.highlightIndex = index
                                     else { root.selIndex = index; root.highlightIndex = -1 }
-                                    root.nextTradeStart = -1
+                                    root.tradeStarted = false
                                 }
                                 onDoubleClicked: {
                                     const r = luaEngine.invoke("pob_timelessAddJewel", [index + 1])
@@ -344,7 +361,10 @@ PopupBase {
                                     const host = root.contentItem.parent
                                     resTip.parent = host
                                     const p = resRow.mapToItem(host, 0, 0)
-                                    resTip.showAt(p.x, p.y, resRow.width, resRow.height, Qt.rect(0, 0, host.width + 400, host.height + 400))
+                                    const win = resRow.Window.window
+                                    const o = host.mapFromItem(null, 0, 0)
+                                    resTip.showAt(p.x, p.y, resRow.width, resRow.height,
+                                                  Qt.rect(o.x, o.y, win ? win.width : host.width, win ? win.height : host.height))
                                 }
                             }
                         }
@@ -367,24 +387,25 @@ PopupBase {
                         Layout.leftMargin: labelWidth + 12; label: "Search Maximum Amount:" }
                     Button {
                         implicitWidth: 150; implicitHeight: 20
-                        label: root.nextTradeStart > 0 ? "Open Next Trade URL" : "Open Trade URL"
-                        controlEnabled: root.results.length > 0
+                        label: root.tradeStarted ? "Open Next Trade URL" : "Open Trade URL"
+                        controlEnabled: root.resultCount > 0
                         onClicked: {
-                            const start = root.nextTradeStart > 0 ? root.nextTradeStart
-                                        : (root.selIndex >= 0 ? root.selIndex + 1 : 1)
-                            const end = (root.nextTradeStart <= 0 && root.highlightIndex >= 0 && !searchMore.state)
-                                        ? Math.max(root.selIndex, root.highlightIndex) + 1 : null
-                            const s = (root.nextTradeStart <= 0 && root.highlightIndex >= 0 && !searchMore.state)
-                                        ? Math.min(root.selIndex, root.highlightIndex) + 1 : start
+                            // Legacy passes the list's selection + Shift-highlight;
+                            // the bridge keeps legacy's lastSearch paging.
                             const r = luaEngine.invoke("pob_timelessTradeUrl",
-                                        [s, end, ["pc", "sony", "xbox"][realmSelect.currentIndex], leagueEdit.text, tradeType.currentIndex + 1, searchMore.state])
+                                        [root.selIndex >= 0 ? root.selIndex + 1 : 1,
+                                         root.highlightIndex >= 0 ? root.highlightIndex + 1 : null,
+                                         ["pc", "sony", "xbox"][realmSelect.currentIndex], leagueEdit.text,
+                                         tradeType.currentIndex + 1, searchMore.state])
                             if (r && r.url) {
                                 luaEngine.openURL(r.url)
                                 luaEngine.copyText(r.url)
                                 root.selIndex = r.startIndex - 1
                                 root.highlightIndex = r.endIndex - 1
                                 resultList.positionViewAtIndex(root.selIndex, ListView.Beginning)
-                                root.nextTradeStart = r.nextStart || -1
+                                root.tradeStarted = true
+                            } else if (r && r.done) {
+                                msgLabel.label = "^7No more results to search."
                             }
                         }
                     }
@@ -398,12 +419,12 @@ PopupBase {
             Button { implicitWidth: 80; implicitHeight: 20; label: "Search"
                 onClicked: {
                     root.apply(luaEngine.invoke("pob_timelessSearch", []))
-                    root.selIndex = root.results.length > 0 ? 0 : -1
+                    root.selIndex = root.resultCount > 0 ? 0 : -1
                     root.highlightIndex = -1
-                    root.nextTradeStart = -1
+                    root.tradeStarted = false
                 } }
             Button { implicitWidth: 80; implicitHeight: 20; label: "Reset"
-                onClicked: { root.apply(luaEngine.invoke("pob_timelessReset", [])); root.selIndex = -1; root.highlightIndex = -1 } }
+                onClicked: { root.apply(luaEngine.invoke("pob_timelessReset", [])); root.selIndex = -1; root.highlightIndex = -1; root.tradeStarted = false } }
             Button { implicitWidth: 80; implicitHeight: 20; label: "Cancel"
                 onClicked: root.close() }
             Label { id: msgLabel; size: 14 }

@@ -935,6 +935,10 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     if (!pob_run_lua_check(engine, "pob_selftestTreeClick", "tree-click")) return false;
     // Phase 4 Part 4.4: mastery / tattoo / reset / version-convert popups.
     if (!pob_run_lua_check(engine, "pob_selftestTreePopups", "tree-popups")) return false;
+    // Phase 4 Part 4.5: Timeless Jewel finder (LUT load for all 6 types incl.
+    // Glorious Vanity's 5-part archive, searches, independent cross-check of
+    // the top seed, trade URL, <TimelessData> save/load round trip).
+    if (!pob_run_lua_check(engine, "pob_selftestTimeless", "timeless")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;
