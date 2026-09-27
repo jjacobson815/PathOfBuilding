@@ -141,6 +141,19 @@ Rectangle {
                 if (lw > w) w = lw;
             }
         }
+        // The .tgf metrics above reproduce legacy's layout, but Qt paints with
+        // the TTF (invariant #8): take the real laid-out extent when larger, so
+        // a tall or wide tooltip never overflows its own box.
+        // (Summed here rather than read from the Column, which only lays
+        // out at the next polish -- after this call has already sized us.)
+        let laid = 0;
+        for (let i = 0; i < lineRepeater.count; i++) {
+            const it = lineRepeater.itemAt(i);
+            if (!it) continue;
+            if (it.textW > w) w = it.textW;
+            laid += it.height + lineColumn.spacing;
+        }
+        h = Math.max(h, laid);
         return { width: w + hPad, height: h + vPad };
     }
 
@@ -174,14 +187,17 @@ Rectangle {
     // --- Rendering --------------------------------------------------------
 
     Column {
+        id: lineColumn
         x: root.hPad / 2
         y: root.vPad / 2
         width: root.width - root.hPad
         spacing: 2
 
         Repeater {
+            id: lineRepeater
             model: root.lines
             delegate: Item {
+                readonly property real textW: modelData.isSeparator ? 0 : lineText.implicitWidth
                 width: parent ? parent.width : 0
                 height: modelData.isSeparator ? (modelData.size || 10) : lineText.implicitHeight
 

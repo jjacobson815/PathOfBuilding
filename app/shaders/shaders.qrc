@@ -1,0 +1,9 @@
+<RCC>
+    <!-- Pre-baked with Qt's qsb tool (GLSL 100es/120/150, HLSL 50, MSL 12,
+         SPIR-V), so no build machine needs Qt Shader Tools. The rebuild
+         command is in tintedtexture.vert. -->
+    <qresource prefix="/shaders">
+        <file>tintedtexture.vert.qsb</file>
+        <file>tintedtexture.frag.qsb</file>
+    </qresource>
+</RCC>

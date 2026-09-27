@@ -9,9 +9,29 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 4 — Tree Tab — IN PROGRESS** (see the Phase 4 paragraph
-below). Phase 3's MVP is done; its gate stays open only on the long-tail
-scope call described next.
+**ACTIVE: Phase 5 — Skills Tab — NOT STARTED** (spec: `phases/PHASE-5-skills-tab.md`).
+Work order is set below (🗺 "PHASE ORDER"): 4 → **5** → 6 → 7 → Phase 3 long tail
+→ 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.
+
+**Phase 4 — Tree Tab — DONE (2026-09-27, cloud session, branch `cloud/phase-4`).**
+All five parts are ticked in `phases/PHASE-4-tree-tab.md` (session logs at its
+bottom have per-item evidence). Gate on Linux: `tools/linux-selftest.sh` →
+`pob-selftest EXIT=0`, `pob-qt --headless EXIT=0`, with the new checks
+`spec-manage` (29 flags), `tree-display` (34), `tree-click`, `tree-popups` (14),
+`timeless` (45). Versions verified rendering under Xvfb: 3_28, 3_25, 3_25_ruthless.
+**Open follow-ups carried out of Phase 4 (none block Phase 5):**
+- **≤3_24 trees render wrong art (PRE-EXISTING — same on the pre-session base):**
+  node icons show as coloured squares and frame rings are missing on e.g. 3_20.
+  Cause found: `skillSprites[state].filename` is nil on those trees, so
+  `nodeSprite` falls back to `skills-3.jpg` for every state (inactive art lives in
+  `skills-disabled-3.jpg`, and the engine normalised the UVs against the sheet
+  IT loaded); `nodeFrame` only resolves frames from `sprites.lua` (3_25+ only).
+- **Needs Windows:** the tint shader's HLSL (D3D11) path; re-baseline
+  `app/tests/capture-baseline/tree.png` (differs only by the new bottom strip).
+- Documented deviations (phase file): gem sub-tooltip beside node tooltips,
+  rotating rings on ALLOCATED jewels, compare-only cluster subgraph nodes,
+  mastery hover art, socket preview follows selection not hover, trade league
+  is a text field, poeurl import/shrink wait for Phase 10.
 
 **Phase 3 — Build Shell — MVP DONE, gate awaiting scope decision (started 2026-08-18).** Spec:
 `phases/PHASE-3-build-shell.md`; that file's "Session log — 2026-08-18" and
@@ -35,7 +55,7 @@ Loadouts (needs the Phase 5/6/7 set UIs), the Spectre Library popup, and the
 full Save-As folder browser — all explicit long tail; Phase 3's acceptance
 gate is otherwise clear to close whenever those are judged in/out of scope.
 
-**Phase 4 — Tree Tab — IN PROGRESS.** Recon findings are at the bottom of
+**Phase 4 history (superseded by the DONE entry above).** Recon findings are at the bottom of
 `phases/PHASE-4-tree-tab.md`. **Part 4.1 — ALL 5 items DONE (2026-09-24).**
 Embeddable viewer: each `TreeScene` owns a per-instance `TreeViewport`
 (zoom/pan) over the shared, data-only `TreeViewController`; `TreeViewer.qml`
@@ -60,7 +80,7 @@ across all 39 versions decode). The real `ImageSize()` + coherent sprite-UV
 conversion is now gated (`5537` sampled sprites, `0` out of bounds), and tree
 interactions use a C++ spatial hit index with each node's legacy `rsq` radius,
 proxy rejection, and bridge-side undo snapshots (the selftest exercises
-alloc→undo→redo→dealloc). Next: Parts 4.2–4.5.
+alloc→undo→redo→dealloc). Parts 4.2–4.5 then landed on 2026-09-27.
 Already fixed: `pob_getTreeData` rendered `latestTreeVersion` regardless of the
 spec's actual tree version (the spec fallback was dead code).
 
@@ -110,7 +130,8 @@ EVERY compile step reports `FAILED: [code=1]` with ZERO diagnostics —
 Smart App Control, not a code error. Running `pob-selftest.exe`/`pob-qt.exe`
 needs the same PATH prefix (else exit 127). Several `app/` sources had MIXED
 CRLF/LF endings (breaks exact-string edits); `* text=auto` normalises on commit,
-so converting a file to LF (`sed -i 's/$//'`) is a content no-op for git.
+so converting a file to LF (`sed -i 's/
+$//'`) is a content no-op for git.
 
 User-data policy is RESOLVED (SHARE); see resolved decision below +
 [[solo-hobby-fork-poc-scope]].
@@ -127,6 +148,15 @@ then runs both gates with `QT_QPA_PLATFORM=offscreen`. Exit code is the
 verdict. `SKIP_DEPS=1` skips the install step.
 - `runtime/*.dll` are Windows-only; on Linux `lua-utf8` resolves through
   `pob_host.lua`'s `require("utf8")` fallback. No `.so` goes in `runtime/`.
+- **Visual checks on Linux:** plain `QT_QPA_PLATFORM=offscreen --capture` draws
+  the tree area BLANK (no GL). Capture under Xvfb instead:
+  `QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1280x800x24" build-linux/pob-qt
+  --capture <dir> --src $PWD --runtime ../runtime --host ../app/lua/pob_host.lua`
+  (cwd `src/`); QML warnings land in `/tmp/pob-qt-main.log`. The headless gate
+  does NOT load QML, so run a capture after any QML change.
+- **Ad-hoc Lua against the real engine:** a probe file that does
+  `_POB_LUA_DIR=_SRC_DIR.."/../app/lua"; dofile(_POB_LUA_DIR.."/pob_host.lua")`
+  then your code, run as `pob-selftest <src> <runtime> <probe.lua>` (cwd `src/`).
 - The gate must pass on a CLEAN checkout (no gitignored `src/Settings.xml`).
   Unset options read as `nil` there; `pob_selftestOptions` now normalises to a
   boolean (it failed `nil ~= false` before 2026-09-26, hidden on dev machines).
@@ -273,6 +303,33 @@ Full detail in `reference/00-architecture.md`. The short list:
 ---
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
+
+**▶ Phase 4 — COMPLETE (Parts 4.2–4.5 on 2026-09-27; 4.1 earlier).** What a
+future session must know:
+- **`LuaEngine::invoke(name, args)`** is the generic QML→Lua entry for new
+  bridges: calls any `pob_*` global (never `pob_selftest*`) and emits the signals
+  the Lua result lists in `_emit` ("build","tree","items","skills","config",
+  "calcs"). Prefer it to adding a C++ wrapper per function.
+  `selftest_checks.h` `pob_run_lua_check(engine, fn, label)` runs a Lua check
+  and prints every scalar flag it returns.
+- **Call the live legacy objects' data methods instead of re-deriving:** the
+  node tooltip is `treeTab.viewer:AddNodeTooltip` into a real `Tooltip`
+  (`pob_getNodeTooltipLines`), search is `viewer:DoesNodeMatchSearchParams`,
+  mastery save is `TreeTab:SaveMasteryPopup`, converts are
+  `ConvertToVersion`. Anything trapped in a legacy CLOSURE must be lifted
+  (the Timeless finder → `app/lua/pob_timeless.lua`, `require`d by pob_host).
+- **Node power:** `pob_powerStep` = `pob_recalculate()` + one
+  `calcsTab:BuildPower()` resume, driven by a QML Timer while the heat map is
+  on. `CalcsTab:BuildOutput` itself re-arms `powerBuildFlag`, so a stale builder
+  is never resumed — no extra abort seam was needed.
+- **Renderer:** `TreeScene` draws node art with `TintedTextureMaterial`
+  (per-vertex colour × texture = legacy SetDrawColor); shaders are PRE-BAKED
+  `.qsb` in `app/shaders/` (edit the `.vert/.frag`, re-run the `qsb` line in
+  the `.vert` header; `qt6-shader-baker` on Ubuntu). Tree data is parsed once
+  per revision; hover / heat / compare only rebuild tinted batches.
+- `LuaEngine::setTreeSearch` no longer emits `treeChanged` (it re-ran
+  `pob_getTreeData` per keystroke); the renderer listens to `searchChanged`.
+- `Tooltip.qml` now sizes from the laid-out lines (it overflowed before).
 
 **▶ Phase 2 — COMPLETE (started 2026-07-25, finished 2026-08-01).** Parts
 2.3-2.6 (this session) close out the phase on top of the already-complete
@@ -714,7 +771,12 @@ during the July 2026 analysis; trust code over any older plan doc.
 | 14 | Packaging, Update & Distribution | installer, updater replacement, CI matrix, gates |
 | 15 | Decommission & Final Hardening | retire SimpleGraphic contract, perf, parity sweep, upstream-sync |
 
-**Dependency spine:** 0 → 1 → 2 → 3 → {4,5,6,7,8,9 in any order, each gated} →
+**▶ PHASE ORDER (set by the user 2026-09-27 — this is the order to work in):**
+**4 → 5 → 6 → 7 → Phase 3 long tail → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.**
+("Phase 3 long tail" = Loadouts, the Spectre Library popup and the full Save-As
+folder browser, which stayed open when Phase 3's MVP closed.) When a phase's gate
+closes, the NEXT one in this list becomes ACTIVE.
+
+**Dependency spine (background):** 0 → 1 → 2 → 3 → {4,5,6,7,8,9 in any order, each gated} →
 10 → 11 → {12, 13} → 14 → 15. (Tree/Skills/Items/Config/Calcs/Notes/Party are
-independent once the shell + calc layer exist; do them in value order. Network
-before Import/Trade.)
+independent once the shell + calc layer exist. Network before Import/Trade.)

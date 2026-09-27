@@ -4,12 +4,15 @@
 #include "TreeGroupModel.h"
 #include "TreeConnectorModel.h"
 #include "LuaEngine.h"
+#include "TintedTextureMaterial.h"
 
 #include <QQuickWindow>
 #include <QImageReader>
 #include <QPainter>
 #include <cmath>
 #include <algorithm>
+#include <cstring>
+#include <QColor>
 
 namespace {
 // Thread-safe image memoization cache across all tree instances.
@@ -48,6 +51,7 @@ void TreeScene::setController(TreeViewController* ctrl) {
     if (m_controller) {
         connect(m_controller, &TreeViewController::viewChanged, this, &TreeScene::onControllerViewChanged);
         connect(m_controller, &TreeViewController::searchChanged, this, &TreeScene::onControllerSearchChanged);
+        connect(m_controller, &TreeViewController::overlaysChanged, this, &TreeScene::onControllerOverlaysChanged);
     }
     m_dirtyGeometry = true;
     m_dirtyTransform = true;
@@ -151,8 +155,31 @@ void TreeScene::setHoverNodeId(int id) {
     if (m_hoverNodeId == id)
         return;
     m_hoverNodeId = id;
-    m_dirtyOverlay = true;
+    // The hovered node draws its "alloc" frame (PassiveTreeView.lua:789).
+    m_dirtyTint = true;
     emit hoverNodeIdChanged();
+    update();
+}
+
+void TreeScene::setHoverInfo(const QVariantMap& info) {
+    m_hoverInfo = info;
+    m_hoverPath.clear();
+    m_hoverDeps.clear();
+    m_radiusColors.clear();
+    for (const QVariant& v : info.value("path").toList())
+        m_hoverPath.insert(v.toInt());
+    for (const QVariant& v : info.value("depends").toList())
+        m_hoverDeps.insert(v.toInt());
+    const QVariantMap radius = info.value("radius").toMap();
+    for (const QVariant& v : radius.value("nodes").toList()) {
+        const QVariantMap n = v.toMap();
+        const QColor c(n.value("color").toString());
+        m_radiusColors.insert(n.value("id").toInt(),
+                              (quint32(c.red()) << 24) | (quint32(c.green()) << 16) | (quint32(c.blue()) << 8) | 0xffu);
+    }
+    m_dirtyTint = true;
+    m_dirtyOverlay = true;
+    emit hoverInfoChanged();
     update();
 }
 
@@ -183,6 +210,21 @@ void TreeScene::setShowSearch(bool show) {
     update();
 }
 
+void TreeScene::setEdgeSearchHighlight(bool on) {
+    if (m_edgeSearch == on)
+        return;
+    m_edgeSearch = on;
+    emit showSearchChanged();
+    update();
+}
+
+QVariantList TreeScene::searchCircleRects() const {
+    QVariantList out;
+    for (const QRectF& r : m_searchCircles)
+        out << QVariant(r);
+    return out;
+}
+
 void TreeScene::geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size())
@@ -198,6 +240,11 @@ void TreeScene::onControllerViewChanged() {
 void TreeScene::onControllerSearchChanged() {
     m_dirtyOverlay = true;
     emit searchChanged();
+    update();
+}
+
+void TreeScene::onControllerOverlaysChanged() {
+    m_dirtyTint = true;
     update();
 }
 
@@ -247,218 +294,333 @@ QSGTexture* TreeScene::getTexture(QQuickWindow* window, const QString& rawPath, 
     return tex;
 }
 
-void TreeScene::buildGeometryBatches() {
-    m_groupBatches.clear();
-    m_connectorBatches.clear();
-    m_nodeIconBatches.clear();
-    m_nodeFrameBatches.clear();
+namespace {
+constexpr quint32 kWhite = 0xffffffffu;
+constexpr quint32 kRed = 0xff0000ffu;
+constexpr quint32 kGreen = 0x00ff00ffu;
+constexpr quint32 kBlue = 0x0000ffffu;
+// Legacy draws every tree sprite at 2.66x its atlas pixel size (tree units).
+constexpr float kSpriteScale = 2.66f;
 
+void readFloats(const QVariant& v, float* out, int n, bool& ok) {
+    const QVariantList l = v.toList();
+    ok = l.size() >= n;
+    for (int i = 0; i < n; ++i)
+        out[i] = i < l.size() ? l[i].toFloat() : 0.0f;
+}
+
+int batchFor(QVector<TreeScene::QuadBatch>& batches, QHash<QString, int>& index, const QString& atlas) {
+    int i = index.value(atlas, -1);
+    if (i < 0) {
+        i = batches.size();
+        index.insert(atlas, i);
+        TreeScene::QuadBatch b;
+        b.atlasPath = atlas;
+        batches.append(b);
+    }
+    return i;
+}
+
+void pushQuad(TreeScene::QuadBatch& b, const float* xy, const float* uv, quint32 rgba) {
+    const quint32 base = static_cast<quint32>(b.vertices.size());
+    for (int k = 0; k < 4; ++k) {
+        TintedVertex v;
+        v.set(xy[k * 2], xy[k * 2 + 1], uv[k * 2], uv[k * 2 + 1], rgba);
+        b.vertices.append(v);
+    }
+    b.indices << base << (base + 1) << (base + 2) << base << (base + 2) << (base + 3);
+}
+
+void pushRect(TreeScene::QuadBatch& b, float x0, float y0, float x1, float y1,
+              float u0, float v0, float u1, float v1, quint32 rgba) {
+    const float xy[8] = { x0, y0, x1, y0, x1, y1, x0, y1 };
+    const float uv[8] = { u0, v0, u1, v0, u1, v1, u0, v1 };
+    pushQuad(b, xy, uv, rgba);
+}
+
+quint32 colorFromString(const QString& s) {
+    const QColor c(s);
+    if (!c.isValid())
+        return kWhite;
+    return (quint32(c.red()) << 24) | (quint32(c.green()) << 16) | (quint32(c.blue()) << 8) | 0xffu;
+}
+}
+
+// Parse the controller's QVariant payload into plain structs, once per tree
+// revision. Every later rebuild (hover, heat map, compare) reads these.
+void TreeScene::parseTreeData() {
+    m_nodeRecs.clear();
+    m_nodeIndex.clear();
+    m_connRecs.clear();
     if (!m_controller)
         return;
-
-    // 1. Group Backgrounds
-    if (auto* groupModel = m_controller->groupsModel()) {
-        QHash<QString, int> batchMap;
-        const auto& groups = groupModel->groups();
-        for (const QVariantMap& grp : groups) {
-            const QVariantMap sp = grp.value("sprite").toMap();
-            const QString atlas = sp.value("atlas").toString();
-            if (atlas.isEmpty())
-                continue;
-            const float sw = sp.value("sw").toFloat();
-            const float sh = sp.value("sh").toFloat();
-            const float sx = sp.value("sx").toFloat();
-            const float sy = sp.value("sy").toFloat();
-            if (sw <= 0 || sh <= 0)
-                continue;
-            const QImage atlasImg = getImage(atlas);
-            if (atlasImg.isNull())
-                continue;
-            const float aw = atlasImg.width();
-            const float ah = atlasImg.height();
-            if (aw <= 0 || ah <= 0)
-                continue;
-
-            int batchIdx = batchMap.value(atlas, -1);
-            if (batchIdx < 0) {
-                batchIdx = m_groupBatches.size();
-                batchMap.insert(atlas, batchIdx);
-                QuadBatch b;
-                b.atlasPath = atlas;
-                m_groupBatches.append(b);
-            }
-            QuadBatch& batch = m_groupBatches[batchIdx];
-
-            const float gx = grp.value("x").toFloat();
-            const float gy = grp.value("y").toFloat();
-            const float gdw = sw * 2.66f;
-            const float gdh = sh * 2.66f;
-            const bool isHalf = sp.value("isHalf").toBool();
-
-            const float u0 = sx / aw;
-            const float v0 = sy / ah;
-            const float u1 = (sx + sw) / aw;
-            const float v1 = (sy + sh) / ah;
-
-            if (isHalf) {
-                // Top half
-                quint32 baseIdx = static_cast<quint32>(batch.vertices.size() / 4);
-                batch.vertices << (gx - gdw / 2.0f) << (gy - gdh) << u0 << v0;
-                batch.vertices << (gx + gdw / 2.0f) << (gy - gdh) << u1 << v0;
-                batch.vertices << (gx + gdw / 2.0f) << gy << u1 << v1;
-                batch.vertices << (gx - gdw / 2.0f) << gy << u0 << v1;
-                batch.indices << baseIdx << (baseIdx + 1) << (baseIdx + 2)
-                              << baseIdx << (baseIdx + 2) << (baseIdx + 3);
-
-                // Bottom half (mirrored vertically: v1 at center gy, v0 at bottom gy + gdh)
-                baseIdx = static_cast<quint32>(batch.vertices.size() / 4);
-                batch.vertices << (gx - gdw / 2.0f) << gy << u0 << v1;
-                batch.vertices << (gx + gdw / 2.0f) << gy << u1 << v1;
-                batch.vertices << (gx + gdw / 2.0f) << (gy + gdh) << u1 << v0;
-                batch.vertices << (gx - gdw / 2.0f) << (gy + gdh) << u0 << v0;
-                batch.indices << baseIdx << (baseIdx + 1) << (baseIdx + 2)
-                              << baseIdx << (baseIdx + 2) << (baseIdx + 3);
-            } else {
-                quint32 baseIdx = static_cast<quint32>(batch.vertices.size() / 4);
-                batch.vertices << (gx - gdw / 2.0f) << (gy - gdh / 2.0f) << u0 << v0;
-                batch.vertices << (gx + gdw / 2.0f) << (gy - gdh / 2.0f) << u1 << v0;
-                batch.vertices << (gx + gdw / 2.0f) << (gy + gdh / 2.0f) << u1 << v1;
-                batch.vertices << (gx - gdw / 2.0f) << (gy + gdh / 2.0f) << u0 << v1;
-                batch.indices << baseIdx << (baseIdx + 1) << (baseIdx + 2)
-                              << baseIdx << (baseIdx + 2) << (baseIdx + 3);
-            }
-        }
-    }
-
-    // 2. Connectors
-    if (auto* connModel = m_controller->connectorsModel()) {
-        QHash<QString, int> batchMap;
-        const auto& connectors = connModel->connectors();
-        for (const QVariantMap& conn : connectors) {
-            const QString atlas = conn.value("atlas").toString();
-            if (atlas.isEmpty())
-                continue;
-            const QVariantList vert = conn.value("vert").toList();
-            const QVariantList uv = conn.value("uv").toList();
-            if (vert.size() < 8 || uv.size() < 8)
-                continue;
-
-            int batchIdx = batchMap.value(atlas, -1);
-            if (batchIdx < 0) {
-                batchIdx = m_connectorBatches.size();
-                batchMap.insert(atlas, batchIdx);
-                QuadBatch b;
-                b.atlasPath = atlas;
-                m_connectorBatches.append(b);
-            }
-            QuadBatch& batch = m_connectorBatches[batchIdx];
-
-            quint32 baseIdx = static_cast<quint32>(batch.vertices.size() / 4);
-            batch.vertices << vert[0].toFloat() << vert[1].toFloat() << uv[0].toFloat() << uv[1].toFloat();
-            batch.vertices << vert[2].toFloat() << vert[3].toFloat() << uv[2].toFloat() << uv[3].toFloat();
-            batch.vertices << vert[4].toFloat() << vert[5].toFloat() << uv[4].toFloat() << uv[5].toFloat();
-            batch.vertices << vert[6].toFloat() << vert[7].toFloat() << uv[6].toFloat() << uv[7].toFloat();
-            batch.indices << baseIdx << (baseIdx + 1) << (baseIdx + 2)
-                          << baseIdx << (baseIdx + 2) << (baseIdx + 3);
-        }
-    }
-
-    // 3. Node Icons & Frame Rings
+    auto sprite = [](const QVariant& v) {
+        Sprite sp;
+        const QVariantMap m = v.toMap();
+        sp.atlas = m.value("atlas").toString();
+        sp.sx = m.value("sx").toFloat();
+        sp.sy = m.value("sy").toFloat();
+        sp.sw = m.value("sw").toFloat();
+        sp.sh = m.value("sh").toFloat();
+        return sp;
+    };
     if (auto* nodeModel = m_controller->nodesModel()) {
-        QHash<QString, int> iconBatchMap;
-        QHash<QString, int> frameBatchMap;
         const auto& nodes = nodeModel->nodes();
+        m_nodeRecs.reserve(nodes.size());
         for (const QVariantMap& node : nodes) {
-            const float nx = node.value("x").toFloat();
-            const float ny = node.value("y").toFloat();
-
-            // Node Icon
-            const QVariantMap sp = node.value("iconSprite").toMap();
-            const QString iconAtlas = sp.value("atlas").toString();
-            if (!iconAtlas.isEmpty()) {
-                const float sw = sp.value("sw").toFloat();
-                const float sh = sp.value("sh").toFloat();
-                const float sx = sp.value("sx").toFloat();
-                const float sy = sp.value("sy").toFloat();
-                if (sw > 0 && sh > 0) {
-                    const QImage atlasImg = getImage(iconAtlas);
-                    if (!atlasImg.isNull() && atlasImg.width() > 0 && atlasImg.height() > 0) {
-                        const float aw = atlasImg.width();
-                        const float ah = atlasImg.height();
-                        int batchIdx = iconBatchMap.value(iconAtlas, -1);
-                        if (batchIdx < 0) {
-                            batchIdx = m_nodeIconBatches.size();
-                            iconBatchMap.insert(iconAtlas, batchIdx);
-                            QuadBatch b;
-                            b.atlasPath = iconAtlas;
-                            m_nodeIconBatches.append(b);
-                        }
-                        QuadBatch& batch = m_nodeIconBatches[batchIdx];
-
-                        const float dw = sw * 2.66f;
-                        const float dh = sh * 2.66f;
-                        const float u0 = sx / aw;
-                        const float v0 = sy / ah;
-                        const float u1 = (sx + sw) / aw;
-                        const float v1 = (sy + sh) / ah;
-
-                        quint32 baseIdx = static_cast<quint32>(batch.vertices.size() / 4);
-                        batch.vertices << (nx - dw / 2.0f) << (ny - dh / 2.0f) << u0 << v0;
-                        batch.vertices << (nx + dw / 2.0f) << (ny - dh / 2.0f) << u1 << v0;
-                        batch.vertices << (nx + dw / 2.0f) << (ny + dh / 2.0f) << u1 << v1;
-                        batch.vertices << (nx - dw / 2.0f) << (ny + dh / 2.0f) << u0 << v1;
-                        batch.indices << baseIdx << (baseIdx + 1) << (baseIdx + 2)
-                                      << baseIdx << (baseIdx + 2) << (baseIdx + 3);
-                    }
-                }
-            }
-
-            // Node Frame Ring
-            const QVariantMap fr = node.value("frameSprite").toMap();
-            const QString frameAtlas = fr.value("atlas").toString();
-            if (!frameAtlas.isEmpty()) {
-                const float fsw = fr.value("sw").toFloat();
-                const float fsh = fr.value("sh").toFloat();
-                const float fsx = fr.value("sx").toFloat();
-                const float fsy = fr.value("sy").toFloat();
-                if (fsw > 0 && fsh > 0) {
-                    const QImage fatlasImg = getImage(frameAtlas);
-                    if (!fatlasImg.isNull() && fatlasImg.width() > 0 && fatlasImg.height() > 0) {
-                        const float faw = fatlasImg.width();
-                        const float fah = fatlasImg.height();
-                        int batchIdx = frameBatchMap.value(frameAtlas, -1);
-                        if (batchIdx < 0) {
-                            batchIdx = m_nodeFrameBatches.size();
-                            frameBatchMap.insert(frameAtlas, batchIdx);
-                            QuadBatch b;
-                            b.atlasPath = frameAtlas;
-                            m_nodeFrameBatches.append(b);
-                        }
-                        QuadBatch& batch = m_nodeFrameBatches[batchIdx];
-
-                        const float fdw = fsw * 2.66f;
-                        const float fdh = fsh * 2.66f;
-                        const float fu0 = fsx / faw;
-                        const float fv0 = fsy / fah;
-                        const float fu1 = (fsx + fsw) / faw;
-                        const float fv1 = (fsy + fsh) / fah;
-
-                        quint32 baseIdx = static_cast<quint32>(batch.vertices.size() / 4);
-                        batch.vertices << (nx - fdw / 2.0f) << (ny - fdh / 2.0f) << fu0 << fv0;
-                        batch.vertices << (nx + fdw / 2.0f) << (ny - fdh / 2.0f) << fu1 << fv0;
-                        batch.vertices << (nx + fdw / 2.0f) << (ny + fdh / 2.0f) << fu1 << fv1;
-                        batch.vertices << (nx - fdw / 2.0f) << (ny + fdh / 2.0f) << fu0 << fv1;
-                        batch.indices << baseIdx << (baseIdx + 1) << (baseIdx + 2)
-                                      << baseIdx << (baseIdx + 2) << (baseIdx + 3);
-                    }
-                }
-            }
+            NodeRec r;
+            r.id = node.value("id").toInt();
+            r.x = node.value("x").toFloat();
+            r.y = node.value("y").toFloat();
+            r.alloc = node.value("allocated").toBool();
+            r.icon = sprite(node.value("iconSprite"));
+            r.frame = sprite(node.value("frameSprite"));
+            r.framePath = sprite(node.value("framePathSprite"));
+            r.frameAlloc = sprite(node.value("frameAllocSprite"));
+            m_nodeIndex.insert(r.id, m_nodeRecs.size());
+            m_nodeRecs.append(r);
+        }
+    }
+    if (auto* connModel = m_controller->connectorsModel()) {
+        const auto& connectors = connModel->connectors();
+        m_connRecs.reserve(connectors.size());
+        for (const QVariantMap& conn : connectors) {
+            ConnRec c;
+            c.n1 = conn.value("nodeId1").toInt();
+            c.n2 = conn.value("nodeId2").toInt();
+            c.atlas = conn.value("atlas").toString();
+            bool okV = false, okU = false;
+            readFloats(conn.value("vert"), c.vert, 8, okV);
+            readFloats(conn.value("uv"), c.uv, 8, okU);
+            if (c.atlas.isEmpty() || !okV || !okU)
+                continue;
+            bool ok = false;
+            c.atlasIntermediate = conn.value("atlasIntermediate").toString();
+            readFloats(conn.value("vertIntermediate"), c.vertIntermediate, 8, ok);
+            c.hasIntermediate = ok && !c.atlasIntermediate.isEmpty();
+            c.atlasActive = conn.value("atlasActive").toString();
+            readFloats(conn.value("vertActive"), c.vertActive, 8, ok);
+            c.hasActive = ok && !c.atlasActive.isEmpty();
+            m_connRecs.append(c);
         }
     }
 }
 
+void TreeScene::addSpriteQuad(QVector<QuadBatch>& batches, QHash<QString, int>& index,
+                              const Sprite& sp, float cx, float cy, quint32 rgba) {
+    if (!sp.valid())
+        return;
+    const QImage atlasImg = getImage(sp.atlas);
+    if (atlasImg.isNull() || atlasImg.width() <= 0 || atlasImg.height() <= 0)
+        return;
+    const float aw = atlasImg.width();
+    const float ah = atlasImg.height();
+    const float dw = sp.sw * kSpriteScale;
+    const float dh = sp.sh * kSpriteScale;
+    QuadBatch& b = batches[batchFor(batches, index, sp.atlas)];
+    pushRect(b, cx - dw / 2.0f, cy - dh / 2.0f, cx + dw / 2.0f, cy + dh / 2.0f,
+             sp.sx / aw, sp.sy / ah, (sp.sx + sp.sw) / aw, (sp.sy + sp.sh) / ah, rgba);
+}
+
+void TreeScene::buildGroupBatches() {
+    m_groupBatches.clear();
+    if (!m_controller)
+        return;
+    auto* groupModel = m_controller->groupsModel();
+    if (!groupModel)
+        return;
+    QHash<QString, int> batchMap;
+    for (const QVariantMap& grp : groupModel->groups()) {
+        const QVariantMap sp = grp.value("sprite").toMap();
+        const QString atlas = sp.value("atlas").toString();
+        if (atlas.isEmpty())
+            continue;
+        const float sw = sp.value("sw").toFloat();
+        const float sh = sp.value("sh").toFloat();
+        const float sx = sp.value("sx").toFloat();
+        const float sy = sp.value("sy").toFloat();
+        if (sw <= 0 || sh <= 0)
+            continue;
+        const QImage atlasImg = getImage(atlas);
+        if (atlasImg.isNull() || atlasImg.width() <= 0 || atlasImg.height() <= 0)
+            continue;
+        const float aw = atlasImg.width();
+        const float ah = atlasImg.height();
+        QuadBatch& batch = m_groupBatches[batchFor(m_groupBatches, batchMap, atlas)];
+        const float gx = grp.value("x").toFloat();
+        const float gy = grp.value("y").toFloat();
+        const float gdw = sw * kSpriteScale;
+        const float gdh = sh * kSpriteScale;
+        const float u0 = sx / aw, v0 = sy / ah, u1 = (sx + sw) / aw, v1 = (sy + sh) / ah;
+        if (sp.value("isHalf").toBool()) {
+            // Top half, then the bottom half mirrored vertically about gy.
+            pushRect(batch, gx - gdw / 2.0f, gy - gdh, gx + gdw / 2.0f, gy, u0, v0, u1, v1, kWhite);
+            pushRect(batch, gx - gdw / 2.0f, gy, gx + gdw / 2.0f, gy + gdh, u0, v1, u1, v0, kWhite);
+        } else {
+            pushRect(batch, gx - gdw / 2.0f, gy - gdh / 2.0f, gx + gdw / 2.0f, gy + gdh / 2.0f,
+                     u0, v0, u1, v1, kWhite);
+        }
+    }
+}
+
+// Connectors, node icons and frames with legacy's per-state art and tints
+// (PassiveTreeView.lua:636-688 connectors, 765-957 nodes).
+void TreeScene::buildTintedBatches() {
+    m_connectorBatches.clear();
+    m_nodeIconBatches.clear();
+    m_nodeFrameBatches.clear();
+    if (!m_controller)
+        return;
+    const bool heatOn = m_controller->heatMapOn();
+    const bool compareOn = m_controller->compareActive();
+    const int hover = m_hoverNodeId;
+    const bool hasPath = !m_hoverPath.isEmpty();
+
+    auto allocOf = [this](int id) {
+        const auto it = m_nodeIndex.constFind(id);
+        return it != m_nodeIndex.constEnd() && m_nodeRecs.at(it.value()).alloc;
+    };
+    // Legacy GetCompareNodeColor: green = only the compared tree has it, red =
+    // only this tree, blue = both, with a different mastery effect.
+    auto compareTint = [&](const NodeRec& n) -> quint32 {
+        if (!compareOn)
+            return kWhite;
+        const bool c = m_controller->compareAlloc(n.id);
+        if (c && !n.alloc) return kGreen;
+        if (!c && n.alloc) return kRed;
+        if (c && n.alloc && m_controller->compareBlue(n.id)) return kBlue;
+        return kWhite;
+    };
+
+    QHash<QString, int> connIdx;
+    for (const ConnRec& c : m_connRecs) {
+        const bool a1 = allocOf(c.n1), a2 = allocOf(c.n2);
+        const float* vert = c.vert;
+        QString atlas = c.atlas;
+        quint32 tint = kWhite;
+        if (!(a1 && a2) && hasPath && c.hasIntermediate
+            && (a1 || c.n1 == hover || m_hoverPath.contains(c.n1))
+            && (a2 || c.n2 == hover || m_hoverPath.contains(c.n2))) {
+            vert = c.vertIntermediate;
+            atlas = c.atlasIntermediate;
+        }
+        if (compareOn) {
+            const bool cBoth = m_controller->compareAlloc(c.n1) && m_controller->compareAlloc(c.n2);
+            if (cBoth && !(a1 && a2)) {
+                if (c.hasActive) { vert = c.vertActive; atlas = c.atlasActive; }
+                tint = kGreen;
+            } else if ((a1 && a2) && !cBoth) {
+                tint = kRed;
+            }
+        }
+        if (m_hoverDeps.contains(c.n1) && m_hoverDeps.contains(c.n2))
+            tint = kRed;
+        QuadBatch& b = m_connectorBatches[batchFor(m_connectorBatches, connIdx, atlas)];
+        pushQuad(b, vert, c.uv, tint);
+    }
+
+    QHash<QString, int> iconIdx, frameIdx;
+    for (const NodeRec& n : m_nodeRecs) {
+        quint32 base = compareTint(n);
+        const bool compareShowsAlloc = compareOn && m_controller->compareAlloc(n.id);
+        if (heatOn && !n.alloc) {
+            const quint32 h = m_controller->heatColor(n.id);
+            if (h != 0)
+                base = h;
+        }
+        addSpriteQuad(m_nodeIconBatches, iconIdx, n.icon, n.x, n.y, base);
+
+        // Frame state (PassiveTreeView.lua:788-797).
+        const Sprite* frame = &n.frame;
+        if (!n.alloc) {
+            if ((heatOn || n.id == hover || compareShowsAlloc) && n.frameAlloc.valid())
+                frame = &n.frameAlloc;
+            else if (m_hoverPath.contains(n.id) && n.framePath.valid())
+                frame = &n.framePath;
+        }
+        quint32 frameTint = base;
+        if (hover >= 0 && m_hoverDeps.contains(n.id))
+            frameTint = kRed;
+        else if (m_radiusColors.contains(n.id))
+            frameTint = m_radiusColors.value(n.id);
+        addSpriteQuad(m_nodeFrameBatches, frameIdx, *frame, n.x, n.y, frameTint);
+    }
+}
+
+// Tree-space overlay: the hovered socket's jewel-radius rings
+// (PassiveTreeView.lua:1122-1152, Assets/ring.png).
+void TreeScene::buildOverlayBatches() {
+    m_overlayBatches.clear();
+    const QVariantMap radius = m_hoverInfo.value("radius").toMap();
+    const QVariantList rings = radius.value("rings").toList();
+    if (rings.isEmpty())
+        return;
+    const float x = radius.value("x").toFloat();
+    const float y = radius.value("y").toFloat();
+    QHash<QString, int> idx;
+    const QString ring = QStringLiteral("Assets/ring.png");
+    QuadBatch& b = m_overlayBatches[batchFor(m_overlayBatches, idx, ring)];
+    for (const QVariant& v : rings) {
+        const QVariantMap r = v.toMap();
+        const quint32 col = colorFromString(r.value("color").toString());
+        const float outer = r.value("outer").toFloat();
+        const float inner = r.value("inner").toFloat();
+        pushRect(b, x - outer, y - outer, x + outer, y + outer, 0, 0, 1, 1, col);
+        if (inner > 0)
+            pushRect(b, x - inner, y - inner, x + inner, y + inner, 0, 0, 1, 1, col);
+    }
+}
+
+// Screen-space overlay: search-match circles (PassiveTreeView.lua:975-1001,
+// Assets/small_ring.png, red, size 175*scale/zoom^0.4), clamped to the
+// viewport edge at 2/3 size when main.edgeSearchHighlight is on.
+void TreeScene::buildScreenBatches() {
+    m_screenBatches.clear();
+    m_searchCircles.clear();
+    if (!m_controller || !m_showSearch || !m_view.valid())
+        return;
+    const QVariantList results = m_controller->searchResults();
+    if (results.isEmpty())
+        return;
+    const double vpW = width(), vpH = height();
+    const double baseSize = 175.0 * m_view.scale() / std::pow(m_view.zoom(), 0.4);
+    constexpr double peek = 1.15;
+    constexpr double scaledDown = 0.6667;
+    QHash<QString, int> idx;
+    const QString ringPath = QStringLiteral("Assets/small_ring.png");
+    QuadBatch& b = m_screenBatches[batchFor(m_screenBatches, idx, ringPath)];
+    for (const QVariant& v : results) {
+        double tx = 0, ty = 0;
+        if (!m_controller->nodePosition(v.toInt(), tx, ty))
+            continue;
+        double sx = 0, sy = 0;
+        m_view.treeToScreen(tx, ty, sx, sy);
+        double size = baseSize;
+        double nx = sx - size, ny = sy - size;
+        const double cx = std::clamp(nx, -size / peek, vpW - size * peek);
+        const double cy = std::clamp(ny, -size / peek, vpH - size * peek);
+        if (cx != nx || cy != ny) {
+            if (!m_edgeSearch)
+                continue;
+            size *= scaledDown;
+            nx = cx + size / 2.0;
+            ny = cy + size / 2.0;
+        }
+        m_searchCircles.append(QRectF(nx, ny, size * 2.0, size * 2.0));
+        pushRect(b, float(nx), float(ny), float(nx + size * 2.0), float(ny + size * 2.0), 0, 0, 1, 1, kRed);
+    }
+}
+
 namespace {
-void populateBatchContainer(QSGNode* container, const QVector<TreeScene::QuadBatch>& batches, QQuickWindow* window) {
+void clearContainer(QSGNode* c) {
+    while (c->childCount() > 0) {
+        QSGNode* child = c->childAtIndex(0);
+        c->removeChildNode(child);
+        delete child;
+    }
+}
+
+void populateTinted(QSGNode* container, const QVector<TreeScene::QuadBatch>& batches, QQuickWindow* window) {
     for (const auto& batch : batches) {
         if (batch.vertices.isEmpty() || batch.indices.isEmpty())
             continue;
@@ -466,33 +628,17 @@ void populateBatchContainer(QSGNode* container, const QVector<TreeScene::QuadBat
         if (!tex)
             continue;
         auto* geomNode = new QSGGeometryNode;
-        auto* geom = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(),
-                                     batch.vertices.size() / 4,
-                                     batch.indices.size(),
-                                     QSGGeometry::UnsignedIntType);
+        auto* geom = new QSGGeometry(tintedTextureAttributes(), batch.vertices.size(),
+                                     batch.indices.size(), QSGGeometry::UnsignedIntType);
         geom->setDrawingMode(QSGGeometry::DrawTriangles);
-
-        auto* vData = geom->vertexDataAsTexturedPoint2D();
-        for (int i = 0; i < batch.vertices.size(); i += 4) {
-            const int vIdx = i / 4;
-            vData[vIdx].set(batch.vertices[i], batch.vertices[i + 1], batch.vertices[i + 2], batch.vertices[i + 3]);
-        }
-
-        auto* iData = geom->indexDataAsUInt();
-        for (int i = 0; i < batch.indices.size(); ++i) {
-            iData[i] = batch.indices[i];
-        }
-
+        std::memcpy(geom->vertexData(), batch.vertices.constData(), batch.vertices.size() * sizeof(TintedVertex));
+        std::memcpy(geom->indexDataAsUInt(), batch.indices.constData(), batch.indices.size() * sizeof(quint32));
         geomNode->setGeometry(geom);
         geomNode->setFlag(QSGNode::OwnsGeometry, true);
-
-        auto* mat = new QSGTextureMaterial;
+        auto* mat = new TintedTextureMaterial;
         mat->setTexture(tex);
-        mat->setMipmapFiltering(QSGTexture::Linear);
-        mat->setFiltering(QSGTexture::Linear);
         geomNode->setMaterial(mat);
         geomNode->setFlag(QSGNode::OwnsMaterial, true);
-
         container->appendChildNode(geomNode);
     }
 }
@@ -504,6 +650,8 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
         return nullptr;
     }
 
+    // Node tree: root -> [background, transform -> [groups, connectors, icons,
+    // frames, overlay], screen overlay].
     QSGNode* rootNode = oldNode;
     QSGNode* bgContainer = nullptr;
     QSGTransformNode* transformNode = nullptr;
@@ -512,30 +660,26 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
     QSGNode* iconContainer = nullptr;
     QSGNode* frameContainer = nullptr;
     QSGNode* overlayContainer = nullptr;
+    QSGNode* screenContainer = nullptr;
 
     if (!rootNode) {
         rootNode = new QSGNode;
         bgContainer = new QSGNode;
         rootNode->appendChildNode(bgContainer);
-
         transformNode = new QSGTransformNode;
         rootNode->appendChildNode(transformNode);
-
         groupContainer = new QSGNode;
         transformNode->appendChildNode(groupContainer);
-
         connContainer = new QSGNode;
         transformNode->appendChildNode(connContainer);
-
         iconContainer = new QSGNode;
         transformNode->appendChildNode(iconContainer);
-
         frameContainer = new QSGNode;
         transformNode->appendChildNode(frameContainer);
-
         overlayContainer = new QSGNode;
         transformNode->appendChildNode(overlayContainer);
-
+        screenContainer = new QSGNode;
+        rootNode->appendChildNode(screenContainer);
         m_dirtyGeometry = true;
         m_dirtyTransform = true;
     } else {
@@ -546,6 +690,7 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
         iconContainer = transformNode->childAtIndex(2);
         frameContainer = transformNode->childAtIndex(3);
         overlayContainer = transformNode->childAtIndex(4);
+        screenContainer = rootNode->childAtIndex(2);
     }
 
     if (!m_controller || !m_view.valid())
@@ -562,11 +707,7 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
     // material instead of silently retaining the old atlas.
     const QString bgUrl = m_controller ? m_controller->backgroundUrl() : QString();
     if (m_backgroundPath != bgUrl) {
-        while (bgContainer->childCount() > 0) {
-            QSGNode* child = bgContainer->childAtIndex(0);
-            bgContainer->removeChildNode(child);
-            delete child;
-        }
+        clearContainer(bgContainer);
         m_backgroundPath = bgUrl;
     }
     if (!bgUrl.isEmpty()) {
@@ -579,29 +720,24 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
                 bgGeom->setDrawingMode(QSGGeometry::DrawTriangles);
                 bgGeomNode->setGeometry(bgGeom);
                 bgGeomNode->setFlag(QSGNode::OwnsGeometry, true);
-
                 auto* mat = new QSGTextureMaterial;
                 mat->setTexture(bgTex);
                 mat->setFiltering(QSGTexture::Linear);
                 bgGeomNode->setMaterial(mat);
                 bgGeomNode->setFlag(QSGNode::OwnsMaterial, true);
-
                 auto* iData = bgGeom->indexDataAsUShort();
                 iData[0] = 0; iData[1] = 1; iData[2] = 2;
                 iData[3] = 0; iData[4] = 2; iData[5] = 3;
-
                 bgContainer->appendChildNode(bgGeomNode);
             } else {
                 bgGeomNode = static_cast<QSGGeometryNode*>(bgContainer->childAtIndex(0));
             }
-
             if (bgGeomNode && bgGeomNode->geometry()) {
                 const float bgSize = bgTex->textureSize().width() * scale * 1.33f * 2.5f;
                 const float u0 = (zx + w / 2.0f) / -bgSize;
                 const float v0 = (zy + h / 2.0f) / -bgSize;
                 const float u1 = (w / 2.0f - zx) / bgSize;
                 const float v1 = (h / 2.0f - zy) / bgSize;
-
                 auto* vData = bgGeomNode->geometry()->vertexDataAsTexturedPoint2D();
                 vData[0].set(0, 0, u0, v0);
                 vData[1].set(w, 0, u1, v0);
@@ -618,121 +754,46 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
     mat.scale(static_cast<float>(scale), static_cast<float>(scale), 1.0f);
     transformNode->setMatrix(mat);
 
-    // 3. Geometry Batches Rebuild (Only when tree revision changes)
+    // 3. Tree data: re-parse only when the tree revision changes.
     const QString currentRev = m_controller ? m_controller->lastRevision() : QString();
-    if (m_dirtyGeometry || (m_builtRevision.isEmpty() || m_builtRevision != currentRev)) {
+    if (m_dirtyGeometry || m_builtRevision.isEmpty() || m_builtRevision != currentRev) {
         m_dirtyGeometry = false;
         m_builtRevision = currentRev;
-
-        buildGeometryBatches();
-
-        // Clear existing children in containers
-        auto clearContainer = [](QSGNode* c) {
-            while (c->childCount() > 0) {
-                QSGNode* child = c->childAtIndex(0);
-                c->removeChildNode(child);
-                delete child;
-            }
-        };
-
+        parseTreeData();
+        buildGroupBatches();
         clearContainer(groupContainer);
-        populateBatchContainer(groupContainer, m_groupBatches, window());
-
-        clearContainer(connContainer);
-        populateBatchContainer(connContainer, m_connectorBatches, window());
-
-        clearContainer(iconContainer);
-        populateBatchContainer(iconContainer, m_nodeIconBatches, window());
-
-        clearContainer(frameContainer);
-        populateBatchContainer(frameContainer, m_nodeFrameBatches, window());
-
+        populateTinted(groupContainer, m_groupBatches, window());
+        m_dirtyTint = true;
         m_dirtyOverlay = true;
     }
 
-    // 4. Search & Overlay Geometry (Highlights)
-    if (m_dirtyOverlay) {
-        m_dirtyOverlay = false;
-        while (overlayContainer->childCount() > 0) {
-            QSGNode* child = overlayContainer->childAtIndex(0);
-            overlayContainer->removeChildNode(child);
-            delete child;
-        }
-
-        if (m_showSearch && m_controller) {
-            const QVariantList results = m_controller->searchResults();
-            if (!results.isEmpty() && m_controller->nodesModel()) {
-                QSet<int> matchSet;
-                for (const QVariant& v : results)
-                    matchSet.insert(v.toInt());
-
-                // Build a combined geometry for all search rings
-                const auto& nodes = m_controller->nodesModel()->nodes();
-                QVector<float> ringVerts;
-                QVector<quint32> ringIndices;
-
-                const int kSegments = 24;
-                for (const QVariantMap& node : nodes) {
-                    const int id = node.value("id").toInt();
-                    if (!matchSet.contains(id))
-                        continue;
-
-                    const float nx = node.value("x").toFloat();
-                    const float ny = node.value("y").toFloat();
-                    const QVariantMap sp = node.value("iconSprite").toMap();
-                    float baseR = 30.0f;
-                    if (!sp.isEmpty() && sp.value("sw").toFloat() > 0) {
-                        baseR = std::max(sp.value("sw").toFloat(), sp.value("sh").toFloat()) * 2.66f / 2.0f + 8.0f;
-                    }
-
-                    const float rInner = baseR;
-                    const float rOuter = baseR + 6.0f;
-                    const quint32 baseIdx = static_cast<quint32>(ringVerts.size() / 2);
-
-                    for (int s = 0; s <= kSegments; ++s) {
-                        const float angle = static_cast<float>(s * 2.0 * M_PI / kSegments);
-                        const float cosA = std::cos(angle);
-                        const float sinA = std::sin(angle);
-                        ringVerts << (nx + rInner * cosA) << (ny + rInner * sinA);
-                        ringVerts << (nx + rOuter * cosA) << (ny + rOuter * sinA);
-                    }
-                    for (int s = 0; s < kSegments; ++s) {
-                        const quint32 i0 = baseIdx + s * 2;
-                        const quint32 i1 = baseIdx + s * 2 + 1;
-                        const quint32 i2 = baseIdx + (s + 1) * 2;
-                        const quint32 i3 = baseIdx + (s + 1) * 2;
-                        ringIndices << i0 << i1 << i2 << i1 << i3 << i2;
-                    }
-                }
-
-                if (!ringVerts.isEmpty()) {
-                    auto* searchNode = new QSGGeometryNode;
-                    auto* geom = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(),
-                                                 ringVerts.size() / 2,
-                                                 ringIndices.size(),
-                                                 QSGGeometry::UnsignedIntType);
-                    geom->setDrawingMode(QSGGeometry::DrawTriangles);
-                    auto* vData = geom->vertexDataAsPoint2D();
-                    for (int i = 0; i < ringVerts.size(); i += 2) {
-                        vData[i / 2].set(ringVerts[i], ringVerts[i + 1]);
-                    }
-                    auto* iData = geom->indexDataAsUInt();
-                    for (int i = 0; i < ringIndices.size(); ++i) {
-                        iData[i] = ringIndices[i];
-                    }
-                    searchNode->setGeometry(geom);
-                    searchNode->setFlag(QSGNode::OwnsGeometry, true);
-
-                    auto* flatMat = new QSGFlatColorMaterial;
-                    flatMat->setColor(QColor(0xd4, 0xaf, 0x37, 0xee)); // Gold highlight
-                    searchNode->setMaterial(flatMat);
-                    searchNode->setFlag(QSGNode::OwnsMaterial, true);
-
-                    overlayContainer->appendChildNode(searchNode);
-                }
-            }
-        }
+    // 4. Art state + tints (hover preview, heat map, compare).
+    if (m_dirtyTint) {
+        m_dirtyTint = false;
+        buildTintedBatches();
+        clearContainer(connContainer);
+        populateTinted(connContainer, m_connectorBatches, window());
+        clearContainer(iconContainer);
+        populateTinted(iconContainer, m_nodeIconBatches, window());
+        clearContainer(frameContainer);
+        populateTinted(frameContainer, m_nodeFrameBatches, window());
     }
+
+    // 5. Tree-space overlay (radius rings).
+    if (m_dirtyOverlay) {
+        buildOverlayBatches();
+        clearContainer(overlayContainer);
+        populateTinted(overlayContainer, m_overlayBatches, window());
+    }
+
+    // 6. Screen-space overlay (search circles): moves with every pan/zoom.
+    if (m_dirtyOverlay || m_dirtyTransform) {
+        buildScreenBatches();
+        clearContainer(screenContainer);
+        populateTinted(screenContainer, m_screenBatches, window());
+    }
+    m_dirtyOverlay = false;
+    m_dirtyTransform = false;
 
     return rootNode;
 }

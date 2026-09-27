@@ -1,6 +1,6 @@
 # Phase 4 — Tree Tab (finish & harden)
 
-**Status:** IN PROGRESS — Part 4.1 4/5 done (renderer landed as `TreeScene`); latest evidence in "Session log — 2026-09-24". See "Recon findings" at the bottom before starting.
+**Status:** DONE (2026-09-27) — Parts 4.1–4.5 done (4.2–4.5 on 2026-09-27); open follow-ups listed in STATUS.md's Phase 4 entry; latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
 **Goal:** Finish the passive-tree tab — the one view that already renders. Harden
 the renderer, make the tree viewer an embeddable multi-instance component, and add
 the missing interactive features (spec management, compare overlay, search, node
@@ -45,50 +45,57 @@ ItemSlotControl, TimelessJewelSocketControl, and CalcBreakdown reuse later.
 
 ## Part 4.2 — Spec management
 
-- [ ] Spec dropdown with respec-gold tooltip (class/asc/points/sockets, switch
+- [x] Spec dropdown with respec-gold tooltip (class/asc/points/sockets, switch
   stat-diff, per-node refund cost). Up/Down cycle specs. (M)
-- [ ] Manage-trees popup (generic set-manager component): new/copy/delete/rename/
+  → **DONE 2026-09-27** (session log): bottom strip of `views/TreeView.qml`.
+- [x] Manage-trees popup (generic set-manager component): new/copy/delete/rename/
   reorder; reorder syncs the itemsTab tree selector + loadouts. (M)
-- [ ] **Import Tree** (pathofexile.com incl. ruthless/alternate URLs, poeurl
+  → **DONE 2026-09-27**: `SpecManagePopup.qml`; reorder by Up/Down buttons
+  (legacy drags — documented deviation).
+- [x] **Import Tree** (pathofexile.com incl. ruthless/alternate URLs, poeurl
   resolve [needs Phase 10 network], poeplanner decode, poeskilltree; version
   validation) and **Export Tree** (encode URL, PoEURL shrink, copy). (M — the
   poeurl/network path is gated on Phase 10; local encode/decode works now.)
+  → **DONE 2026-09-27** except the two network paths (poeurl resolve, PoEURL
+  shrink), which wait for Phase 10; poeurl links get a clear refusal message.
 
 ## Part 4.3 — Interaction & display
 
-- [ ] Viewer: pan/zoom/alloc/dealloc with dependent-node handling, path tracing +
+- [x] Viewer: pan/zoom/alloc/dealloc with dependent-node handling, path tracing +
   hover preview, path drag (Shift alternate-path mode). Hotkeys: `p` heat map,
   Ctrl+D stat-diff tooltips, Ctrl+C copy hovered node, PgUp/PgDn zoom, Shift-socket
   jewel compare, wiki hotkey. (M)
-- [ ] Node tooltips: name, stats (unsupported flagged), reminder text, **stat-diff
+  → **DONE 2026-09-27** (session log). "Shift-socket jewel compare" does not exist in
+  legacy: Shift over a socket only hides its tooltip so the radius rings show — ported.
+- [x] Node tooltips: name, stats (unsupported flagged), reminder text, **stat-diff
   on alloc/dealloc** (Phase 2 node calculator), required gold, compare-spec status;
   jewel sockets show socketed-jewel tooltip + radius rings + "allocates in radius". (M)
-- [ ] Compare checkbox + compare-spec dropdown → overlay (green/red/blue) or the
+- [x] Compare checkbox + compare-spec dropdown → overlay (green/red/blue) or the
   compare colors in the viewer; cluster subgraphs. (M) Includes the viewer's
   `compareSpec` parameter (moved here from 4.1): the bridge must export the
   compare spec's alloc/mastery/jewel state per node
   (`PassiveTreeView:GetCompareNodeColor`), and TreeScene needs per-node tinting —
   `QSGTextureMaterial` cannot tint, so use a vertex-colour textured material.
-- [ ] Search box (Ctrl+F, Lua patterns, `oil:` anoint prefix, `(a|b)` groups) →
+- [x] Search box (Ctrl+F, Lua patterns, `oil:` anoint prefix, `(a|b)` groups) →
   viewer highlight + optional edge-of-viewport circles. (S-M)
-- [ ] **Show Node Power** + max-depth dropdown + power-stat dropdown → heat map;
+- [x] **Show Node Power** + max-depth dropdown + power-stat dropdown → heat map;
   **Power Report drawer** (PowerReportListControl, sortable, click-to-recenter);
   progress toast while the PowerBuilder coroutine runs (drive resume from a Qt
   timer/idle hook, never concurrent with a rebuild). (M — uses Phase 2 node power.)
 
 ## Part 4.4 — Popups
 
-- [ ] **Mastery-effect popup** (right-click mastery): per-effect stat-diff preview
+- [x] **Mastery-effect popup** (right-click mastery): per-effect stat-diff preview
   (PassiveMasteryControl with embedded node tooltip). (S-M)
-- [ ] **Tattoo popup** (right-click tattooable node): eligible tattoos by target
+- [x] **Tattoo popup** (right-click tattooable node): eligible tattoos by target
   type/connections, legacy toggle, tattoo count x/50, Add/Reset Node. (M)
-- [ ] **Reset popup**: Reset Tree / Remove All Tattoos / Cancel. (S)
-- [ ] Version dropdown + **Convert** popup (Convert / Copy+Convert / Cancel) +
+- [x] **Reset popup**: Reset Tree / Remove All Tattoos / Cancel. (S)
+- [x] Version dropdown + **Convert** popup (Convert / Copy+Convert / Cancel) +
   "convert all trees" banner for outdated specs. (S-M)
 
 ## Part 4.5 — Timeless Jewel finder (large sub-feature)
 
-- [ ] Full popup: 6 jewel types + conqueror/devotion dropdowns; jewel-socket
+- [x] Full popup: 6 jewel types + conqueror/devotion dropdowns; jewel-socket
   dropdown (+ "All Sockets" multi-search) with **mini tree preview**
   (TimelessJewelSocketControl); Filter Nodes + distance slider + protect-notables
   list; weight sliders; node search dropdown; Desired/Fallback node CSV edits +
@@ -488,3 +495,203 @@ jewel-style inset (socket 26725, zoom 17, crosshair) and a Calcs-style inset
 (zoom 5, focus ring) over the Tree tab; the capture showed all three views
 rendering independently from the shared data, each correctly framed. Probe
 reverted.
+
+## Session log — 2026-09-27 (Part 4.2: spec management) — Linux cloud session
+
+Gate first (never run after the last build, per `HANDOFF-phase4.md`):
+`tools/linux-selftest.sh` → `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0`.
+
+**Bridge** (`app/lua/pob_host.lua`, new section at the end): `pob_getSpecList`,
+`pob_setActiveSpec`, `pob_cycleSpec`, `pob_getSpecTooltip`, `pob_newSpec`,
+`pob_copySpec`, `pob_renameSpec`, `pob_deleteSpec`, `pob_moveSpec`,
+`pob_importTree`, `pob_exportTree`. They drive the live `build.treeTab`
+(`SetActiveSpec`, `specList`) and end in `pob_specSync` — the Items-tab tree
+selector refresh + `SyncLoadouts` that legacy ran from the list control's
+callbacks and the per-frame Draw. The renderer revision gained a spec serial
+(a switch between two specs with the same version and allocation set was
+otherwise invisible to the rebuild throttle).
+- Tooltip = legacy TreeTab.lua:51-103 as data: switch stat-diff via the misc
+  calculator (`{ spec = spec }` override → `pob_diffStatList`), respec gold
+  = `goldRespecPrices[level]` per node, ×5 for ascendancy nodes, same-class only.
+- Copy: legacy's `CreateUndoState` drops the secondary ascendancy (it stores a
+  field that does not exist, `PassiveSpec.lua:2259`). `src/` may not be patched,
+  so the bridge restores it after the engine's copy path.
+- Import: GGG (versioned / ruthless / alternate / fullscreen), poeskilltree and
+  poeplanner decode offline; version clamp to latest as legacy. poeurl →
+  refused with a message (Phase 10). poeplanner has no golden fixture link, so
+  that branch is ported but not exercised by the selftest.
+
+**C++**: `LuaEngine::invoke(name, args)` — generic `pob_*` call that emits the
+signals the Lua result lists in `_emit` (so the function that mutated decides
+what changed); `LuaEngine::copyText`. `selftest_checks.h` gained
+`pob_run_lua_check`, which prints every scalar field a Lua check returns.
+
+**QML**: `TreeView.qml` bottom strip (spec dropdown + "Manage trees... (ctrl-m)"
+row + per-row tooltip, Up/Down cycling when the tree has focus, Ctrl+M);
+`SpecManagePopup.qml`, `TreeImportPopup.qml`, `TreeExportPopup.qml`,
+`StatDiff.js` (shared stat-diff tooltip lines, reused by 4.3 node tooltips).
+
+**Gate:** new `spec-manage` check (29 flags) — export→import round trip keeps
+the allocation, list/labels, switch + revision move, tooltip gold + diff,
+new/copy/rename/move/cycle/delete (incl. deleting the active spec), Items
+selector sync, version detection (3.25 link → `3_25`, ruthless, 9.99 clamp),
+poeurl/garbage refusals, full restore. Teeth: removing the reorder's activeSpec
+fix-up fails it (`moveOk=false`, exit 1). `pob-selftest EXIT=0`,
+`pob-qt --headless EXIT=0`.
+
+**Linux visual check:** plain `QT_QPA_PLATFORM=offscreen` capture draws the
+tree area BLANK on Linux (no GL → TreeScene's geometry nodes are not drawn);
+run the capture under `xvfb-run` with `QT_QPA_PLATFORM=xcb` (Mesa llvmpipe)
+instead — tree SSIM 0.994 vs the committed baseline. Probe capture of the
+Manage popup (3 trees, one `[3.25]`) looked right; probe reverted.
+
+## Session log — 2026-09-27 (Part 4.3: interaction & display)
+
+**Approach:** the legacy `PassiveTreeView` object (`build.treeTab.viewer`) is
+live under Qt, just never drawn. Its data-building methods are CALLED, not
+re-derived: the node tooltip is `viewer:AddNodeTooltip` into a real `Tooltip`
+object (`pob_getNodeTooltipLines` marshals `tip.lines`), and search is the
+engine's `DoesNodeMatchSearchParams` (only the Draw-local tokeniser was ported).
+The per-frame Draw logic became data: `pob_getHoverInfo` (hover path, dependents,
+Shift trace extension, socket radius rings + in-radius colours), `pob_clickNode`
+/ `pob_confirmNodeClassChange` / `pob_rightClickNode` (PassiveTreeView.lua:366-518
+incl. bloodline / same-class / cross-class ascendancy branches and the Class
+Change confirm), `pob_getCompareState`, `pob_getHeatMap` (legacy colour formula
+per `main.nodePowerTheme`), hotkey helpers.
+
+**Node power job:** `pob_powerStep` = `pob_recalculate()` then ONE
+`calcsTab:BuildPower()` resume (~100ms, the engine's own yield). QML `Timer`
+drives it while the heat map is on. No new abort logic was needed:
+`CalcsTab:BuildOutput` itself sets `powerBuildFlag`, so the step after any
+recalc starts a fresh coroutine on the new calculators (stale builder never
+resumed; selftest `powerRestartsOnRebuild`). Progress toast = legacy's own
+ToastNotification through the existing toast mirror. Power Report drawer =
+`PowerReportPanel.qml` over `TreeTab:BuildPowerReportList` rows (filter,
+masteries toggle, sortable columns, click → focus at zoom level 12).
+
+**Renderer (`TreeScene`):** new `TintedTextureMaterial` (per-vertex colour ×
+texture = legacy `SetDrawColor`) with PRE-BAKED shaders (`app/shaders/*.qsb`,
+GLSL/HLSL/MSL/SPIR-V; source + rebuild command next to them) so no build machine
+needs Qt Shader Tools. Tree payload is parsed once per revision into structs;
+connectors/icons/frames are rebuilt from the structs on hover / overlay change.
+Draws: hover path (Intermediate connector art + "path" frames), dependents red,
+radius rings (`Assets/ring.png`) + in-radius frame colours, compare tints
+(green/red/blue, compare-only connectors forced Active + green), heat map tints
++ "alloc" frames, search circles (`Assets/small_ring.png`, red,
+175·scale/zoom^0.4, edge-clamped at 2/3 size — screen space). `pob_getTreeData`
+now also exports per-node `framePathSprite`/`frameAllocSprite` and per-connector
+`vertIntermediate`/`vertActive` + atlases. Search no longer emits `treeChanged`
+(it re-ran `pob_getTreeData` on every keystroke).
+
+**Also fixed:** `Tooltip.qml` sized itself from font sizes, so tall/wide
+tooltips overflowed their box; it now also measures the laid-out lines.
+
+**Gate:** `tree-display` (34 flags: tooltip lines/diff toggle, hover path,
+trace seed/extend/drop, radius, search plain/quoted/group/AND/oil:/bad pattern/
+ClassStart excluded, compare on/off, power job start→finish, heat map lit,
+report rows, restart on rebuild, copy/wiki) and `tree-click` (alloc, dealloc,
+trace alloc along the path, same-class ascendancy switch, cross-class confirm,
+right-click routing, full restore). Both binaries EXIT=0. Probe captures under
+Xvfb confirmed: engine tooltip (unsupported-mod flag, stat diffs, tips), heat
+map (legacy black/red look), search + edge circles, Power Report, red
+dependents chain. Probes reverted.
+
+**Not done / deviations (documented):** the gem sub-tooltip beside a node
+tooltip (`skillTooltip`); rotating shaded radius rings on ALLOCATED jewels
+(only the hovered socket's rings); compare-only cluster subgraph nodes (the
+renderer draws `tree.nodes` only); other-ascendancy grey connectors / 25%
+backgrounds; mastery hover art (`masteryConnected`). Capture: tree view differs
+from the Windows baseline only by the new bottom strip — re-baseline on Windows.
+**Needs Windows:** the tint shader's HLSL path (D3D11) has only run on Linux
+(OpenGL via Mesa).
+
+## Session log — 2026-09-27 (Part 4.4: popups)
+
+Bridge (`pob_host.lua`, "Phase 4 Part 4.4" section) ported from TreeTab.lua
+(verbatim copies read via subagent): `pob_getMasteryEffects` /
+`pob_previewMasteryEffect` / `pob_selectMasteryEffect` (the last calls the
+engine's own `TreeTab:SaveMasteryPopup`; the preview temporarily applies the
+effect, marshals `AddNodeTooltip`, and restores the node — with a dummy entry in
+`main.popups` so the tooltip takes legacy's "Reallocating" branch),
+`pob_getTattooOptions` / `pob_applyTattoo` / `pob_resetTattooNode` (buildMods
+eligibility, tattoo count x/50 + per-effect breakdown, Show Legacy Tattoos),
+`pob_resetTree` / `pob_removeAllTattoos`, `pob_getVersionState` /
+`pob_convertTree` / `pob_convertAllTrees` (engine `ConvertToVersion` /
+`ConvertAllToVersion`; the banner's "Tree Converted" message is returned as
+data because legacy's `OpenMessagePopup` is inert under Qt).
+
+QML: `MasteryPopup.qml` (effect rows; hover = full node tooltip for that effect,
+drawn in the popup's layer above the modal dim; click = select + allocate),
+`TattooPopup.qml` ("Replace Modifier of Node"), Reset / Convert / Convert-all
+via `ConfirmPopup` 3-button layouts, "Version:" dropdown and the older-version
+banner in `TreeView.qml`. Left-click on an unallocated mastery and right-click
+routing (mastery / tattoo / runegraft) open them.
+
+**Gate:** new `tree-popups` check (14 flags: mastery list/preview-restores-node/
+select/restore, tattoo options/apply/count/reset/remove-all, reset tree, version
+state, copy+convert to 3_25 with banner, convert all, banner message, restore).
+Both binaries EXIT=0. Probe captures (reverted): tattoo popup + `[3.25]` spec +
+version dropdown + banner; mastery popup with preview tooltip.
+
+## Session log — 2026-09-27 (Part 4.5: Timeless Jewel finder)
+
+The whole legacy finder is one closure (`TreeTab:FindTimelessJewel`,
+TreeTab.lua:1369-2891) whose helpers all read `controls.*`, so nothing in it is
+callable. It was LIFTED verbatim (with `-- TreeTab.lua:NNNN` refs) into a new
+module **`app/lua/pob_timeless.lua`** (loaded by `require` at the end of
+`pob_host.lua`; `app/lua/*.lua` is already installed by CMake). Only three
+control reads were substituted (filter checkbox -> `timelessData.socketFilter`,
+fallback list selection -> `fallbackWeightMode.idx`, slider labels -> numbers
+from QML re-rendered into the exact legacy label strings). The draft was written
+by a subagent from the legacy source and reviewed/integrated here. Globals:
+`pob_timelessGetState/Set/SelectNode/SetWeights/Protect/GenerateFallback/Search/
+Reset/AddJewel/TradeUrl/GetResults`. Results are paged to QML
+(`pob_timelessGetResults`) — a multi-socket Militant Faith search produced
+168k rows in testing. Deliberate changes vs legacy are listed in the module
+(e.g. the `for k, v in legionAddition.stats do` missing-`pairs` bug fixed,
+crash guards on hand-typed list rows, bad saved ids fall back to defaults).
+
+`TimelessJewelPopup.qml` ("Find a Timeless Jewel"): type / conqueror / devotion,
+socket + mini tree preview (TreeViewer embed, zoom 5, crosshair), Filter Nodes +
+distance + protect notables, node search + 3 weight sliders, fallback weight
+mode + Generate, total minimum weight, Desired / Fallback lists, results
+(double-click adds the jewel item; Shift+click range; tooltip node lists), trade
+URL (realm / league / listing type / search max -> opens + copies the URL).
+
+**Gate:** new `timeless` check (45 flags): all 6 LUTs load (Glorious Vanity's
+5-part archive included), Lethal Pride search on the Marauder socket (5660
+results, sorted, seeds in range), **independent cross-check** of the top seed
+(15910) re-counted straight from `data.readLUT` = the search's total (7 = 7),
+Elegant Hubris seeds all multiples of 20, trade URL decodes to JSON with the
+`pseudo_timeless_jewel_` filters, `<TimelessData>` save/load round trip through
+`build:Save`/`build:Load`, full restore (byte-identical save before/after).
+Teeth: an EH seed step of 10 instead of 20 fails it. Probe capture (reverted):
+5,648 Lethal Pride results with node-list tooltips.
+
+**Not done / deviations:** the league list is a text field (legacy fetches it —
+network, Phase 10/12); the socket preview follows the SELECTED socket, not the
+hovered dropdown row; the `.bin` LUT cache is still written next to the install
+(`src/Data/TimelessJewelData/*.bin`, gitignored) because moving it means
+changing `Modules/DataLegionLookUpTableHelper.lua` (invariant #2) — on a
+read-only install the LUTs re-inflate each session, as in legacy. "Matches
+legacy for a known seed" is established by the verbatim port + the independent
+readLUT cross-check; there is no legacy binary to diff against on Linux.
+
+## Acceptance gate — 2026-09-27 (Linux)
+
+- ≥3 versions render (latest + old + ruthless): **3_28, 3_25, 3_25_ruthless** —
+  verified by Xvfb captures (group backgrounds, frames, WebP ascendancy art).
+  3_20 (≤3_24) renders wrong icon/frame art — PRE-EXISTING (reproduced on the
+  pre-session base build); cause recorded in STATUS.md.
+- Pixel-sample vs legacy: the 2026-09-24 TreeScene capture scored SSIM 0.53 /
+  hist-corr 0.91 vs `skill_tree/legacy.png`; this phase's tint material renders
+  the idle tree pixel-identically to that (tree SSIM 0.994 vs baseline before
+  the bottom strip was added).
+- Alloc/dealloc + hover stat diff: the tooltip IS legacy's AddNodeTooltip
+  output; heat map + Power Report populate; mastery + tattoo popups work;
+  search + `oil:` work (`tree-display`, `tree-click`, `tree-popups`).
+- Timeless LUT search: verbatim port + independent readLUT cross-check
+  (`timeless`).
+- `pob-selftest` EXIT=0, `pob-qt --headless` EXIT=0. Capture diff: only the
+  tree view differs from the (Windows) baseline, by the new bottom strip —
+  re-baseline on Windows.

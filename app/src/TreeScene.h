@@ -1,19 +1,19 @@
-﻿#pragma once
+#pragma once
 #include <QQuickItem>
 #include <QSGNode>
 #include <QSGTransformNode>
 #include <QSGGeometryNode>
 #include <QSGTextureMaterial>
-#include <QSGOpaqueTextureMaterial>
-#include <QSGFlatColorMaterial>
 #include <QSGTexture>
 #include <QImage>
 #include <QHash>
 #include <QSet>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QPointer>
 #include "TreeViewController.h"
 #include "TreeViewport.h"
+#include "TintedTextureMaterial.h"
 
 // Phase 4 Part 4.1: High-performance scene-graph passive tree renderer (TreeScene).
 // Replaces the Canvas-2D JS repaint loop with native GPU scene-graph nodes.
@@ -25,6 +25,13 @@
 // but each TreeScene owns its own TreeViewport (zoom/pan/size), mirroring legacy's
 // one-PassiveTreeView-per-embed design. Embeds set focusNodeId (+ focusZoom, a raw
 // zoom factor as legacy embeds assign `viewer.zoom`) to stay centred on a node.
+//
+// Phase 4 Part 4.3: node icons, frames and connectors are drawn with a
+// per-vertex TINT (TintedTextureMaterial = legacy SetDrawColor). The tree
+// payload is parsed ONCE per revision into plain structs; the batches are then
+// rebuilt from those structs whenever something that only changes art STATE
+// or TINT changes -- the hover preview (per view), the heat map and compare
+// overlay (shared, controller) -- which is cheap (no QVariant access).
 class TreeScene : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(TreeViewController* controller READ controller WRITE setController NOTIFY controllerChanged)
@@ -34,20 +41,26 @@ class TreeScene : public QQuickItem {
     Q_PROPERTY(double zoomY READ zoomY WRITE setZoomY NOTIFY transformChanged)
     Q_PROPERTY(double baseScale READ baseScale NOTIFY transformChanged)
     Q_PROPERTY(int hoverNodeId READ hoverNodeId WRITE setHoverNodeId NOTIFY hoverNodeIdChanged)
+    // pob_getHoverInfo result for the hovered node: { path:[ids], depends:[ids],
+    // radius:{ x, y, rings:[{outer,inner,color}], nodes:[{id,color}] } }.
+    Q_PROPERTY(QVariantMap hoverInfo READ hoverInfo WRITE setHoverInfo NOTIFY hoverInfoChanged)
     // -1 = free view. Otherwise the view stays centred on this node through
     // resizes and tree refreshes (legacy recomputes zoomX/zoomY every frame).
     Q_PROPERTY(int focusNodeId READ focusNodeId WRITE setFocusNodeId NOTIFY focusChanged)
     // Raw zoom factor while focused; <= 0 keeps the current zoom level.
     Q_PROPERTY(double focusZoom READ focusZoom WRITE setFocusZoom NOTIFY focusChanged)
     Q_PROPERTY(bool showSearch READ showSearch WRITE setShowSearch NOTIFY showSearchChanged)
+    // Legacy main.edgeSearchHighlight: off-screen search matches get a smaller
+    // circle clamped to the viewport edge.
+    Q_PROPERTY(bool edgeSearchHighlight READ edgeSearchHighlight WRITE setEdgeSearchHighlight NOTIFY showSearchChanged)
 
 public:
     struct QuadBatch {
         QString atlasPath;
-        QVector<float> vertices; // 4 * (x, y, tx, ty) per quad
+        QVector<TintedVertex> vertices;  // 4 per quad
         // A single atlas batch can contain the whole tree. Keep indices 32-bit:
         // search rings alone can exceed the 65,535-vertex ceiling of uint16.
-        QVector<quint32> indices; // 6 indices per quad
+        QVector<quint32> indices;        // 6 per quad
     };
 
     explicit TreeScene(QQuickItem* parent = nullptr);
@@ -68,6 +81,8 @@ public:
 
     int hoverNodeId() const { return m_hoverNodeId; }
     void setHoverNodeId(int id);
+    QVariantMap hoverInfo() const { return m_hoverInfo; }
+    void setHoverInfo(const QVariantMap& info);
 
     int focusNodeId() const { return m_focusNodeId; }
     void setFocusNodeId(int id);
@@ -76,6 +91,8 @@ public:
 
     bool showSearch() const { return m_showSearch; }
     void setShowSearch(bool show);
+    bool edgeSearchHighlight() const { return m_edgeSearch; }
+    void setEdgeSearchHighlight(bool on);
 
     // Legacy PassiveTreeView:Zoom — keeps the tree point under (cursorX, cursorY)
     // fixed. Pass a negative cursor to zoom about the viewport centre.
@@ -89,6 +106,8 @@ public:
     // One-shot centre on a node (legacy PassiveTreeView:Focus); zoomFactor <= 0
     // keeps the current zoom. Unlike focusNodeId this does not stick.
     Q_INVOKABLE bool centerOnNode(int id, double zoomFactor = 0);
+    // Screen rects of the search circles last drawn (x, y, w, h), for tests.
+    Q_INVOKABLE QVariantList searchCircleRects() const;
 
     // Texture cache helper (shared per QQuickWindow)
     static QSGTexture* getTexture(QQuickWindow* window, const QString& path, bool repeat = false);
@@ -98,6 +117,7 @@ signals:
     void controllerChanged();
     void transformChanged();
     void hoverNodeIdChanged();
+    void hoverInfoChanged();
     void focusChanged();
     void showSearchChanged();
     void searchChanged();
@@ -107,28 +127,66 @@ protected:
     void geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) override;
 
 private:
+    struct Sprite {
+        QString atlas;
+        float sx = 0, sy = 0, sw = 0, sh = 0;
+        bool valid() const { return !atlas.isEmpty() && sw > 0 && sh > 0; }
+    };
+    struct NodeRec {
+        int id = -1;
+        float x = 0, y = 0;
+        bool alloc = false;
+        Sprite icon, frame, framePath, frameAlloc;
+    };
+    struct ConnRec {
+        int n1 = -1, n2 = -1;
+        QString atlas, atlasIntermediate, atlasActive;
+        float vert[8] = {};
+        float vertIntermediate[8] = {};
+        float vertActive[8] = {};
+        float uv[8] = {};
+        bool hasIntermediate = false, hasActive = false;
+    };
+
     void onControllerViewChanged();
     void onControllerSearchChanged();
+    void onControllerOverlaysChanged();
     // Push the controller's tree extent + our size into m_view and re-apply a
     // sticky focus. Emits transformChanged when the view moved.
     void syncViewport();
     bool applyFocus();
     void viewMoved();
 
-    void buildGeometryBatches();
+    void parseTreeData();
+    void buildGroupBatches();
+    void buildTintedBatches();
+    void buildOverlayBatches();
+    void buildScreenBatches();
+    void addSpriteQuad(QVector<QuadBatch>& batches, QHash<QString, int>& index,
+                       const Sprite& sp, float cx, float cy, quint32 rgba);
 
     QPointer<TreeViewController> m_controller;
     TreeViewport m_view;
     int m_hoverNodeId = -1;
+    QVariantMap m_hoverInfo;
+    QSet<int> m_hoverPath;
+    QSet<int> m_hoverDeps;
+    QHash<int, quint32> m_radiusColors;
     int m_focusNodeId = -1;
     double m_focusZoom = 0.0;
     bool m_showSearch = true;
+    bool m_edgeSearch = true;
 
-    bool m_dirtyGeometry = true;
-    bool m_dirtyOverlay = true;
+    bool m_dirtyGeometry = true;   // tree data changed: re-parse + rebuild all
+    bool m_dirtyTint = true;       // hover / overlays changed: rebuild tinted batches
+    bool m_dirtyOverlay = true;    // search / radius / zoom changed: rebuild overlay
     bool m_dirtyTransform = true;
     QString m_builtRevision;
     QString m_backgroundPath;
+
+    QVector<NodeRec> m_nodeRecs;
+    QHash<int, int> m_nodeIndex;
+    QVector<ConnRec> m_connRecs;
 
     // Batched geometry structures ready for GPU upload
     QVector<QuadBatch> m_groupBatches;
@@ -136,4 +194,6 @@ private:
     QVector<QuadBatch> m_nodeIconBatches;
     QVector<QuadBatch> m_nodeFrameBatches;
     QVector<QuadBatch> m_overlayBatches;
+    QVector<QuadBatch> m_screenBatches;
+    QVector<QRectF> m_searchCircles;
 };

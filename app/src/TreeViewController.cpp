@@ -5,6 +5,7 @@
 #include "TreeConnectorModel.h"
 
 #include <cmath>
+#include <algorithm>
 #include <limits>
 #include <QDebug>
 #include <QFile>
@@ -118,6 +119,7 @@ void TreeViewController::refresh(LuaEngine* engine) {
     // through and rebuild rather than throttle on a value we cannot trust.
     const QString revision = d.value("revision").toString();
     if (m_loaded && !revision.isEmpty() && revision == m_lastRevision) {
+        refreshOverlays();
         return;
     }
     m_lastRevision = revision;
@@ -151,6 +153,7 @@ void TreeViewController::refresh(LuaEngine* engine) {
     }
 
     emit viewChanged();
+    refreshOverlays();
     qDebug().noquote() << "[TreeViewController] refresh -> nodes="
              << nodeRows.size()
              << " groups=" << d.value("groups").toList().size()
@@ -221,3 +224,29 @@ void TreeViewController::setTreeSearch(const QString& str) {
     emit searchChanged();
 }
 
+
+void TreeViewController::refreshOverlays() {
+    if (!m_engine)
+        return;
+    auto channel = [](const QVariant& v) {
+        return static_cast<quint32>(std::lround(std::clamp(v.toDouble(), 0.0, 1.0) * 255.0));
+    };
+    const QVariantMap heat = m_engine->callGlobal("pob_getHeatMap").toMap();
+    m_heatOn = heat.value("on").toBool();
+    m_heat.clear();
+    for (const QVariant& v : heat.value("nodes").toList()) {
+        const QVariantMap n = v.toMap();
+        m_heat.insert(n.value("id").toInt(),
+                      (channel(n.value("r")) << 24) | (channel(n.value("g")) << 16)
+                          | (channel(n.value("b")) << 8) | 0xffu);
+    }
+    const QVariantMap cmp = m_engine->callGlobal("pob_getCompareState").toMap();
+    m_compareActive = cmp.value("active").toBool();
+    m_compareAlloc.clear();
+    m_compareBlue.clear();
+    for (const QVariant& v : cmp.value("alloc").toList())
+        m_compareAlloc.insert(v.toInt());
+    for (const QVariant& v : cmp.value("blue").toList())
+        m_compareBlue.insert(v.toInt());
+    emit overlaysChanged();
+}
