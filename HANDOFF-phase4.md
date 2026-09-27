@@ -1,3 +1,6 @@
+> **SUPERSEDED 2026-09-27.** The gate below was run on Linux (`tools/linux-selftest.sh`,
+> both binaries exit 0) and Phase 4 is done — see `port-plan/STATUS.md`.
+
 # Handoff — Phase 4 (Part 4.1), 2026-08-19
 
 ## FIRST COMMAND — the gate was never run after the final rebuild

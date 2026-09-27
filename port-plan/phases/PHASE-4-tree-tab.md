@@ -1,6 +1,6 @@
 # Phase 4 — Tree Tab (finish & harden)
 
-**Status:** Parts 4.1–4.5 done (4.2–4.5 on 2026-09-27); latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
+**Status:** DONE (2026-09-27) — Parts 4.1–4.5 done (4.2–4.5 on 2026-09-27); open follow-ups listed in STATUS.md's Phase 4 entry; latest evidence in the newest "Session log" at the bottom. See "Recon findings" at the bottom before starting.
 **Goal:** Finish the passive-tree tab — the one view that already renders. Harden
 the renderer, make the tree viewer an embeddable multi-instance component, and add
 the missing interactive features (spec management, compare overlay, search, node
@@ -676,3 +676,22 @@ changing `Modules/DataLegionLookUpTableHelper.lua` (invariant #2) — on a
 read-only install the LUTs re-inflate each session, as in legacy. "Matches
 legacy for a known seed" is established by the verbatim port + the independent
 readLUT cross-check; there is no legacy binary to diff against on Linux.
+
+## Acceptance gate — 2026-09-27 (Linux)
+
+- ≥3 versions render (latest + old + ruthless): **3_28, 3_25, 3_25_ruthless** —
+  verified by Xvfb captures (group backgrounds, frames, WebP ascendancy art).
+  3_20 (≤3_24) renders wrong icon/frame art — PRE-EXISTING (reproduced on the
+  pre-session base build); cause recorded in STATUS.md.
+- Pixel-sample vs legacy: the 2026-09-24 TreeScene capture scored SSIM 0.53 /
+  hist-corr 0.91 vs `skill_tree/legacy.png`; this phase's tint material renders
+  the idle tree pixel-identically to that (tree SSIM 0.994 vs baseline before
+  the bottom strip was added).
+- Alloc/dealloc + hover stat diff: the tooltip IS legacy's AddNodeTooltip
+  output; heat map + Power Report populate; mastery + tattoo popups work;
+  search + `oil:` work (`tree-display`, `tree-click`, `tree-popups`).
+- Timeless LUT search: verbatim port + independent readLUT cross-check
+  (`timeless`).
+- `pob-selftest` EXIT=0, `pob-qt --headless` EXIT=0. Capture diff: only the
+  tree view differs from the (Windows) baseline, by the new bottom strip —
+  re-baseline on Windows.
