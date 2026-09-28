@@ -942,6 +942,9 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Old-tree art: icons + frames resolve (and from the right sheets) for one
     // tree version per data era, <= 3_24 included.
     if (!pob_run_lua_check(engine, "pob_selftestTreeVersionArt", "tree-version-art")) return false;
+    // Phase 5 Part 5.1: skill sets + socket-group list (paste/copy round trip,
+    // link colours, Ctrl/right-click toggles, reorder index fix-up, undo/redo).
+    if (!pob_run_lua_check(engine, "pob_selftestSkillsList", "skills-list")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

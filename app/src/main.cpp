@@ -429,14 +429,10 @@ int main(int argc, char** argv) {
     qml.rootContext()->setContextProperty("itemSlotModel", itemSlotModel);
     qml.rootContext()->setContextProperty("jewelSocketModel", jewelSocketModel);
 
-    // Phase 5b: SkillsTab (SKILLS view) model. skillModel holds the build's
-    // active-skill DPS list (name/dps/totalDps/minionDps/socketGroupLabel/
-    // isMain/socketGroupIndex/displaySkillIndex). It is refreshed every frame
-    // (throttled internally by a change signature over the socket groups + main
-    // skill selection) so the SKILLS view stays in sync without QML polling.
-    SkillModel* skillModel = new SkillModel(&app);
-    skillModel->refresh(&engine);
-    qml.rootContext()->setContextProperty("skillModel", skillModel);
+    // Phase 5: the SKILLS view reads pob_skillsGetState (app/lua/pob_skills.lua)
+    // directly. The old SkillModel (pob_getActiveSkills: one BuildOutput per
+    // displayed skill, run on every skillsChanged) had no other consumer and
+    // is no longer instantiated.
 
     // Phase 5c: CalcsTab (CALCS view) model. calcModel holds the build's
     // calculation output (summary numbers + the rendered CalcSection list with
@@ -496,7 +492,6 @@ int main(int argc, char** argv) {
     QObject::connect(&engine, &LuaEngine::itemsChanged, [&]() { itemModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::itemsChanged, [&]() { itemSlotModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::itemsChanged, [&]() { jewelSocketModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::skillsChanged, [&]() { skillModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::calcsChanged, [&]() { calcModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::notesChanged, [&]() { notesController->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::compareChanged, [&]() { compareModel->refresh(&engine); });
@@ -511,7 +506,6 @@ int main(int argc, char** argv) {
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { itemModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { itemSlotModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { jewelSocketModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { skillModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { calcModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { configModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { notesController->refresh(&engine); });

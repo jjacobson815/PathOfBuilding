@@ -1,6 +1,6 @@
 # Phase 5 — Skills Tab
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS (started 2026-09-28, cloud session, branch `cloud/phase-5`)
 **Goal:** Port the skills/gems tab: skill sets, the socket-group list with its
 keyboard semantics, the group detail panel, and the dynamic gem rows built on
 GemSelectControl (fuzzy matching + live DPS-sorted candidates + compare tooltips).
@@ -11,9 +11,9 @@ GemSelectControl (fuzzy matching + live DPS-sorted candidates + compare tooltips
 
 ## Part 5.1 — Skill sets & socket-group list
 
-- [ ] Skill sets: dropdown + Manage popup (generic set-manager: new/copy/delete/
+- [x] Skill sets: dropdown + Manage popup (generic set-manager: new/copy/delete/
   rename/reorder). (S)
-- [ ] Socket-group list (SkillListControl): add/delete/reorder with link-color gem
+- [x] Socket-group list (SkillListControl): add/delete/reorder with link-color gem
   string rendering (R-G-B letters) + slot icons; **keyboard semantics**: Ctrl+C/V
   copy/paste socket groups as text (round-trip the "Label:/Slot:/Name lvl/q
   DISABLED count" format), Ctrl+click enable/disable, Ctrl+right-click include/
@@ -73,3 +73,45 @@ GemSelectControl (fuzzy matching + live DPS-sorted candidates + compare tooltips
   the Phase 2 threading decision needs revisiting, not a GemSelect hack.
 - Two independent main-skill selections exist (side bar plain fields + Calcs
   `*Calcs` fields) — keep them separate.
+
+## Session log — 2026-09-28 (cloud, Linux)
+
+Bridge: `app/lua/pob_skills.lua` (required at the end of `pob_host.lua`). It
+drives the LIVE `skillsTab`: `SetDisplayGroup(sg)` then the legacy control
+closures (`changeFunc`/`selFunc`/`gemChangeFunc`/`tooltipFunc`), lifting code
+only where legacy hit-tests the cursor or draws. Recon brief of the legacy tab
+(file:line for every feature) was done by a subagent.
+
+**Part 5.1 — DONE.**
+- Skill sets: `pob_skillsGetSetList/SetActiveSet/NewSet/CopySet/RenameSet/
+  DeleteSet/MoveSet` (copy lifted from SkillSetListControl.lua:14-32; move =
+  modFlag only, like legacy). UI: dropdown (enabled with > 1 set) + generic
+  `components/SetManagePopup.qml` (Copy/Delete left, New/Rename right, F2,
+  Delete key, double-click activates; Up/Down instead of drag, as in
+  SpecManagePopup). Phases 6/7 can reuse it for item/config sets.
+- Socket-group list: `components/SocketGroupList.qml`. Row text = live
+  `SkillListControl:GetRowValue` (link colours, (Active)/(Disabled)/(FullDPS));
+  slot icon = lifted GetRowIcon map. Click selects, Ctrl+click enable/disable,
+  right-click main, Ctrl+right-click FullDPS, drag reorder (live
+  `OnOrderChange` fixes mainSocketGroup + calcs skill_number), Up/Down/Home/End,
+  Ctrl+C copy, Delete/Backspace delete (confirm when the group has gems,
+  message for item groups), New / Delete All / Delete buttons, row tooltip =
+  `AddSocketGroupTooltip`. Ctrl+V paste, Ctrl+Z / Ctrl+Y undo/redo in the tab.
+- Selftest `skills-list` (23 flags): paste, copy text format + round trip,
+  link colours, icon, toggles, main, reorder fix-up, delete shift, undo/redo,
+  set new/select/copy/rename/move/delete. Confirmed it fails with the
+  OnOrderChange call removed (5 flags go false).
+- Checked by driving pob-qt under Xvfb with xdotool: hover tooltip, right-click,
+  Ctrl+click, drag, Manage popup Copy -> Save, set dropdown, Ctrl+C/V/Z.
+- Fixed along the way:
+  - `BuildModel` and `SocketGroupModel` marshalled the raw `socketGroupList`;
+    on a calculated build that walks the calc env through each group and ran
+    to ~8 GB (pob-qt hung on any build with skills). Both now read
+    `pob_getSocketGroups()`.
+  - Old `SkillModel` (only used by the old Skills view; ran one BuildOutput
+    per skill on every skillsChanged) is no longer instantiated.
+  - `TextInputPopup` content overflowed its dialog (width -> implicitWidth).
+  - A ConfirmPopup whose `message` is BOUND to a changing selection crashed
+    Qt 6.4's layout engine; SetManagePopup sets it when opening instead.
+  - Qt's offscreen clipboard segfaults on setText: selftests must not call the
+    real `Copy` (pob_skillsCopyGroup has a noClipboard flag).

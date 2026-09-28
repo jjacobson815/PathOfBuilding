@@ -16,8 +16,9 @@ void BuildModel::refresh(LuaEngine* engine) {
     const QString className = engine->getPath("main.modes.BUILD.spec.curClassName").toString();
     const QString ascendClassName = engine->getPath("main.modes.BUILD.spec.curAscendClassName").toString();
     const QString targetVersion = engine->getPath("main.modes.BUILD.targetVersion").toString();
-    const int socketGroupCount =
-        engine->getPath("main.modes.BUILD.skillsTab.socketGroupList").toList().size();
+    // Via pob_getSocketGroups: marshalling the raw socketGroupList also walks
+    // every group's calc-owned fields and runs away on a calculated build.
+    const int socketGroupCount = engine->callGlobal("pob_getSocketGroups").toList().size();
 
     bool changed = false;
     if (buildName != m_buildName) { m_buildName = buildName; changed = true; }

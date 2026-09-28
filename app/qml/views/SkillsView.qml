@@ -1,169 +1,197 @@
 import QtQuick
-import QtQuick.Layouts
-import QtQuick.Controls
+import QtQuick.Window
+import "../components" as Widgets
 
-// SKILLS view (socket groups + active-skill DPS). Extracted from main.qml
-// (Part 1.1); behaviour unchanged. Bound to socketGroupModel (groups + nested
-// gems) and skillModel (active-skill DPS list). Selecting an active skill calls
-// luaEngine.setActiveSkill(socketGroupIndex, displaySkillIndex). A themed
-// "Add group + gem" control calls luaEngine.addSocketGroupWithGem(label, gemName).
-// All colours come from the theme singleton. Visibility is parent-controlled.
+// SKILLS view — Phase 5, ports src/Classes/SkillsTab.lua over the live
+// skillsTab (bridge: app/lua/pob_skills.lua). Legacy geometry (non-portrait):
+// skill-set row at y 8, socket-group list at (20, 54) 360x300, usage tips and
+// the "Gem Options" section under it, the group detail panel 20px right of
+// the list.
+//
+// Part 5.1: skill-set dropdown (enabled with > 1 set) + "Manage..." (generic
+//   SetManagePopup), the socket-group list (SocketGroupList), Ctrl+V paste
+//   anywhere in the tab, Ctrl+Z / Ctrl+Y undo/redo (SkillsTab:Draw 544-556,
+//   which the host never runs).
+//
+// STATE MODEL: `st` is pob_skillsGetState(), re-read (coalesced with
+// Qt.callLater) on skills/calcs/items/tree/mode signals only — no frame loop
+// (invariant #7). Everything is addressed by 1-based index because legacy
+// replaces the group/gem tables on undo.
 Item {
-    id: skillsView
+    id: root
     anchors.fill: parent
     clip: true
 
-    ColumnLayout {
+    property var st: ({})
+    property var lists: ({})
+    readonly property var groups: st && st.groups && st.groups.length !== undefined ? st.groups : []
+    readonly property var sets: st && st.sets && st.sets.length !== undefined ? st.sets : []
+    readonly property var detail: st && st.detail ? st.detail : null
+
+    property bool _pending: false
+    function refresh() {
+        if (_pending) return
+        _pending = true
+        Qt.callLater(_doRefresh)
+    }
+    function _doRefresh() {
+        _pending = false
+        if (luaEngine.currentMode !== "BUILD") return
+        if (!lists.slots) {
+            const l = luaEngine.invoke("pob_skillsGetLists", [])
+            if (l) lists = l
+        }
+        const s = luaEngine.invoke("pob_skillsGetState", [])
+        st = s ? s : ({})
+        setSelect.model = sets
+        setSelect.currentIndex = (st.activeSet || 1) - 1
+    }
+
+    function call(name, args) { return luaEngine.invoke(name, args || []) }
+
+    onVisibleChanged: if (visible) refresh()
+    Component.onCompleted: refresh()
+
+    Connections {
+        target: luaEngine
+        function onSkillsChanged() { root.refresh() }
+        function onCalcsChanged() { root.refresh() }
+        function onItemsChanged() { root.refresh() }
+        function onTreeChanged() { root.refresh() }
+        function onModeChanged() { root.lists = ({}); root.refresh() }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: root.call("pob_skillsPasteGroup")
+    }
+    Shortcut {
+        sequence: "Ctrl+Z"
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: root.call("pob_skillsUndo")
+    }
+    Shortcut {
+        sequences: ["Ctrl+Y", "Ctrl+Shift+Z"]
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: root.call("pob_skillsRedo")
+    }
+
+    Flickable {
+        id: page
         anchors.fill: parent
-        anchors.margins: theme.space3
-        spacing: theme.space2
+        contentWidth: Math.max(width, content.implicitWidth)
+        contentHeight: Math.max(height, content.implicitHeight)
+        boundsBehavior: Flickable.StopAtBounds
+        clip: true
 
-        Text {
-            text: "Skills"
-            color: theme.text
-            font.bold: true
-            font.pixelSize: theme.fontSize + 4
-        }
+        Item {
+            id: content
+            implicitWidth: 400 + 700
+            implicitHeight: 560
 
-        // --- Add group + gem control ---
-        RowLayout {
-            spacing: theme.space1
-            TextField {
-                id: skillGroupLabel
-                Layout.fillWidth: true
-                placeholderText: "Group label"
-                color: theme.text
-                background: Rectangle { color: theme.sideBarBg; border.color: theme.section; radius: theme.radiusControl }
+            // --- Skill set row (SkillsTab.lua:95-106) ---
+            Widgets.Label {
+                anchors.right: setSelect.left
+                anchors.rightMargin: 2
+                anchors.verticalCenter: setSelect.verticalCenter
+                horizontalAlignment: Text.AlignRight
+                label: "^7Skill set:"
+                size: 16
             }
-            TextField {
-                id: skillGemName
-                Layout.fillWidth: true
-                placeholderText: "Gem name (e.g. Fireball)"
-                color: theme.text
-                background: Rectangle { color: theme.sideBarBg; border.color: theme.section; radius: theme.radiusControl }
+            Widgets.DropDownControl {
+                id: setSelect
+                x: 76; y: 8
+                width: 210; height: 20
+                controlEnabled: root.sets.length > 1
+                onSelected: function (index) { root.call("pob_skillsSetActiveSet", [index + 1]) }
             }
-            Button {
-                text: "Add"
-                onClicked: {
-                    if (skillGemName.text.trim() !== "") {
-                        luaEngine.addSocketGroupWithGem(
-                            skillGroupLabel.text.trim() || "New Group",
-                            skillGemName.text.trim())
-                        skillGroupLabel.text = ""
-                        skillGemName.text = ""
-                    }
+            Widgets.Button {
+                anchors.left: setSelect.right
+                anchors.leftMargin: 4
+                anchors.verticalCenter: setSelect.verticalCenter
+                width: 90; height: 20
+                label: "Manage..."
+                onClicked: setManage.openFresh()
+            }
+
+            // --- Socket group list (SkillsTab.lua:109) ---
+            Widgets.SocketGroupList {
+                id: groupList
+                x: 20; y: 34
+                width: 360; height: 320
+                groups: root.groups
+                selIndex: (root.st.displayIndex || 0) - 1
+                onDeleteRequested: function (i) { deleteGroupConfirm.openFor(i) }
+                onDeleteAllRequested: deleteAllConfirm.open()
+                onMessageRequested: function (title, text) {
+                    messagePopup.title = title
+                    messagePopup.message = text
+                    messagePopup.open()
+                }
+            }
+
+            // Usage tips (SkillsTab.lua:110-118).
+            Column {
+                id: tips
+                x: 20
+                y: groupList.y + groupList.height + 8
+                Repeater {
+                    model: [
+                        "^7Usage Tips:",
+                        "- You can copy/paste socket groups using Ctrl+C and Ctrl+V.",
+                        "- Ctrl + Click to enable/disable socket groups.",
+                        "- Ctrl + Right click to include/exclude in FullDPS calculations.",
+                        "- Right click to set as the Main skill group.",
+                    ]
+                    delegate: Widgets.Label { label: modelData; size: 14 }
                 }
             }
         }
+    }
 
-        // --- Socket groups (with nested gems) ---
-        Text {
-            text: "Socket groups: " + socketGroupModel.count
-            color: theme.accent
-            font.bold: true
-        }
-        ListView {
-            id: socketGroupListView
-            Layout.fillWidth: true
-            Layout.preferredHeight: parent.height * 0.4
-            model: socketGroupModel
-            clip: true
-            delegate: Rectangle {
-                width: ListView.view.width
-                height: gemRow.height + 8
-                color: index % 2 ? theme.sideBarBg : "transparent"
-                Column {
-                    id: gemRow
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.margins: theme.space1
-                    spacing: 2
-                    RowLayout {
-                        width: parent.width
-                        spacing: theme.space2
-                        Text {
-                            text: (model.enabled ? "✔" : "✖") + "  " + (model.title || "(untitled)")
-                            color: model.enabled ? theme.text : theme.muted
-                            font.pixelSize: theme.fontSize
-                            Layout.fillWidth: true
-                        elide: Text.ElideRight
-                        clip: true
-                        }
-                        Text {
-                            text: model.slot ? ("[" + model.slot + "]") : ""
-                            color: theme.muted
-                            font.pixelSize: theme.fontSize - 1
-                        }
-                        Text {
-                            text: "main #" + model.mainActiveSkill
-                            color: theme.muted
-                            font.pixelSize: theme.fontSize - 1
-                        }
-                    }
-                    // Nested gem list for this group.
-                    ListView {
-                        width: parent.width
-                        height: Math.max(1, (model.gems ? model.gems.length : 0) * 20)
-                        model: model.gems
-                        clip: true
-                        interactive: false
-                        delegate: Text {
-                            text: "   • " + (modelData.name || "?")
-                                  + "  " + (modelData.level || 1) + "/" + (modelData.quality || 0)
-                                  + (modelData.enabled ? "" : "  (disabled)")
-                            color: theme.muted
-                            font.pixelSize: theme.fontSize - 1
-                        elide: Text.ElideRight
-                        clip: true
-                        }
-                    }
-                }
-            }
-        }
+    Widgets.SetManagePopup {
+        id: setManage
+        parent: root
+        title: "Manage Skill Sets"
+        noun: "skill set"
+        deleteTitle: "Delete Item Set"      // legacy's own title (SkillSetListControl.lua:102)
+        fn: ({
+            list: "pob_skillsGetSetList",
+            setActive: "pob_skillsSetActiveSet",
+            create: "pob_skillsNewSet",
+            copy: "pob_skillsCopySet",
+            rename: "pob_skillsRenameSet",
+            remove: "pob_skillsDeleteSet",
+            move: "pob_skillsMoveSet",
+        })
+    }
 
-        // --- Active-skill DPS list ---
-        Text {
-            text: "Active skills (DPS):"
-            color: theme.accent
-            font.bold: true
+    Widgets.ConfirmPopup {
+        id: deleteGroupConfirm
+        parent: root
+        property int index: -1
+        title: "Delete Socket Group"
+        confirmLabel: "Delete"
+        function openFor(i) {
+            index = i
+            message = "Are you sure you want to delete '" + root.groups[i].displayLabel + "'?"
+            open()
         }
-        ListView {
-            id: activeSkillListView
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            model: skillModel
-            clip: true
-            delegate: Rectangle {
-                width: ListView.view.width
-                height: 24
-                color: model.isMain ? theme.accent : (index % 2 ? theme.sideBarBg : "transparent")
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: theme.space1
-                    spacing: theme.space2
-                    Text {
-                        text: (model.isMain ? "★ " : "  ") + (model.name || "?")
-                        color: model.isMain ? theme.background : theme.text
-                        font.pixelSize: theme.fontSize
-                        Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    clip: true
-                    }
-                    Text {
-                        text: "DPS " + Math.round(model.totalDps || 0).toLocaleString()
-                        color: model.isMain ? theme.background : theme.accent
-                        font.pixelSize: theme.fontSize - 1
-                    }
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: {
-                        luaEngine.setActiveSkill(
-                            model.socketGroupIndex,
-                            model.displaySkillIndex)
-                    }
-                }
-            }
-        }
+        onAccepted: root.call("pob_skillsDeleteGroup", [index + 1])
+    }
+
+    Widgets.ConfirmPopup {
+        id: deleteAllConfirm
+        parent: root
+        title: "Delete All"
+        message: "Are you sure you want to delete all socket groups in this build?"
+        confirmLabel: "Delete"
+        onAccepted: root.call("pob_skillsDeleteAllGroups")
+    }
+
+    Widgets.MessagePopup {
+        id: messagePopup
+        parent: root
     }
 }
