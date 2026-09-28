@@ -695,3 +695,33 @@ readLUT cross-check; there is no legacy binary to diff against on Linux.
 - `pob-selftest` EXIT=0, `pob-qt --headless` EXIT=0. Capture diff: only the
   tree view differs from the (Windows) baseline, by the new bottom strip —
   re-baseline on Windows.
+
+## Follow-up — 2026-09-27 (old-tree art fixed)
+
+**Symptom:** on <= 3_24 trees (e.g. 3_20) unallocated node icons drew as
+coloured scraps of other icons and no frame rings were drawn. Pre-existing
+(reproduced on the pre-Part-4.2 base build).
+
+**Cause (runtime probe + legacy read via subagent):** those trees keep their
+sprite sheets in tree.lua (`skillSprites` / `sprites` keyed by zoom) with no
+top-level `filename`, so `nodeSprite` guessed `skills-3.jpg` for every state —
+but the engine loads `skills-disabled-3.jpg` for *Inactive (PassiveTree.lua:
+270-298 loads whatever each state's zoom entry names) and normalised the UVs
+against THAT image. Frames: legacy always draws `tree.assets[overlayName]`
+(PassiveTreeView.lua:955, DrawAsset = whole image at width×scale×1.33×2); the
+bridge only looked in `sprites.lua`, which <= 3_24 do not ship.
+
+**Fix (`pob_host.lua`):** new memoised `imageInfo(handle.fileName)`;
+`nodeSprite` prefers the sprite's own `handle.fileName` (UV denominators match
+by construction on every version); `nodeFrame` falls back to the whole
+standalone `tree.assets[name]` image; jewel sockets pick `JewelSocketAlt*`
+(expansion) / `Azmeri*` (Charm) frames like PassiveTreeView.lua:798-804 — the
+last was wrong on every version (plain jewel frame on cluster sockets).
+
+**Evidence:** sweep of all 39 versions — every node icon and frame resolves,
+0 out of bounds. New `tree-version-art` check (3_16, 3_20, 3_25_ruthless,
+3_28: icons/frames complete, in bounds, inactive icons from the engine's
+inactive sheet, expansion sockets on Alt frames); teeth: disabling the sheet fix
+fails 3_20 (`inactiveSheet=0/2018`). Captures: 3_20 and 3_16 now render like
+the new trees; 3_28 default view pixel-identical (SSIM 1.000). Both binaries
+EXIT=0.

@@ -939,6 +939,9 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Glorious Vanity's 5-part archive, searches, independent cross-check of
     // the top seed, trade URL, <TimelessData> save/load round trip).
     if (!pob_run_lua_check(engine, "pob_selftestTimeless", "timeless")) return false;
+    // Old-tree art: icons + frames resolve (and from the right sheets) for one
+    // tree version per data era, <= 3_24 included.
+    if (!pob_run_lua_check(engine, "pob_selftestTreeVersionArt", "tree-version-art")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;
