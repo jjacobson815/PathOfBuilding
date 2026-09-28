@@ -60,6 +60,9 @@ Item {
         anchors.right: parent.left
         anchors.rightMargin: 5
         anchors.verticalCenter: parent.verticalCenter
+        // Width is the legacy (.tgf) measure, but Qt paints the wider TTF:
+        // right-align so any overrun grows away from the box (invariant #8).
+        horizontalAlignment: Text.AlignRight
         label: root.label
         size: Math.max(1, root.boxSize - 4)
         // This label sits outside the box, on the ordinary page background;

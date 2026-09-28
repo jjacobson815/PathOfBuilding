@@ -1,169 +1,593 @@
 import QtQuick
-import QtQuick.Layouts
-import QtQuick.Controls
+import QtQuick.Window
+import "../components" as Widgets
+import "../components/StatDiff.js" as StatDiff
 
-// SKILLS view (socket groups + active-skill DPS). Extracted from main.qml
-// (Part 1.1); behaviour unchanged. Bound to socketGroupModel (groups + nested
-// gems) and skillModel (active-skill DPS list). Selecting an active skill calls
-// luaEngine.setActiveSkill(socketGroupIndex, displaySkillIndex). A themed
-// "Add group + gem" control calls luaEngine.addSocketGroupWithGem(label, gemName).
-// All colours come from the theme singleton. Visibility is parent-controlled.
+// SKILLS view — Phase 5, ports src/Classes/SkillsTab.lua over the live
+// skillsTab (bridge: app/lua/pob_skills.lua). Legacy geometry (non-portrait):
+// skill-set row at y 8, socket-group list at (20, 54) 360x300, usage tips and
+// the "Gem Options" section under it, the group detail panel 20px right of
+// the list.
+//
+// Part 5.1: skill-set dropdown (enabled with > 1 set) + "Manage..." (generic
+//   SetManagePopup), the socket-group list (SocketGroupList), Ctrl+V paste
+//   anywhere in the tab, Ctrl+Z / Ctrl+Y undo/redo (SkillsTab:Draw 544-556,
+//   which the host never runs).
+//
+// Part 5.2: group detail panel (SkillsTab.lua:160-315) — label, "Socketed in"
+//   (row tooltip = the equipped item), Enabled, Include in Full DPS, Count +
+//   source note for item/node groups, Imbued Support (a GemSelect in imbued
+//   mode + clear "x") — and the "Gem Options" section (121-150).
+//   Text edits apply 300 ms after the last keystroke or on Enter/focus-out
+//   (legacy applies every keystroke; each is a recalc + undo state here).
+//   Control values are pushed imperatively after each refresh because the
+//   components write their own state (a binding would break on first edit).
+//
+// Part 5.3: gem rows (SkillsTab:CreateGemSlot 640-965) — delete "x", GemSelect,
+//   level, quality (tooltip: quality stats + "Setting to 20 quality..."),
+//   enabled (tooltip: enable/disable diff), count (shown for gems with an
+//   active skill), error text, Vaal "Enable <effect>:" boxes on a 2nd line,
+//   supporting-gem cross-highlight while a gem name is hovered. The last row
+//   is the blank "add a gem" row. Rows are a COUNT model so a refresh updates
+//   them in place (a focused field keeps focus while typing).
+//
+// STATE MODEL: `st` is pob_skillsGetState(), re-read (coalesced with
+// Qt.callLater) on skills/calcs/items/tree/mode signals only — no frame loop
+// (invariant #7). Everything is addressed by 1-based index because legacy
+// replaces the group/gem tables on undo.
 Item {
-    id: skillsView
+    id: root
     anchors.fill: parent
     clip: true
 
-    ColumnLayout {
+    property var st: ({})
+    property var lists: ({})
+    readonly property var groups: st && st.groups && st.groups.length !== undefined ? st.groups : []
+    readonly property var sets: st && st.sets && st.sets.length !== undefined ? st.sets : []
+    readonly property var detail: st && st.detail ? st.detail : null
+    readonly property var gems: detail && detail.gems && detail.gems.length !== undefined ? detail.gems : []
+    property int hoverGemRow: 0          // 1-based gem row whose name is hovered
+
+    property bool _pending: false
+    function refresh() {
+        if (_pending) return
+        _pending = true
+        Qt.callLater(_doRefresh)
+    }
+    function _doRefresh() {
+        _pending = false
+        if (luaEngine.currentMode !== "BUILD") return
+        if (!lists.slots) {
+            const l = luaEngine.invoke("pob_skillsGetLists", [])
+            if (l) lists = l
+        }
+        const s = luaEngine.invoke("pob_skillsGetState", [])
+        st = s ? s : ({})
+        setSelect.model = sets
+        setSelect.currentIndex = (st.activeSet || 1) - 1
+        _pushDetail()
+    }
+
+    function _pushDetail() {
+        const d = detail
+        const o = st.options || {}
+        sortByDps.state = !!o.sortGemsByDPS
+        sortField.currentIndex = (o.sortField || 1) - 1
+        defaultLevel.currentIndex = (o.defaultGemLevel || 1) - 1
+        if (!defaultQuality.editing) defaultQuality.text = o.defaultGemQuality || "0"
+        supportTypes.currentIndex = (o.showSupportGemTypes || 1) - 1
+        showLegacy.state = !!o.showLegacyGems
+        if (!d) return
+        if (!groupLabel.editing) groupLabel.text = d.label
+        groupSlot.currentIndex = (d.slotIndex || 1) - 1
+        groupEnabled.state = d.enabled
+        groupFullDPS.state = d.includeInFullDPS
+        if (!groupCount.editing) groupCount.text = String(d.groupCount)
+    }
+
+    // Debounced text edits: `apply` runs 300 ms after the last keystroke,
+    // or at once on commit.
+    component Debounce: Timer {
+        property var apply: null
+        property string value: ""
+        interval: 300
+        function push(v) { value = v; restart() }
+        function flush(v) { stop(); value = v; if (apply) apply(value) }
+        onTriggered: if (apply) apply(value)
+    }
+
+    function call(name, args) { return luaEngine.invoke(name, args || []) }
+
+    onVisibleChanged: if (visible) refresh()
+    Component.onCompleted: refresh()
+
+    Connections {
+        target: luaEngine
+        function onSkillsChanged() { root.refresh() }
+        function onCalcsChanged() { root.refresh() }
+        function onItemsChanged() { root.refresh() }
+        function onTreeChanged() { root.refresh() }
+        function onModeChanged() { root.lists = ({}); root.refresh() }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: root.call("pob_skillsPasteGroup")
+    }
+    Shortcut {
+        sequence: "Ctrl+Z"
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: root.call("pob_skillsUndo")
+    }
+    Shortcut {
+        sequences: ["Ctrl+Y", "Ctrl+Shift+Z"]
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: root.call("pob_skillsRedo")
+    }
+
+    Flickable {
+        id: page
         anchors.fill: parent
-        anchors.margins: theme.space3
-        spacing: theme.space2
-
-        Text {
-            text: "Skills"
-            color: theme.text
-            font.bold: true
-            font.pixelSize: theme.fontSize + 4
-        }
-
-        // --- Add group + gem control ---
-        RowLayout {
-            spacing: theme.space1
-            TextField {
-                id: skillGroupLabel
-                Layout.fillWidth: true
-                placeholderText: "Group label"
-                color: theme.text
-                background: Rectangle { color: theme.sideBarBg; border.color: theme.section; radius: theme.radiusControl }
-            }
-            TextField {
-                id: skillGemName
-                Layout.fillWidth: true
-                placeholderText: "Gem name (e.g. Fireball)"
-                color: theme.text
-                background: Rectangle { color: theme.sideBarBg; border.color: theme.section; radius: theme.radiusControl }
-            }
-            Button {
-                text: "Add"
-                onClicked: {
-                    if (skillGemName.text.trim() !== "") {
-                        luaEngine.addSocketGroupWithGem(
-                            skillGroupLabel.text.trim() || "New Group",
-                            skillGemName.text.trim())
-                        skillGroupLabel.text = ""
-                        skillGemName.text = ""
-                    }
-                }
+        anchors.bottomMargin: hScroll.visible ? 18 : 0
+        contentWidth: Math.max(width, content.implicitWidth)
+        contentHeight: Math.max(height, content.implicitHeight)
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: false          // scrolled by the bars / wheel, not by dragging
+        clip: true
+        contentX: hScroll.offset
+        contentY: vScroll.offset
+        WheelHandler {
+            onWheel: function (event) {
+                if (event.modifiers & Qt.ShiftModifier) hScroll.handleWheel(event.angleDelta.y)
+                else vScroll.handleWheel(event.angleDelta.y)
             }
         }
 
-        // --- Socket groups (with nested gems) ---
-        Text {
-            text: "Socket groups: " + socketGroupModel.count
-            color: theme.accent
-            font.bold: true
-        }
-        ListView {
-            id: socketGroupListView
-            Layout.fillWidth: true
-            Layout.preferredHeight: parent.height * 0.4
-            model: socketGroupModel
-            clip: true
-            delegate: Rectangle {
-                width: ListView.view.width
-                height: gemRow.height + 8
-                color: index % 2 ? theme.sideBarBg : "transparent"
-                Column {
-                    id: gemRow
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.margins: theme.space1
-                    spacing: 2
-                    RowLayout {
-                        width: parent.width
-                        spacing: theme.space2
-                        Text {
-                            text: (model.enabled ? "✔" : "✖") + "  " + (model.title || "(untitled)")
-                            color: model.enabled ? theme.text : theme.muted
-                            font.pixelSize: theme.fontSize
-                            Layout.fillWidth: true
-                        elide: Text.ElideRight
-                        clip: true
-                        }
-                        Text {
-                            text: model.slot ? ("[" + model.slot + "]") : ""
-                            color: theme.muted
-                            font.pixelSize: theme.fontSize - 1
-                        }
-                        Text {
-                            text: "main #" + model.mainActiveSkill
-                            color: theme.muted
-                            font.pixelSize: theme.fontSize - 1
-                        }
-                    }
-                    // Nested gem list for this group.
-                    ListView {
-                        width: parent.width
-                        height: Math.max(1, (model.gems ? model.gems.length : 0) * 20)
-                        model: model.gems
-                        clip: true
-                        interactive: false
-                        delegate: Text {
-                            text: "   • " + (modelData.name || "?")
-                                  + "  " + (modelData.level || 1) + "/" + (modelData.quality || 0)
-                                  + (modelData.enabled ? "" : "  (disabled)")
-                            color: theme.muted
-                            font.pixelSize: theme.fontSize - 1
-                        elide: Text.ElideRight
-                        clip: true
-                        }
-                    }
-                }
-            }
-        }
+        Item {
+            id: content
+            implicitWidth: 400 + 564 + 350      // gem Count column + 350 (legacy maxX)
+            implicitHeight: Math.max(620, groupDetail.y + 100 + (root.gems.length + 1) * 44 + 20)
 
-        // --- Active-skill DPS list ---
-        Text {
-            text: "Active skills (DPS):"
-            color: theme.accent
-            font.bold: true
-        }
-        ListView {
-            id: activeSkillListView
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            model: skillModel
-            clip: true
-            delegate: Rectangle {
-                width: ListView.view.width
-                height: 24
-                color: model.isMain ? theme.accent : (index % 2 ? theme.sideBarBg : "transparent")
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: theme.space1
-                    spacing: theme.space2
-                    Text {
-                        text: (model.isMain ? "★ " : "  ") + (model.name || "?")
-                        color: model.isMain ? theme.background : theme.text
-                        font.pixelSize: theme.fontSize
-                        Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    clip: true
+            // --- Skill set row (SkillsTab.lua:95-106) ---
+            Widgets.Label {
+                anchors.right: setSelect.left
+                anchors.rightMargin: 2
+                anchors.verticalCenter: setSelect.verticalCenter
+                horizontalAlignment: Text.AlignRight
+                label: "^7Skill set:"
+                size: 16
+            }
+            Widgets.DropDownControl {
+                id: setSelect
+                x: 76; y: 8
+                width: 210; height: 20
+                controlEnabled: root.sets.length > 1
+                onSelected: function (index) { root.call("pob_skillsSetActiveSet", [index + 1]) }
+            }
+            Widgets.Button {
+                anchors.left: setSelect.right
+                anchors.leftMargin: 4
+                anchors.verticalCenter: setSelect.verticalCenter
+                width: 90; height: 20
+                label: "Manage..."
+                onClicked: setManage.openFresh()
+            }
+
+            // --- Socket group list (SkillsTab.lua:109) ---
+            Widgets.SocketGroupList {
+                id: groupList
+                x: 20; y: 34
+                width: 360; height: 320
+                groups: root.groups
+                selIndex: (root.st.displayIndex || 0) - 1
+                onDeleteRequested: function (i) { deleteGroupConfirm.openFor(i) }
+                onDeleteAllRequested: deleteAllConfirm.open()
+                onMessageRequested: function (title, text) {
+                    messagePopup.title = title
+                    messagePopup.message = text
+                    messagePopup.open()
+                }
+            }
+
+            // Usage tips (SkillsTab.lua:110-118).
+            Column {
+                id: tips
+                x: 20
+                y: groupList.y + groupList.height + 8
+                Repeater {
+                    model: [
+                        "^7Usage Tips:",
+                        "- You can copy/paste socket groups using Ctrl+C and Ctrl+V.",
+                        "- Ctrl + Click to enable/disable socket groups.",
+                        "- Ctrl + Right click to include/exclude in FullDPS calculations.",
+                        "- Right click to set as the Main skill group.",
+                    ]
+                    delegate: Widgets.Label { label: modelData; size: 14 }
+                }
+            }
+
+            // --- Gem Options (SkillsTab.lua:121-150), under the list ---
+            Widgets.Section {
+                x: 20
+                y: groupList.y + 20 + 300 + 45 + 50
+                width: 360; height: 156
+                label: "Gem Options"
+            }
+            Item {
+                id: opts
+                x: 20 + 170
+                y: groupList.y + 20 + 300 + 45
+                Widgets.CheckBox {
+                    id: sortByDps
+                    y: 70; width: 20; height: 20
+                    label: "Sort gems by DPS:"
+                    onToggled: function (s) { root.call("pob_skillsSetOption", ["sortGemsByDPS", s]) }
+                }
+                Widgets.DropDownControl {
+                    id: sortField
+                    x: 30; y: 70; width: 140; height: 20
+                    model: root.lists.sortFields || []
+                    onSelected: function (i) { root.call("pob_skillsSetOption", ["sortField", i + 1]) }
+                }
+                Widgets.Label {
+                    anchors.right: defaultLevel.left; anchors.rightMargin: 4
+                    anchors.verticalCenter: defaultLevel.verticalCenter
+                    horizontalAlignment: Text.AlignRight
+                    label: "^7Default gem level:"; size: 16
+                }
+                Widgets.DropDownControl {
+                    id: defaultLevel
+                    y: 94; width: 170; height: 20
+                    model: root.lists.defaultLevels || []
+                    tooltipForItem: function (item, tt) {
+                        const i = (root.lists.defaultLevels || []).indexOf(item)
+                        const d = (root.lists.defaultLevelDescriptions || [])[i]
+                        if (d) d.split("\n").forEach(function (l) { tt.addLine(16, "^7" + l) })
                     }
-                    Text {
-                        text: "DPS " + Math.round(model.totalDps || 0).toLocaleString()
-                        color: model.isMain ? theme.background : theme.accent
-                        font.pixelSize: theme.fontSize - 1
+                    onSelected: function (i) { root.call("pob_skillsSetOption", ["defaultGemLevel", i + 1]) }
+                }
+                Widgets.Label {
+                    anchors.right: defaultQuality.left; anchors.rightMargin: 4
+                    anchors.verticalCenter: defaultQuality.verticalCenter
+                    horizontalAlignment: Text.AlignRight
+                    label: "^7Default gem quality:"; size: 16
+                }
+                Widgets.EditControl {
+                    id: defaultQuality
+                    y: 118; width: 60; height: 20
+                    isNumeric: true; maxChars: 2
+                    onEdited: function (t) { root.call("pob_skillsSetOption", ["defaultGemQuality", t]) }
+                }
+                Widgets.Label {
+                    anchors.right: supportTypes.left; anchors.rightMargin: 4
+                    anchors.verticalCenter: supportTypes.verticalCenter
+                    horizontalAlignment: Text.AlignRight
+                    label: "^7Show support gems:"; size: 16
+                }
+                Widgets.DropDownControl {
+                    id: supportTypes
+                    y: 142; width: 170; height: 20
+                    model: root.lists.supportTypes || []
+                    onSelected: function (i) { root.call("pob_skillsSetOption", ["showSupportGemTypes", i + 1]) }
+                }
+                Widgets.CheckBox {
+                    id: showLegacy
+                    y: 166; width: 20; height: 20
+                    label: "^7Show legacy gems:"
+                    onToggled: function (s) { root.call("pob_skillsSetOption", ["showLegacyGems", s]) }
+                }
+            }
+
+            // --- Group detail (SkillsTab.lua:160-315), 20px right of the list ---
+            Item {
+                id: groupDetail
+                x: 20 + 360 + 20
+                y: groupList.y + 20
+                visible: root.detail !== null
+                readonly property int gi: root.st.displayIndex || 0
+                readonly property bool isSource: !!(root.detail && root.detail.source)
+
+                Debounce { id: labelDebounce; apply: function (v) { root.call("pob_skillsSetGroupLabel", [groupDetail.gi, v]) } }
+                Debounce { id: countDebounce; apply: function (v) { root.call("pob_skillsSetGroupCount", [groupDetail.gi, v]) } }
+
+                Widgets.EditControl {
+                    id: groupLabel
+                    width: 380; height: 20
+                    placeholder: "Label"
+                    maxChars: 50
+                    onEdited: function (t) { labelDebounce.push(t) }
+                    onCommitted: function (t) { labelDebounce.flush(t) }
+                }
+                Widgets.Label {
+                    y: 30
+                    width: 83
+                    horizontalAlignment: Text.AlignRight
+                    label: "^7Socketed in:"; size: 16
+                }
+                Widgets.DropDownControl {
+                    id: groupSlot
+                    x: 85; y: 28; width: 130; height: 20
+                    model: root.lists.slots || []
+                    popupMinWidth: 150
+                    controlEnabled: !groupDetail.isSource
+                    tooltipForItem: function (item, tt) {
+                        const i = (root.lists.slots || []).indexOf(item)
+                        const t = luaEngine.invoke("pob_skillsSlotTooltip", [i + 1])
+                        StatDiff.fillFromLines(tt, t)
+                    }
+                    tooltipFunc: function (tt) {
+                        StatDiff.fillFromLines(tt, luaEngine.invoke("pob_skillsSlotTooltip", [0]))
+                    }
+                    onSelected: function (i) { root.call("pob_skillsSetGroupSlot", [groupDetail.gi, i + 1]) }
+                }
+                Widgets.CheckBox {
+                    id: groupEnabled
+                    x: 85 + 130 + 70; y: 28; width: 20; height: 20
+                    label: "Enabled:"
+                    onToggled: function (s) { root.call("pob_skillsSetGroupEnabled", [groupDetail.gi, s]) }
+                }
+                Widgets.CheckBox {
+                    id: groupFullDPS
+                    x: groupEnabled.x + 20 + 145; y: 28; width: 20; height: 20
+                    label: "Include in Full DPS:"
+                    onToggled: function (s) { root.call("pob_skillsSetGroupFullDPS", [groupDetail.gi, s]) }
+                }
+                Widgets.Label {
+                    id: countLabel
+                    visible: groupDetail.isSource
+                    x: groupFullDPS.x + 20 + 16; y: 30
+                    label: "Count:"; size: 16
+                }
+                Widgets.EditControl {
+                    id: groupCount
+                    visible: groupDetail.isSource
+                    x: countLabel.x + countLabel.implicitWidth + 4; y: 28; width: 60; height: 20
+                    isNumeric: true; maxChars: 2
+                    onEdited: function (t) { countDebounce.push(t) }
+                    onCommitted: function (t) { countDebounce.flush(t) }
+                }
+
+                // Imbued Support (hidden for item/node-provided groups).
+                Item {
+                    visible: root.detail !== null && root.detail.imbuedShown
+                    Widgets.Label {
+                        id: imbuedLabel
+                        x: 86; y: 58
+                        label: "^xB8DAF1Imbued Support:"; size: 16
+                    }
+                    Widgets.GemSelect {
+                        id: imbuedSelect
+                        x: imbuedLabel.x + imbuedLabel.width + 8; y: 56
+                        width: 250; height: 20
+                        groupIndex: groupDetail.gi
+                        row: 0
+                        text: root.detail ? root.detail.imbuedName : ""
+                        textColor: root.detail ? root.detail.imbuedColor : "^7"
+                        controlEnabled: !!(root.detail && root.detail.imbuedEnabled)
+                        onPicked: function (id) {
+                            if (id !== (root.detail ? root.detail.imbuedId : ""))
+                                root.call("pob_skillsSetImbued", [groupDetail.gi, id])
+                        }
+                    }
+                    Widgets.Button {
+                        x: imbuedSelect.x + 252; y: 56; width: 20; height: 20
+                        label: "x"
+                        controlEnabled: !!(root.detail && root.detail.imbuedEnabled)
+                        tooltipText: "Remove this imbued support."
+                        onClicked: root.call("pob_skillsSetImbued", [groupDetail.gi, ""])
                     }
                 }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: {
-                        luaEngine.setActiveSkill(
-                            model.socketGroupIndex,
-                            model.displaySkillIndex)
+
+                // --- Gem rows (anchorGemSlots at y 100; headers 18 above) ---
+                Item {
+                    id: gemArea
+                    visible: !groupDetail.isSource
+                    y: 100
+                    Widgets.Label { x: 22; y: -18; label: "^7Gem name:"; size: 16 }
+                    Widgets.Label { x: 324; y: -18; label: "^7Level:"; size: 16 }
+                    Widgets.Label { x: 386; y: -18; label: "^7Quality:"; size: 16 }
+                    Widgets.Label { x: 448; y: -18; label: "^7Enabled:"; size: 16 }
+                    Widgets.Label { x: 510; y: -18; label: "^7Count:"; size: 16 }
+
+                    Column {
+                        spacing: 0
+                        Repeater {
+                            model: root.gems.length + 1
+                            delegate: Item {
+                                id: gemRow
+                                readonly property int r: index + 1
+                                readonly property var g: index < root.gems.length ? root.gems[index] : null
+                                readonly property bool hasGlobals: !!(g && (g.global1Shown || g.global2Shown))
+                                width: 700
+                                height: hasGlobals ? 44 : 22
+
+                                function push() {
+                                    if (!levelEdit.editing) levelEdit.text = g ? String(g.level) : ""
+                                    if (!qualityEdit.editing) qualityEdit.text = g ? String(g.quality) : ""
+                                    if (!countEdit.editing) countEdit.text = g ? String(g.count) : ""
+                                    enabledBox.state = !!(g && g.enabled)
+                                    global1.state = !!(g && g.global1)
+                                    global2.state = !!(g && g.global2)
+                                }
+                                onGChanged: push()
+                                Component.onCompleted: push()
+
+                                Debounce { id: levelDb; apply: function (v) { root.call("pob_skillsSetGemLevel", [groupDetail.gi, gemRow.r, v]) } }
+                                Debounce { id: qualityDb; apply: function (v) { root.call("pob_skillsSetGemQuality", [groupDetail.gi, gemRow.r, v]) } }
+                                Debounce { id: countDb; apply: function (v) { root.call("pob_skillsSetGemCount", [groupDetail.gi, gemRow.r, v]) } }
+
+                                Widgets.Button {
+                                    width: 20; height: 20
+                                    label: "x"
+                                    controlEnabled: gemRow.g !== null
+                                    tooltipText: "Remove this gem."
+                                    onClicked: root.call("pob_skillsDeleteGem", [groupDetail.gi, gemRow.r])
+                                }
+                                Widgets.GemSelect {
+                                    x: 22; width: 300; height: 20
+                                    groupIndex: groupDetail.gi
+                                    row: gemRow.r
+                                    text: gemRow.g ? gemRow.g.nameSpec : ""
+                                    textColor: gemRow.g ? gemRow.g.color : "^7"
+                                    highlighted: {
+                                        const h = root.hoverGemRow
+                                        if (h < 1 || h === gemRow.r || h > root.gems.length) return false
+                                        return root.gems[h - 1].links.indexOf(gemRow.r) >= 0
+                                    }
+                                    onHoverChanged: function (on) {
+                                        if (on) root.hoverGemRow = gemRow.r
+                                        else if (root.hoverGemRow === gemRow.r) root.hoverGemRow = 0
+                                    }
+                                    onPicked: function (id) { root.call("pob_skillsSetGem", [groupDetail.gi, gemRow.r, id]) }
+                                }
+                                Widgets.EditControl {
+                                    id: levelEdit
+                                    x: 324; width: 60; height: 20
+                                    isNumeric: true; maxChars: 2
+                                    controlEnabled: gemRow.g !== null
+                                    onEdited: function (t) { levelDb.push(t) }
+                                    onCommitted: function (t) { levelDb.flush(t) }
+                                }
+                                Widgets.EditControl {
+                                    id: qualityEdit
+                                    x: 386; width: 60; height: 20
+                                    isNumeric: true; maxChars: 2
+                                    controlEnabled: gemRow.g !== null
+                                    tooltipFunc: function (tt) {
+                                        StatDiff.fillFromLines(tt, luaEngine.invoke("pob_skillsGemQualityTooltip", [groupDetail.gi, gemRow.r]))
+                                    }
+                                    onEdited: function (t) { qualityDb.push(t) }
+                                    onCommitted: function (t) { qualityDb.flush(t) }
+                                }
+                                Widgets.CheckBox {
+                                    id: enabledBox
+                                    x: 464; width: 20; height: 20
+                                    controlEnabled: gemRow.g !== null
+                                    tooltipFunc: function (tt) {
+                                        StatDiff.fillFromLines(tt, luaEngine.invoke("pob_skillsGemEnabledTooltip", [groupDetail.gi, gemRow.r]))
+                                    }
+                                    onToggled: function (s) { root.call("pob_skillsSetGemEnabled", [groupDetail.gi, gemRow.r, s]) }
+                                }
+                                Widgets.EditControl {
+                                    id: countEdit
+                                    x: 502; width: 60; height: 20
+                                    visible: !!(gemRow.g && gemRow.g.countShown)
+                                    isNumeric: true; maxChars: 2
+                                    tooltipFunc: function (tt) {
+                                        tt.addLine(16, "^8Note: `count` integer value scales the DPS of associated skill by a scalar.")
+                                        tt.addLine(16, "^8To be used with totems, minions, shot-gunning of projectiles (e.g., VD, magma-orbs),")
+                                        tt.addLine(16, "^8multi-hit projectiles (e.g. ball-lightning), traps, mines.")
+                                    }
+                                    onEdited: function (t) { countDb.push(t) }
+                                    onCommitted: function (t) { countDb.flush(t) }
+                                }
+                                Widgets.Label {
+                                    x: 564; y: 2
+                                    visible: !!(gemRow.g && gemRow.g.errMsg !== "")
+                                    label: "^1" + (gemRow.g ? gemRow.g.errMsg : "")
+                                    size: 16
+                                }
+                                // Vaal gems: "Enable <effect>:" boxes on a second line.
+                                Widgets.CheckBox {
+                                    id: global1
+                                    visible: !!(gemRow.g && gemRow.g.global1Shown)
+                                    x: labelWidth + 12; y: 22; width: 20; height: 20
+                                    label: gemRow.g ? gemRow.g.global1Label : ""
+                                    onToggled: function (s) { root.call("pob_skillsSetGemGlobal", [groupDetail.gi, gemRow.r, 1, s]) }
+                                }
+                                Widgets.CheckBox {
+                                    id: global2
+                                    visible: !!(gemRow.g && gemRow.g.global2Shown)
+                                    x: (global1.visible ? global1.x + 20 : 0) + labelWidth + 16; y: 22; width: 20; height: 20
+                                    label: gemRow.g ? gemRow.g.global2Label : ""
+                                    onToggled: function (s) { root.call("pob_skillsSetGemGlobal", [groupDetail.gi, gemRow.r, 2, s]) }
+                                }
+                            }
+                        }
                     }
+                }
+
+                // Source note for item / node / explode-provided groups.
+                Widgets.ColorText {
+                    visible: groupDetail.isSource
+                    y: 60
+                    sourceText: root.detail ? root.detail.sourceNote : ""
+                    defaultColor: theme.text
+                    font.pixelSize: 16
                 }
             }
         }
+    }
+
+    // Legacy's horizontal bar along the bottom (SkillsTab:Draw 531-540: the
+    // content reaches past the Count column); a vertical one when the window
+    // is shorter than the tab.
+    Widgets.ScrollBar {
+        id: hScroll
+        anchors.left: parent.left
+        anchors.right: vScroll.visible ? vScroll.left : parent.right
+        anchors.bottom: parent.bottom
+        height: 18
+        dir: "HORIZONTAL"
+        visible: active
+        contentDim: content.implicitWidth
+        viewDim: page.width
+    }
+    Widgets.ScrollBar {
+        id: vScroll
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: hScroll.visible ? hScroll.top : parent.bottom
+        width: 18
+        dir: "VERTICAL"
+        visible: active
+        contentDim: content.implicitHeight
+        viewDim: page.height
+    }
+
+    Widgets.SetManagePopup {
+        id: setManage
+        parent: root
+        title: "Manage Skill Sets"
+        noun: "skill set"
+        deleteTitle: "Delete Item Set"      // legacy's own title (SkillSetListControl.lua:102)
+        fn: ({
+            list: "pob_skillsGetSetList",
+            setActive: "pob_skillsSetActiveSet",
+            create: "pob_skillsNewSet",
+            copy: "pob_skillsCopySet",
+            rename: "pob_skillsRenameSet",
+            remove: "pob_skillsDeleteSet",
+            move: "pob_skillsMoveSet",
+        })
+    }
+
+    Widgets.ConfirmPopup {
+        id: deleteGroupConfirm
+        parent: root
+        property int index: -1
+        title: "Delete Socket Group"
+        confirmLabel: "Delete"
+        function openFor(i) {
+            index = i
+            message = "Are you sure you want to delete '" + root.groups[i].displayLabel + "'?"
+            open()
+        }
+        onAccepted: root.call("pob_skillsDeleteGroup", [index + 1])
+    }
+
+    Widgets.ConfirmPopup {
+        id: deleteAllConfirm
+        parent: root
+        title: "Delete All"
+        message: "Are you sure you want to delete all socket groups in this build?"
+        confirmLabel: "Delete"
+        onAccepted: root.call("pob_skillsDeleteAllGroups")
+    }
+
+    Widgets.MessagePopup {
+        id: messagePopup
+        parent: root
     }
 }

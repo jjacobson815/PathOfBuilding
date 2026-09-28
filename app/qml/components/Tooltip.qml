@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as QC
 
 // Tooltip — Tier 0 shared hover-tooltip framework, ported from the legacy
 // `Tooltip` class (src/Classes/Tooltip.lua, 643 lines). Programmatic API:
@@ -36,6 +37,22 @@ Rectangle {
     property bool center: false     // default per-line centering (AddLine's self.center)
     property int maxWidth: 0        // 0 = no wrapping; else wrap AddLine text to this width
     property var _updateParams: null
+
+    // Legacy draws tooltips on the top layer, never clipped. showAt() moves
+    // this item into the window's popup overlay (above views AND popups) and
+    // maps the caller's local coordinates from the item it was declared in
+    // (`_home`), so no ancestor `clip: true` can cut it off. Set false to
+    // keep it where it is declared.
+    property bool floating: true
+    property Item _home: null
+    property bool _moving: false
+    readonly property Item _overlay: QC.Overlay.overlay
+    onParentChanged: if (!_moving && parent !== _overlay) _home = parent
+    Component.onCompleted: if (!_home) _home = parent
+    // Item.visible reads the EFFECTIVE visibility, so this also fires when an
+    // ancestor of the home item (e.g. the whole view) is hidden.
+    readonly property bool _homeShown: _home ? _home.visible : true
+    on_HomeShownChanged: if (!_homeShown) visible = false
 
     visible: false
     z: 100
@@ -161,6 +178,19 @@ Rectangle {
     // (hx,hy) sized (hw,hh), flipping to the left/above when it would
     // overflow `viewport` ({x,y,width,height}) — ported from Tooltip:Draw.
     function showAt(hx, hy, hw, hh, viewport) {
+        if (floating && _home && _overlay) {
+            const p = _home.mapToItem(_overlay, hx, hy);
+            if (viewport)
+                viewport = Qt.rect(viewport.x + p.x - hx, viewport.y + p.y - hy, viewport.width, viewport.height);
+            hx = p.x;
+            hy = p.y;
+            if (parent !== _overlay) {
+                _moving = true;
+                parent = _overlay;
+                _moving = false;
+            }
+            z = 1000;
+        }
         const sz = getSize();
         let ttX = hx, ttY = hy;
         if (hw !== undefined && hh !== undefined && hw !== null && hh !== null) {

@@ -27,7 +27,7 @@ PopupBase {
     Keys.onEnterPressed: if (confirmEnabled) root.accept()
 
     ColumnLayout {
-        width: 280
+        implicitWidth: 280
         spacing: 8
 
         ColorText {

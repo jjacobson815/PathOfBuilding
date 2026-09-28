@@ -30,3 +30,14 @@ function addToTooltip(tooltip, header, stats, minionStats) {
     }
     return n + m
 }
+
+// Fill `tooltip` from a bridge result { lines: [{size,text,center}|{sep,size}] }
+// (the pob_skills* / pob_get*TooltipLines shape).
+function fillFromLines(tooltip, t) {
+    if (!t || !t.lines || t.lines.length === undefined) return
+    for (var i = 0; i < t.lines.length; i++) {
+        var l = t.lines[i]
+        if (l.sep) tooltip.addSeparator(l.size)
+        else tooltip.addLine(l.size, l.text.length > 0 ? l.text : " ")
+    }
+}

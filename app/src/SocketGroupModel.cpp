@@ -41,8 +41,11 @@ void SocketGroupModel::refresh(LuaEngine* engine) {
         return;
 
     // Defensive: an absent skillsTab (LIST mode) yields an empty list.
-    const QVariantList raw =
-        engine->getPath("main.modes.BUILD.skillsTab.socketGroupList").toList();
+    // Read through pob_getSocketGroups (plain tables). Marshalling the raw
+    // socketGroupList walks each group's calc-owned fields (displaySkillList
+    // -> activeSkill -> env ...) and, on a calculated build, runs away to
+    // gigabytes before returning.
+    const QVariantList raw = engine->callGlobal("pob_getSocketGroups").toList();
 
     QList<SocketGroupData> groups;
     groups.reserve(raw.size());
@@ -53,14 +56,14 @@ void SocketGroupModel::refresh(LuaEngine* engine) {
         g.slot = m.value("slot").toString();          // nil slot -> "" (QVariant->toString)
         g.enabled = m.value("enabled", true).toBool(); // default enabled when absent
         g.mainActiveSkill = m.value("mainActiveSkill", 1).toInt();
-        const QVariantList gems = m.value("gemList").toList();
+        const QVariantList gems = m.value("gems").toList();
         QVariantList gemRows;
         gemRows.reserve(gems.size());
         QStringList names;
         names.reserve(gems.size());
         for (const QVariant& gv : gems) {
             const QVariantMap gm = gv.toMap();
-            const QString n = gm.value("nameSpec").toString();
+            const QString n = gm.value("name").toString();
             QVariantMap row;
             row.insert("name", n);
             row.insert("level", gm.value("level", 1).toInt());

@@ -9,9 +9,25 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 5 — Skills Tab — NOT STARTED** (spec: `phases/PHASE-5-skills-tab.md`).
-Work order is set below (🗺 "PHASE ORDER"): 4 → **5** → 6 → 7 → Phase 3 long tail
+**ACTIVE: Phase 6 — Items Tab — NOT STARTED** (spec: `phases/PHASE-6-items-tab.md`).
+Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → **6** → 7 → Phase 3 long tail
 → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.
+
+**Phase 5 — Skills Tab — DONE (2026-09-28, cloud session, branch `cloud/phase-5`,
+draft PR jjacobson815/PathOfBuilding#6, stacked on `cloud/phase-4`).** All four parts
+ticked in `phases/PHASE-5-skills-tab.md` (session log at its bottom). Gate on
+Linux: `tools/linux-selftest.sh` -> `pob-selftest EXIT=0`, `pob-qt --headless
+EXIT=0`, new checks `skills-list` (23 flags), `skills-detail` (22),
+`skills-gems` (16), `skills-persist` (18). Bridge: `app/lua/pob_skills.lua`.
+**Open follow-ups carried out of Phase 5 (none block Phase 6):**
+- **Needs Windows:** re-baseline `app/tests/capture-baseline/skills.png` (new
+  view) and `tree.png` (bottom strip + checkbox labels); the baselines are
+  Windows captures, so Linux captures differ in every view by font rendering.
+- Suggested task (not done here): `PopupBase` and 3 popups attach `Keys` to a
+  Dialog (not an Item) -> Enter-to-confirm / F2 / Delete do nothing there.
+- Documented deviations (phase file): no live gem preview while typing, gem
+  text fields apply 300 ms after the last keystroke (legacy: every keystroke),
+  set manager reorders with Up/Down, not drag.
 
 **Phase 4 — Tree Tab — DONE (2026-09-27, cloud session, branch `cloud/phase-4`).**
 All five parts are ticked in `phases/PHASE-4-tree-tab.md` (session logs at its
@@ -158,6 +174,16 @@ verdict. `SKIP_DEPS=1` skips the install step.
 - **Ad-hoc Lua against the real engine:** a probe file that does
   `_POB_LUA_DIR=_SRC_DIR.."/../app/lua"; dofile(_POB_LUA_DIR.."/pob_host.lua")`
   then your code, run as `pob-selftest <src> <runtime> <probe.lua>` (cwd `src/`).
+- **Driving the real UI on Linux (Phase 5):** `apt-get install -y xdotool
+  x11-apps imagemagick`, start `Xvfb :99 -screen 0 1280x800x24`, run pob-qt with
+  `QT_QPA_PLATFORM=xcb DISPLAY=:99` (a host file can `pob_loadBuildXML` a
+  `spec/TestBuilds` build first), then `xdotool mousemove X Y click 1` /
+  `xdotool key ctrl+c` / `xdotool type ...` and `import -window root out.png`.
+  Hover needs two small `mousemove`s. Run pob-qt under `gdb -batch -ex run -ex
+  bt --args ...` to catch a crash. Don't `pkill -f` a pattern that appears in
+  your own command line.
+- **Qt's offscreen platform has no clipboard:** `QClipboard::setText` segfaults
+  under `pob-qt --headless`. Selftests must never reach the real `Copy()`.
 - The gate must pass on a CLEAN checkout (no gitignored `src/Settings.xml`).
   Unset options read as `nil` there; `pob_selftestOptions` now normalises to a
   boolean (it failed `nil ~= false` before 2026-09-26, hidden on dev machines).
@@ -304,6 +330,37 @@ Full detail in `reference/00-architecture.md`. The short list:
 ---
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
+
+**▶ Phase 5 — COMPLETE (2026-09-28).** What a future session must know:
+- **Skills tab pattern:** almost every legacy control keeps its callback as a
+  field (`changeFunc`, `selFunc`, `gemChangeFunc`, `tooltipFunc`, `onClick`).
+  Call `skillsTab:SetDisplayGroup(sg)` (also makes `gemSlots[1..#gemList+1]`),
+  then the closure. Lift code only where legacy hit-tests the cursor
+  (`GetCursorPos` is always 0,0 in the host) or draws. The Items/Config tabs
+  are built the same way and should get the same treatment.
+- **Never marshal a calc-touched Lua table raw** (`getPath` on
+  `socketGroupList`, item/skill objects): after a recalc they reference the
+  whole env and `luaToVariant` runs to gigabytes. `BuildModel` and
+  `SocketGroupModel` did exactly that (pob-qt hung on any build with skills);
+  both now read `pob_getSocketGroups()`. Return plain tables from a `pob_*`.
+- **`Tooltip` renders in the window overlay** (`floating: true` default): it
+  maps showAt() coordinates from where it is declared, so clipped containers
+  and popups no longer hide it. `DropDownControl` row tooltips were clipped
+  before (never showed, incl. the Tree tab's spec dropdown); fixed.
+- **Qt 6.4 layout crash:** a `ConfirmPopup` whose `message` is BOUND to a
+  changing selection re-lays out its Repeater while rows are replaced and
+  segfaults. Set the message when opening (see `SetManagePopup`).
+- Components that write their own state (`EditControl.text`,
+  `CheckBox.state`) break an outside binding on first edit: push values
+  imperatively after a refresh (SkillsView `_pushDetail`, gem row `push()`).
+  Repeat rows with a COUNT model so a refresh does not recreate a focused
+  field. `CheckBox` labels are now right-aligned (TTF overran the box);
+  `EditControl` joins the Tab chain.
+- Generic `components/SetManagePopup.qml` (pass bridge names in `fn`) is ready
+  for item sets / config sets. `components/GemSelect.qml` is ready for any
+  other gem picker (e.g. item-granted skills).
+- `SkillModel` (old view only; one BuildOutput per skill per skillsChanged) is
+  no longer created. `pob_getActiveSkills` remains but has no caller in pob-qt.
 
 **▶ Phase 4 — COMPLETE (Parts 4.2–4.5 on 2026-09-27; 4.1 earlier).** What a
 future session must know:
