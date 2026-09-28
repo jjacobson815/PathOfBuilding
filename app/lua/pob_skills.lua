@@ -198,7 +198,8 @@ local function groupDetail(bm, st, sg)
     }
     if sg.source then
         local ok, text = pcall(st.controls.sourceNote.label)
-        d.sourceNote = ok and text or ""
+        -- Legacy indents each source with "\t"; Qt text drops tabs.
+        d.sourceNote = ok and (tostring(text):gsub("\t", "    ")) or ""
     else
         d.gems = gemRows(st, sg)
     end
@@ -207,7 +208,9 @@ local function groupDetail(bm, st, sg)
     d.imbuedShown = not sg.source
     d.imbuedEnabled = (sg.slot and ((bySlot[sg.slot] and sg.imbuedSupport) or not bySlot[sg.slot])) and true or false
     d.imbuedName = sg.imbuedSupport or ""
-    local ig = sg.imbuedSupport and bm.data.gemForBaseName[sg.imbuedSupport:lower() .. " support"]
+    local igId = sg.imbuedSupport and bm.data.gemForBaseName[sg.imbuedSupport:lower() .. " support"]
+    local ig = igId and bm.data.gems[igId]
+    d.imbuedId = igId or ""
     d.imbuedColor = ig and gemColor(ig.grantedEffect) or "^7"
     return d
 end
@@ -562,6 +565,234 @@ function pob_skillsRedo()
 end
 
 ---------------------------------------------------------------------------
+-- 5.2 Group detail panel (SkillsTab.lua:160-315) and gem options (121-150)
+---------------------------------------------------------------------------
+
+-- Label edit: changeFunc = label + ProcessSocketGroup + undo + buildFlag.
+function pob_skillsSetGroupLabel(index, text)
+    local bm, st = ctx()
+    if not (st and showGroup(st, index)) then return fail("no such group") end
+    st.controls.groupLabel.changeFunc(tostring(text or ""))
+    return done()
+end
+
+-- "Socketed in" dropdown selFunc (with the imbued-support migration).
+function pob_skillsSetGroupSlot(index, slotIndex)
+    local bm, st = ctx()
+    local sg = st and showGroup(st, index)
+    if not sg then return fail("no such group") end
+    if sg.source then return fail("item-provided group") end
+    local ctl = st.controls.groupSlot
+    local value = ctl.list[tonumber(slotIndex) or -1]
+    if not value then return fail("bad slot") end
+    ctl.selFunc(slotIndex, value)
+    return done()
+end
+
+-- Slot dropdown row tooltip (tooltipFunc 185-199): the equipped item.
+function pob_skillsSlotTooltip(slotIndex)
+    local bm, st = ctx()
+    if not st then return { lines = { } } end
+    local ctl = st.controls.groupSlot
+    local i = tonumber(slotIndex) or -1
+    local mode = i < 1 and "OUT" or "HOVER"
+    return { lines = tipLines(function(tip) ctl.tooltipFunc(tip, mode, i, ctl.list[i]) end) }
+end
+
+function pob_skillsSetGroupEnabled(index, state)
+    local bm, st = ctx()
+    if not (st and showGroup(st, index)) then return fail("no such group") end
+    st.controls.groupEnabled.changeFunc(state and true or false)
+    return done()
+end
+
+function pob_skillsSetGroupFullDPS(index, state)
+    local bm, st = ctx()
+    if not (st and showGroup(st, index)) then return fail("no such group") end
+    st.controls.includeInFullDPS.changeFunc(state and true or false)
+    return done()
+end
+
+-- Count edit, shown for item/node-provided groups only.
+function pob_skillsSetGroupCount(index, text)
+    local bm, st = ctx()
+    local sg = st and showGroup(st, index)
+    if not sg then return fail("no such group") end
+    if not sg.source then return fail("not an item-provided group") end
+    st.controls.groupCount.changeFunc(tostring(text or ""))
+    return done()
+end
+
+-- Imbued support. Mutate, rebuild the slot map, THEN push undo (legacy's
+-- gemChangeFunc pushes undo before mutating, which leaves a stale top state).
+-- `gemId` is a data.gems key, or nil/"" to clear.
+function pob_skillsSetImbued(index, gemId)
+    local bm, st = ctx()
+    local sg = st and showGroup(st, index)
+    if not sg then return fail("no such group") end
+    if sg.source or not sg.slot then return fail("imbued support needs a socketed-in item") end
+    local by = st.imbuedSupportBySlot or { }
+    if by[sg.slot] and not sg.imbuedSupport then return fail("slot already has an imbued support") end
+    if gemId and gemId ~= "" then
+        local gem = bm.data.gems[gemId]
+        if not (gem and gem.grantedEffect.support) then return fail("not a support gem") end
+        sg.imbuedSupport = gem.name
+    else
+        if not sg.imbuedSupport then return { ok = true } end
+        sg.imbuedSupport = nil
+    end
+    st:RebuildImbuedSupportBySlot()
+    st:SetDisplayGroup(sg)
+    st:AddUndoState()
+    bm.buildFlag = true
+    return done()
+end
+
+-- Gem options: no undo, no modFlag, no recalc (legacy). The option only
+-- changes what the gem lists hold and how they sort.
+function pob_skillsSetOption(key, value)
+    local bm, st = ctx()
+    if not st then return fail("no build") end
+    local c = st.controls
+    if key == "sortGemsByDPS" then
+        c.sortGemsByDPS.state = value and true or false
+        c.sortGemsByDPS.changeFunc(value and true or false)
+    elseif key == "showLegacyGems" then
+        c.showLegacyGems.state = value and true or false
+        c.showLegacyGems.changeFunc(value and true or false)
+    elseif key == "defaultGemQuality" then
+        local text = tostring(value or ""):gsub("%D", ""):sub(1, 2)
+        c.defaultQuality:SetText(text)
+        c.defaultQuality.changeFunc(text)
+    else
+        local ctl = ({ sortField = c.sortGemsByDPSFieldControl, defaultGemLevel = c.defaultLevel,
+                       showSupportGemTypes = c.showSupportGemTypes })[key]
+        local i = tonumber(value) or -1
+        if not ctl or not ctl.list[i] then return fail("bad option") end
+        ctl.selIndex = i
+        ctl.selFunc(i, ctl.list[i])
+    end
+    return { ok = true, _emit = { "skills" } }
+end
+
+---------------------------------------------------------------------------
+-- GemSelect (GemSelectControl.lua) — shared by the imbued selector (row 0)
+-- and the gem rows (row = 1..#gemList+1). The live control's own
+-- UpdateSortCache / BuildList do the matching, filtering and DPS sort; only
+-- the row rendering (Draw 457-486) and the hover tooltip (Draw 489-513) are
+-- lifted, because they are SimpleGraphic draw code.
+---------------------------------------------------------------------------
+
+local function gemSelectCtl(st, row)
+    row = tonumber(row) or -1
+    if row == 0 then return st.controls.imbuedSupport end
+    local slot = st.gemSlots and st.gemSlots[row]
+    return slot and slot.nameSpec
+end
+
+-- The dropdown list for `buf`. `filter` is the S/A overlay button state:
+-- "support" | "grants_active_skill" | nil (gem rows only).
+function pob_skillsGemCandidates(index, row, buf, filter)
+    local bm, st = ctx()
+    if not (st and showGroup(st, index)) then return nil end
+    pob_recalculate()
+    local ctl = gemSelectCtl(st, row)
+    if not ctl then return nil end
+    if not ctl.imbuedSelect then
+        ctl.sortGemsBy = (filter == "support" or filter == "grants_active_skill") and filter or nil
+    end
+    local t0 = os.clock()
+    ctl:UpdateSortCache()
+    ctl:BuildList(tostring(buf or ""))
+    local sc = ctl.sortCache or { canSupport = { }, dpsColor = { } }
+    local rows = { }
+    for _, key in ipairs(ctl.list) do
+        local gd = ctl.gems[key]
+        if gd then
+            local ge = gd.grantedEffect
+            local marker = ""
+            if ge.support and sc.canSupport[key] then
+                marker = "check"
+            elseif ge.hasGlobalEffect then
+                marker = "plus"
+            end
+            rows[#rows + 1] = {
+                key = key,
+                id = (key:gsub("^%w+:", "")),
+                name = gd.name,
+                color = gemColor(ge),
+                marker = marker,
+                markerColor = sc.dpsColor[key] or "^7",
+            }
+        end
+    end
+    return { rows = rows, noMatches = ctl.noMatches and true or false, seconds = os.clock() - t0 }
+end
+
+-- Hover tooltip for dropdown row `key` (GemSelectControl:Draw 489-513):
+-- the gem tooltip, then "Selecting this gem will give you:".
+function pob_skillsGemCandidateTooltip(index, row, key)
+    local bm, st = ctx()
+    if not (st and showGroup(st, index)) then return { lines = { } } end
+    local ctl = gemSelectCtl(st, row)
+    local gemData = ctl and ctl.gems and ctl.gems[key]
+    if not gemData then return { lines = { } } end
+    pob_recalculate()
+    return { lines = tipLines(function(tip)
+        local calcFunc, calcBase = bm.calcsTab:GetMiscCalculator(bm)
+        if not calcFunc then return end
+        local output = ctl:CalcOutputWithThisGem(calcFunc, gemData, st.sortGemsByDPSField == "FullDPS")
+        local gemInstance = {
+            level = st:ProcessGemLevel(gemData, ctl.imbuedSelect),
+            quality = st.defaultGemQuality or 0,
+            count = 1,
+            enabled = true,
+            enableGlobal1 = true,
+            enableGlobal2 = true,
+            gemId = gemData.id,
+            nameSpec = gemData.name,
+            skillId = gemData.grantedEffectId,
+            displayEffect = nil,
+            gemData = gemData,
+        }
+        gemTooltip.AddGemTooltip(tip, bm, gemInstance)
+        tip:AddSeparator(10)
+        bm:AddStatComparesToTooltip(tip, calcBase, output, "^7Selecting this gem will give you:")
+    end) }
+end
+
+local TAG_HINT = "Prefix tag searches with a colon and exclude tags with a dash. e.g. :fire:lightning:-cold:area"
+local IMBUED_HINT = "\"Socketed in\" item must be set in order to add an imbued support.\nOnly one imbued support is allowed per item."
+
+-- Collapsed (not dropped) hover tooltip (GemSelectControl:Draw 532-553):
+-- the gem's own tooltip (real instance, so Level/Quality "+N"), else a hint.
+function pob_skillsGemTooltip(index, row)
+    local bm, st = ctx()
+    local sg = st and showGroup(st, index)
+    if not sg then return { lines = { } } end
+    pob_recalculate()
+    row = tonumber(row) or -1
+    return { lines = tipLines(function(tip)
+        if row == 0 then
+            local id = sg.imbuedSupport and bm.data.gemForBaseName[sg.imbuedSupport:lower() .. " support"]
+            local gd = id and bm.data.gems[id]
+            if gd then
+                gemTooltip.AddGemTooltip(tip, bm, { gemData = gd, level = 1, quality = 0 })
+            else
+                for line in IMBUED_HINT:gmatch("[^\n]+") do tip:AddLine(16, line) end
+            end
+            return
+        end
+        local gi = sg.gemList[row]
+        if gi and gi.gemData then
+            gemTooltip.AddGemTooltip(tip, bm, gi)
+        else
+            tip:AddLine(16, TAG_HINT)
+        end
+    end) }
+end
+
+---------------------------------------------------------------------------
 -- Selftests
 ---------------------------------------------------------------------------
 
@@ -687,6 +918,124 @@ function pob_selftestSkillsList()
             and #st.skillSetOrderList == nSets + 1
         local list = pob_skillsGetSetList()
         res.setListOk = #list.sets == #st.skillSetOrderList
+    end)
+    stRestore(bm, st, snap)
+    res.ok = ok
+    if not ok then res.error = tostring(err) end
+    for k, v in pairs(res) do
+        if type(v) == "boolean" and not v then res.ok = false end
+    end
+    res.restored = true
+    return res
+end
+
+-- Part 5.2: group detail panel, gem options, imbued support, GemSelect list.
+function pob_selftestSkillsDetail()
+    local bm, st = ctx()
+    if not st then return { ok = false, error = "no skillsTab" } end
+    local snap = stSnapshot(bm, st)
+    local res = { }
+    local ok, err = pcall(function()
+        pob_skillsDeleteAllGroups()
+        pob_skillsPasteGroup("Slot: Body Armour\r\nFireball 20/0  1\r\n")
+        pob_skillsPasteGroup("Slot: Body Armour\r\nArc 20/0  1\r\n")
+        local a, b = st.socketGroupList[1], st.socketGroupList[2]
+
+        -- Label (changeFunc): label + displayLabel after recalc + one undo state.
+        local undoBefore = #st.undo
+        pob_skillsSetGroupLabel(1, "ST Label")
+        res.labelOk = a.label == "ST Label" and a.displayLabel == "ST Label" and #st.undo == undoBefore + 1
+        pob_skillsSetGroupLabel(1, "")
+        res.labelFallbackOk = a.displayLabel == "Fireball"
+
+        -- Socketed in (selFunc).
+        pob_skillsSetGroupSlot(1, indexWhere(st.controls.groupSlot.list, "slotName", "Helmet"))
+        res.slotOk = a.slot == "Helmet" and pob_skillsGetState().detail.slotIndex == 6
+        local none = pob_skillsSlotTooltip(1)
+        res.slotTooltipNone = #none.lines == 2 and none.lines[1].text:find("Select the item", 1, true) ~= nil
+        local hl = pob_skillsSlotTooltip(indexWhere(st.controls.groupSlot.list, "slotName", "Helmet"))
+        res.slotTooltipItem = #hl.lines >= 1
+        pob_skillsSetGroupSlot(1, indexWhere(st.controls.groupSlot.list, "slotName", "Body Armour"))
+
+        -- Enabled / Include in FullDPS (display rule: includeInFullDPS AND enabled).
+        pob_skillsSetGroupFullDPS(1, true)
+        res.fullDPSOk = a.includeInFullDPS == true and pob_skillsGetState().detail.includeInFullDPS == true
+        pob_skillsSetGroupEnabled(1, false)
+        local d = pob_skillsGetState().detail
+        res.enabledOk = a.enabled == false and d.enabled == false and d.includeInFullDPS == false
+        pob_skillsSetGroupEnabled(1, true)
+        res.countRefused = not pob_skillsSetGroupCount(1, "3").ok
+
+        -- Imbued support: one per slot; the other group in the slot is locked out.
+        local cold = bm.data.gemForBaseName["added cold damage support"]
+        local r = pob_skillsSetImbued(1, cold)
+        res.imbuedSet = r.ok and a.imbuedSupport == "Added Cold Damage" and st.imbuedSupportBySlot["Body Armour"] ~= nil
+        pob_skillsSelectGroup(2)
+        res.imbuedLocked = pob_skillsGetState().detail.imbuedEnabled == false and not pob_skillsSetImbued(2, cold).ok
+        pob_skillsSetImbued(1, "")
+        res.imbuedCleared = a.imbuedSupport == nil and st.imbuedSupportBySlot["Body Armour"] == nil
+        pob_skillsSelectGroup(2)
+        res.imbuedFreed = pob_skillsGetState().detail.imbuedEnabled == true
+
+        -- Gem options (no undo, no modFlag change expected from legacy; just fields).
+        pob_skillsSetOption("sortField", 3)
+        pob_skillsSetOption("defaultGemLevel", 5)
+        pob_skillsSetOption("defaultGemQuality", "25")
+        pob_skillsSetOption("showSupportGemTypes", 2)
+        pob_skillsSetOption("showLegacyGems", true)
+        pob_skillsSetOption("sortGemsByDPS", false)
+        local o = pob_skillsGetState().options
+        res.optionsOk = st.sortGemsByDPSField == "TotalDPS" and st.defaultGemLevel == "levelOne"
+            and st.defaultGemQuality == 23 and st.showSupportGemTypes == "NORMAL"
+            and st.showLegacyGems == true and st.sortGemsByDPS == false
+            and o.sortField == 3 and o.defaultGemLevel == 5 and o.showSupportGemTypes == 2
+        for k, v in pairs(snap.options) do st[k] = v end
+
+        -- GemSelect list on Fireball's group (row 2 = the blank "add gem" row).
+        pob_skillsSelectGroup(1)
+        local c = pob_skillsGemCandidates(1, 2, "ctf", nil)
+        -- Initials tier: "ctf" matches exactly the two gems named C* t* F*.
+        local names = { }
+        for _, row in ipairs(c.rows) do names[row.name] = true end
+        res.abbrevOk = #c.rows == 2 and names["Cold to Fire"] and names["Chance to Flee"] or false
+        local sup = pob_skillsGemCandidates(1, 2, "", "support")
+        local allSup = #sup.rows > 0
+        for _, row in ipairs(sup.rows) do
+            if not bm.data.gems[row.id].grantedEffect.support then allSup = false end
+        end
+        res.filterSupportOk = allSup
+        local act = pob_skillsGemCandidates(1, 2, ":fire:-support", nil)
+        local noSup = #act.rows > 0
+        for _, row in ipairs(act.rows) do
+            local g = bm.data.gems[row.id]
+            if g.grantedEffect.support or not g.tags.fire then noSup = false end
+        end
+        res.tagFilterOk = noSup
+        -- DPS order: check-marked supports first, by descending DPS.
+        local all = pob_skillsGemCandidates(1, 2, "", nil)
+        local ctl = st.gemSlots[2].nameSpec
+        local sorted, seenPlain, prev = true, false, math.huge
+        for _, row in ipairs(all.rows) do
+            local can = ctl.sortCache.canSupport[row.key]
+            if can then
+                if seenPlain then sorted = false end
+                local dps = ctl.sortCache.dps[row.key]
+                if dps > prev + 1e-6 then sorted = false end
+                prev = dps
+            else
+                seenPlain = true
+            end
+        end
+        res.dpsSortOk = sorted and all.rows[1].marker == "check"
+        local tt = pob_skillsGemCandidateTooltip(1, 2, all.rows[1].key)
+        local sawHeader = false
+        for _, l in ipairs(tt.lines) do
+            if l.text and l.text:find("Selecting this gem will give you:", 1, true) then sawHeader = true end
+        end
+        res.candidateTooltipOk = sawHeader
+        res.gemTooltipOk = #pob_skillsGemTooltip(1, 1).lines > 3
+        res.hintTooltipOk = pob_skillsGemTooltip(1, 2).lines[1].text:find(":fire:lightning", 1, true) ~= nil
+        res.previewRestored = #a.gemList == 1
     end)
     stRestore(bm, st, snap)
     res.ok = ok

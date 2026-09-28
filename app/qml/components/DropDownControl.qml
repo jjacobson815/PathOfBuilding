@@ -160,13 +160,13 @@ Item {
             list.positionViewAtIndex(Math.max(0, root.currentIndex), ListView.Contain)
             list.forceActiveFocus()
         }
-        // NOTE: row tooltips are owned by their delegate instance, so they
-        // cannot be reached (or hidden) from here — a delegate's ids are not
-        // in scope outside it. They hide themselves via the row's own
-        // onContainsMouseChanged when the list goes away and hover is lost.
-        onClosed: root._typeBuffer = ""
+        // One row tooltip for the whole list, OUTSIDE the clipped ListView
+        // (a tooltip inside a delegate was clipped to the list and never
+        // showed beside it).
+        onClosed: { root._typeBuffer = ""; rowTip.hide() }
 
         contentItem: Item {
+            Tooltip { id: rowTip; z: 100; property int ownerRow: -1 }
             ListView {
                 id: list
                 anchors.fill: parent
@@ -212,23 +212,24 @@ Item {
                         }
                         onContainsMouseChanged: {
                             if (!root.tooltipForItem) return
-                            if (!containsMouse) { rowTip.hide(); return }
+                            // Shared tooltip: the old row's exit can arrive after the
+                            // new row's enter, so only the owning row may hide it.
+                            if (!containsMouse) { if (rowTip.ownerRow === index) rowTip.hide(); return }
+                            rowTip.ownerRow = index
                             rowTip.clear()
                             root.tooltipForItem(modelData, rowTip)
                             if (rowTip.lines.length === 0) { rowTip.hide(); return }
+                            var host = rowTip.parent
+                            var p = row.mapToItem(host, 0, 0)
                             var win = Window.window
-                            var origin = win ? row.mapToItem(win.contentItem, 0, 0)
+                            var origin = win ? host.mapToItem(win.contentItem, 0, 0)
                                              : Qt.point(0, 0)
                             var viewport = win
                                 ? Qt.rect(-origin.x, -origin.y, win.width, win.height)
-                                : Qt.rect(0, 0, row.width, row.height)
-                            rowTip.showAt(0, 0, row.width, row.height, viewport)
+                                : Qt.rect(0, 0, host.width, host.height)
+                            rowTip.showAt(p.x, p.y, row.width, row.height, viewport)
                         }
                     }
-
-                    // The row tooltip lives on the row so its coordinate space
-                    // is the row's own, matching Button's local-space contract.
-                    Tooltip { id: rowTip }
                 }
 
                 Keys.onPressed: (event) => {

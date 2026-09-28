@@ -22,11 +22,11 @@ GemSelectControl (fuzzy matching + live DPS-sorted candidates + compare tooltips
 
 ## Part 5.2 — Group detail & gem options
 
-- [ ] Group detail panel: label edit, "Socketed in" slot dropdown (with equipped-
+- [x] Group detail panel: label edit, "Socketed in" slot dropdown (with equipped-
   item tooltip), Enabled checkbox, Include-in-FullDPS checkbox, source Count edit,
   **Imbued Support gem selector** (per-slot ExtraSupport + clear; hidden for item-
   provided groups), source note for item/node/explode-provided groups. (M)
-- [ ] Gem options panel: sort-by-DPS checkbox + sort-stat dropdown (FullDPS/
+- [x] Gem options panel: sort-by-DPS checkbox + sort-stat dropdown (FullDPS/
   CombinedDPS/Hit/Average/DoT/Bleed/Ignite/Poison/EHP), default gem level dropdown
   (normalMax/corruptedMax/awakenedMax/characterLevel/levelOne), default gem quality,
   show-support-gems dropdown (All/Non-Exceptional/Exceptional), show-legacy-gems. (S)
@@ -115,3 +115,33 @@ only where legacy hit-tests the cursor or draws. Recon brief of the legacy tab
     Qt 6.4's layout engine; SetManagePopup sets it when opening instead.
   - Qt's offscreen clipboard segfaults on setText: selftests must not call the
     real `Copy` (pob_skillsCopyGroup has a noClipboard flag).
+
+**Part 5.2 — DONE.**
+- Detail panel (legacy geometry, 20px right of the list): label edit, "Socketed
+  in" (row tooltip = the live `groupSlot.tooltipFunc` -> AddItemTooltip incl.
+  "Removing this item..."), Enabled, Include in Full DPS (shown as
+  `includeInFullDPS and enabled`), Count + source note for item/node/explode
+  groups (gem rows hidden for them, slot locked), Imbued Support.
+  All calls go through the live closures (`groupLabel.changeFunc`,
+  `groupSlot.selFunc` incl. the imbued migration, ...). Text edits apply 300 ms
+  after the last keystroke or on Enter/blur (legacy: every keystroke).
+- Imbued support: `pob_skillsSetImbued` = set `sg.imbuedSupport`,
+  `RebuildImbuedSupportBySlot`, then undo (legacy pushes undo BEFORE the
+  change). One per slot: another group in the slot locks the selector.
+- `components/GemSelect.qml` (built here for the imbued selector; the gem rows
+  in 5.3 reuse it). List, matching tiers, :tag/:-tag, S/A filter, DPS sort and
+  check/"+" markers come from the live GemSelectControl (`UpdateSortCache`,
+  `BuildList`); row hover = lifted Draw tooltip ("Selecting this gem will give
+  you:"). Enter = selection else top match; Esc reverts; focus-out keeps an
+  exact match else clears. Deviation: no live preview while typing/arrowing.
+  First open on OccVortex: 1.5 s (one calc per support that can apply, as in
+  legacy); later opens ~5 ms (sortCache keyed on outputRevision).
+- Gem Options section: sort-by-DPS + stat, default level (row tooltip =
+  description), default quality (clamped 23), show support gems, legacy gems.
+  No undo / modFlag / recalc, like legacy.
+- Selftest `skills-detail` (22 flags). Confirmed failing with
+  RebuildImbuedSupportBySlot removed.
+- Shared-component fixes: `CheckBox` label right-aligned (TTF overran into the
+  box); `DropDownControl` row tooltips were inside the clipped ListView and
+  never showed (also the Tree tab's spec dropdown) — now one tooltip outside
+  the list, hidden only by the row that owns it.

@@ -945,6 +945,9 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Phase 5 Part 5.1: skill sets + socket-group list (paste/copy round trip,
     // link colours, Ctrl/right-click toggles, reorder index fix-up, undo/redo).
     if (!pob_run_lua_check(engine, "pob_selftestSkillsList", "skills-list")) return false;
+    // Phase 5 Part 5.2: group detail, gem options, imbued support, GemSelect
+    // list (abbreviation, S/A + tag filters, DPS order, candidate tooltip).
+    if (!pob_run_lua_check(engine, "pob_selftestSkillsDetail", "skills-detail")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

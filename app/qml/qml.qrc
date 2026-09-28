@@ -44,6 +44,7 @@
         <file>components/SpecManagePopup.qml</file>
         <file>components/SetManagePopup.qml</file>
         <file>components/SocketGroupList.qml</file>
+        <file>components/GemSelect.qml</file>
         <file>components/TreeImportPopup.qml</file>
         <file>components/TreeExportPopup.qml</file>
         <file>components/PowerReportPanel.qml</file>
