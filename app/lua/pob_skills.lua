@@ -1231,3 +1231,199 @@ function pob_selftestSkillsGems()
     res.restored = true
     return res
 end
+
+-- Part 5.4: <Skills> XML round trip (legacy SkillsTab:Save/Load via the
+-- standard savers), the legacy flat <Skill> format with name matching, and
+-- undo (deep copies of every set + both main-group selections). Runs on a
+-- fresh build and leaves a fresh "Unnamed build" behind.
+function pob_selftestSkillsPersist()
+    local res = { }
+    local ok, err = pcall(function()
+        main:SetMode("BUILD", false, "Unnamed build")
+        runCallback("OnFrame")
+        local bm, st = ctx()
+        local data = bm.data
+        local gfb = data.gemForBaseName
+
+        -- A transfigured gem: same gameId as another gem, own variantId.
+        local variantGem
+        for id, gd in pairs(data.gems) do
+            local vs = gd.gameId and data.gemsByGameId[gd.gameId]
+            if vs and gd.variantId and not gd.grantedEffect.support then
+                local n = 0
+                for _ in pairs(vs) do n = n + 1 end
+                if n > 1 and gd.variantId ~= gd.gameId:match("[^/]+$") then variantGem = gd break end
+            end
+        end
+        res.variantFound = variantGem ~= nil
+
+        -- Set 1 (untitled): group A with the group-level attributes and an
+        -- imbued support; group B = the transfigured gem. Set 2 "ST Second"
+        -- with a Vaal gem (enableGlobal2 off), active.
+        pob_skillsDeleteAllGroups()
+        pob_skillsPasteGroup("Label: Persist A\r\nSlot: Body Armour\r\nFireball 20/13  2\r\nSpell Echo 20/0 DISABLED 1\r\n")
+        local a = st.socketGroupList[1]
+        a.includeInFullDPS = true
+        pob_skillsSetImbued(1, gfb["added cold damage support"])
+        pob_skillsNewGroup()
+        if variantGem then pob_skillsSetGem(2, 1, variantGem.id) end
+        pob_skillsNewSet("ST Second")
+        pob_skillsSetActiveSet(2)
+        pob_skillsPasteGroup("Vaal Fireball 20/0  1\r\n")
+        st.socketGroupList[1].gemList[1].enableGlobal2 = false
+        st.defaultGemLevel, st.defaultGemQuality = "awakenedMaximum", 17
+        st.sortGemsByDPS, st.sortGemsByDPSField = false, "TotalDot"
+        st.showSupportGemTypes, st.showLegacyGems = "EXCEPTIONAL", true
+        bm.buildFlag = true
+        pob_recalculate()
+
+        local function snapshotSets(t)
+            local out = { order = { }, active = t.activeSkillSetId }
+            for i, id in ipairs(t.skillSetOrderList) do
+                local set = t.skillSets[id]
+                local gs = { }
+                for gi, g in ipairs(set.socketGroupList) do
+                    local gems = { }
+                    for k, gem in ipairs(g.gemList) do
+                        gems[k] = table.concat({ gem.nameSpec, gem.gemId or "", tostring(gem.level), tostring(gem.quality),
+                            tostring(gem.enabled), tostring(gem.enableGlobal1), tostring(gem.enableGlobal2),
+                            tostring(gem.count or 1) }, "|")
+                    end
+                    -- A new group has no mainActiveSkill until LoadSkill defaults it to 1.
+                    gs[gi] = table.concat({ g.label or "", g.slot or "", tostring(g.enabled),
+                        tostring(g.includeInFullDPS or false), tostring(g.mainActiveSkill or 1),
+                        tostring(g.mainActiveSkillCalcs or 1), g.imbuedSupport or "", g.source or "",
+                        table.concat(gems, ";") }, "#")
+                end
+                out.order[i] = (set.title or "<nil>") .. "=" .. table.concat(gs, "/")
+            end
+            return out
+        end
+        local function opts(t)
+            return table.concat({ t.defaultGemLevel, t.defaultGemQuality, tostring(t.sortGemsByDPS),
+                t.sortGemsByDPSField, t.showSupportGemTypes, tostring(t.showLegacyGems) }, "|")
+        end
+        local before, beforeOpts = snapshotSets(st), opts(st)
+
+        -- Writer: every per-gem part/stage/mine/minion field and its *Calcs
+        -- twin is written (set right before SaveDB; the calc pass would clear
+        -- values that do not apply to Fireball).
+        local fb = st.skillSets[st.skillSetOrderList[1]].socketGroupList[1].gemList[1]
+        local calcFields = { skillPart = 2, skillPartCalcs = 3, skillStageCount = 4, skillStageCountCalcs = 5,
+            skillMineCount = 6, skillMineCountCalcs = 7, skillMinion = "STMinion", skillMinionCalcs = "STMinionCalcs",
+            skillMinionItemSet = 8, skillMinionItemSetCalcs = 9, skillMinionSkill = 10, skillMinionSkillCalcs = 11 }
+        for k, v in pairs(calcFields) do fb[k] = v end
+        local xml = bm:SaveDB(nil)
+        local writerOk = true
+        for k, v in pairs(calcFields) do
+            if not xml:find(k .. '="' .. tostring(v) .. '"', 1, true) then writerOk = false; res.writerMissing = k end
+        end
+        res.xmlWritesCalcsFields = writerOk
+        res.xmlHasVariant = variantGem ~= nil and xml:find('variantId="' .. variantGem.variantId .. '"', 1, true) ~= nil
+        res.xmlHasSets = xml:find('<SkillSet', 1, true) ~= nil and xml:find('title="ST Second"', 1, true) ~= nil
+
+        -- Reader: the live LoadSkill reads every one of them back.
+        local probeSet = st:NewSkillSet()
+        local attrib = { nameSpec = "Fireball", gemId = fb.gemData.gameId, variantId = fb.gemData.variantId,
+            level = "20", quality = "0", enabled = "true" }
+        for k, v in pairs(calcFields) do attrib[k] = tostring(v) end
+        st:LoadSkill({ elem = "Skill", attrib = { enabled = "true", mainActiveSkillCalcs = "2" },
+            { elem = "Gem", attrib = attrib } }, probeSet.id)
+        local lg = probeSet.socketGroupList[1]
+        local readerOk = lg ~= nil and lg.mainActiveSkillCalcs == 2 and lg.gemList[1].gemId == fb.gemData.id
+        for k, v in pairs(calcFields) do
+            if not lg or lg.gemList[1][k] ~= v then readerOk = false; res.readerMissing = k end
+        end
+        res.loadSkillReadsCalcsFields = readerOk
+        st.skillSets[probeSet.id] = nil
+
+        -- Round trip of the whole tab.
+        pob_loadBuildXML(xml, "Skills Persist Probe")
+        bm, st = ctx()
+        local after = snapshotSets(st)
+        res.activeSetOk = after.active == before.active and #after.order == 2
+        local same = #after.order == #before.order
+        for i = 1, #before.order do
+            if before.order[i] ~= after.order[i] then same = false; res.mismatchSet = i end
+        end
+        res.setsRoundTrip = same
+        res.optionsRoundTrip = beforeOpts == opts(st)
+        res.variantRoundTrip = variantGem ~= nil
+            and st.skillSets[st.skillSetOrderList[1]].socketGroupList[2].gemList[1].gemId == variantGem.id
+        res.imbuedIdleInSet2 = st.imbuedSupportBySlot["Body Armour"] == nil
+        pob_skillsSetActiveSet(1)
+        res.imbuedRebuilt = st.imbuedSupportBySlot["Body Armour"] ~= nil
+
+        -- Stable on a real build: load -> save -> load -> save gives the same
+        -- <Skills> section (source groups, *Calcs selections, all attribs).
+        local f = io.open(_SRC_DIR .. "/../spec/TestBuilds/3.13/OccVortex.xml", "r")
+        if f then
+            local real = f:read("*a")
+            f:close()
+            pob_loadBuildXML(real, "Skills Stable Probe")
+            local x1 = ctx():SaveDB(nil)
+            pob_loadBuildXML(x1, "Skills Stable Probe")
+            local x2 = ctx():SaveDB(nil)
+            local s1, s2 = x1:match("<Skills.-</Skills>"), x2:match("<Skills.-</Skills>")
+            -- Legacy quirks (upstream too), same meaning either way:
+            --  * a group loaded WITHOUT includeInFullDPS keeps nil and saves
+            --    "nil"; reloaded, "nil" ~= "true" gives false;
+            --  * the engine-made Explode group has no mainActiveSkill[Calcs]
+            --    and saves "nil"; LoadSkill reads that as 1.
+            if s1 then
+                s1 = s1:gsub('includeInFullDPS="nil"', 'includeInFullDPS="false"')
+                s1 = s1:gsub('mainActiveSkill="nil"', 'mainActiveSkill="1"')
+                s1 = s1:gsub('mainActiveSkillCalcs="nil"', 'mainActiveSkillCalcs="1"')
+            end
+            res.realBuildStable = s1 ~= nil and s1 == s2 and s1:find("mainActiveSkillCalcs", 1, true) ~= nil
+        else
+            res.realBuildStable = false
+            res.realBuildMissing = true
+        end
+
+        -- Legacy flat <Skill> (pre-skill-set files): into set 1; gems matched
+        -- by skillId and by name only; group-level skillPart onto gem 1;
+        -- `active` instead of `enabled`.
+        local legacySkills = '<Skills defaultGemLevel="20" sortGemsByDPS="true">'
+            .. '<Skill active="true" label="Old" slot="Helmet" skillPart="2" mainActiveSkill="1">'
+            .. '<Gem skillId="Fireball" nameSpec="Fireball" level="18" quality="5" enabled="true"/>'
+            .. '<Gem nameSpec="Spell Echo" level="17" quality="0" enabled="true"/>'
+            .. '</Skill></Skills>'
+        local oldXml = xml:gsub("<Skills.-</Skills>", function() return legacySkills end, 1)
+        pob_loadBuildXML(oldXml, "Skills Legacy Probe")
+        bm, st = ctx()
+        local g = st.socketGroupList[1]
+        res.legacyFlatOk = (#st.skillSetOrderList == 1 and g ~= nil and g.label == "Old" and g.enabled == true
+            and g.slot == "Helmet" and #g.gemList == 2
+            and g.gemList[1].gemData ~= nil and g.gemList[1].gemData.name == "Fireball" and g.gemList[1].level == 18
+            and g.gemList[2].gemData ~= nil and g.gemList[2].gemData.name == "Spell Echo"
+            and g.gemList[1].skillPart == 2 and st.defaultGemLevel == "normalMaximum") and true or false
+
+        -- Undo: every set is copied, and both main selections come back.
+        pob_skillsPasteGroup("Arc 20/0  1\r\n")
+        pob_skillsNewSet("ST Undo")
+        bm.mainSocketGroup = 2
+        bm.calcsTab.input.skill_number = 1
+        st:AddUndoState()
+        local copied = st.undo[1].skillSets[st.skillSetOrderList[1]].socketGroupList[1]
+        st.socketGroupList[1].label = "mutated"
+        res.undoDeepCopy = copied.label == "Old" and copied ~= st.socketGroupList[1]
+        st.socketGroupList[1].label = "Old"
+        pob_skillsSetMainGroup(1)
+        bm.calcsTab.input.skill_number = 2
+        pob_skillsDeleteSet(2)
+        res.deletedSet = #st.skillSetOrderList == 1
+        pob_skillsUndo()
+        res.undoSetBack = #st.skillSetOrderList == 2 and st.skillSets[st.skillSetOrderList[2]].title == "ST Undo"
+        pob_skillsUndo()
+        res.undoMainBoth = bm.mainSocketGroup == 2 and bm.calcsTab.input.skill_number == 1
+    end)
+    main:SetMode("BUILD", false, "Unnamed build")
+    runCallback("OnFrame")
+    res.ok = ok
+    if not ok then res.error = tostring(err) end
+    for k, v in pairs(res) do
+        if type(v) == "boolean" and not v then res.ok = false end
+    end
+    return res
+end

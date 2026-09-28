@@ -951,6 +951,9 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Phase 5 Part 5.3: gem rows (set/level/quality/count/enabled/Vaal/delete,
     // error text, links, quality + enabled tooltips) + group tooltip.
     if (!pob_run_lua_check(engine, "pob_selftestSkillsGems", "skills-gems")) return false;
+    // Phase 5 Part 5.4: <Skills> XML round trip (sets, every group/gem attrib
+    // incl. variantId and *Calcs fields, options), legacy flat <Skill>, undo.
+    if (!pob_run_lua_check(engine, "pob_selftestSkillsPersist", "skills-persist")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

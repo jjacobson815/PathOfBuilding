@@ -1,6 +1,6 @@
 # Phase 5 — Skills Tab
 
-**Status:** IN PROGRESS (started 2026-09-28, cloud session, branch `cloud/phase-5`)
+**Status:** DONE (2026-09-28, cloud session, branch `cloud/phase-5`)
 **Goal:** Port the skills/gems tab: skill sets, the socket-group list with its
 keyboard semantics, the group detail panel, and the dynamic gem rows built on
 GemSelectControl (fuzzy matching + live DPS-sorted candidates + compare tooltips).
@@ -47,13 +47,13 @@ GemSelectControl (fuzzy matching + live DPS-sorted candidates + compare tooltips
 
 ## Part 5.4 — Persistence
 
-- [ ] `<Skills>` XML round-trip: attribs (activeSkillSet, defaultGemLevel/Quality,
+- [x] `<Skills>` XML round-trip: attribs (activeSkillSet, defaultGemLevel/Quality,
   sortGemsByDPS[Field], showSupportGemTypes, showLegacyGems); `<SkillSet>` →
   `<Skill>` groups → `<Gem>` with full attribs (nameSpec, skillId, gemId/variantId,
   level, quality, enabled, enableGlobal1/2, count, and every `skillPart`/`stageCount`/
   `mineCount`/`minion`/`minionItemSet`/`minionSkill` + their `*Calcs` variants).
   Support **legacy flat `<Skill>`** and legacy gem-name matching. (M)
-- [ ] Undo state deep-copies all sets and preserves main-group selection for both
+- [x] Undo state deep-copies all sets and preserves main-group selection for both
   side bar and Calcs. (S)
 
 ## Acceptance gate
@@ -176,3 +176,40 @@ only where legacy hit-tests the cursor or draws. Recon brief of the legacy tab
   ancestor cuts it and it draws above popups. Checked: tree node tooltip,
   popup button tooltip, dropdown rows, all Skills tooltips. Capture diff of
   the other views: only the checkbox-label alignment (and ~115 px noise).
+
+**Part 5.4 — DONE.**
+- `<Skills>` save/load is legacy's own `SkillsTab:Save/Load` (a standard
+  saver; the host's `bm:SaveDB` already includes it). Selftest
+  `skills-persist` (18 flags) proves it through the port:
+  - writer: every `skillPart/StageCount/MineCount/Minion/MinionItemSet/
+    MinionSkill` field and its `*Calcs` twin, `variantId` of a transfigured gem,
+    `<SkillSet title>`;
+  - reader: live `LoadSkill` reads all of them back (fed a hand-made node,
+    because the calc pass clears values that do not apply to the gem);
+  - round trip: 2 sets (titles, active set), group attribs incl. imbued
+    support, gem attribs, tab options;
+  - a real build (`spec/TestBuilds/3.13/OccVortex.xml`) load -> save -> load ->
+    save gives the same `<Skills>`, apart from two UPSTREAM quirks that mean
+    the same thing (`includeInFullDPS="nil"` -> `"false"`, Explode group
+    `mainActiveSkill="nil"` -> `"1"`);
+  - legacy flat `<Skill>` (no `<SkillSet>`; `active=`; skillId-only and
+    name-only gems; group-level skillPart) loads into set 1.
+- Undo: `CreateUndoState` copies every set (checked by mutating after a
+  push), and undo restores both `mainSocketGroup` and the Calcs
+  `skill_number`, and a deleted set.
+
+### Acceptance gate — 2026-09-28 (Linux)
+- `tools/linux-selftest.sh`: `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0`
+  with `skills-list`, `skills-detail`, `skills-gems`, `skills-persist` green.
+- Open a build (OccVortex) -> groups, gems, link colours, levels/qualities as
+  legacy; the side-bar main-skill selector follows right-click / reorder
+  (checked in the running app under Xvfb).
+- "ctf" -> Cold to Fire / Chance to Flee (initials tier); DPS order and the
+  check/"+" colours come from the live GemSelectControl; hover shows "Selecting
+  this gem will give you:".
+- Copy -> paste gives an identical group (selftest + in-app Ctrl+C/Ctrl+V).
+- Save round trip incl. variantId and `*Calcs` fields (above).
+- Captures vs a Linux capture from this session's start: non-Skills views
+  0-10 px; Tree 2,111 px = the checkbox-label fix; Skills = the new view. vs the
+  committed (Windows) baseline every view differs by font rendering, so the
+  Skills/Tree baseline refresh needs Windows.
