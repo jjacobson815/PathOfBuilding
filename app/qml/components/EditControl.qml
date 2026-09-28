@@ -108,6 +108,9 @@ Item {
         enabled: root.controlEnabled
         selectByMouse: true
         activeFocusOnPress: true
+        // Legacy EditControl tab-advance: Tab / Shift+Tab walk the fields in
+        // declaration order (Qt's focus chain).
+        activeFocusOnTab: true
         // maximumLength rejects at the source; the sanitizer below still runs
         // for the paste path, which can arrive over-length in one edit.
         maximumLength: root.maxChars > 0 ? root.maxChars : 32767

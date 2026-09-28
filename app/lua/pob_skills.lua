@@ -793,6 +793,109 @@ function pob_skillsGemTooltip(index, row)
 end
 
 ---------------------------------------------------------------------------
+-- 5.3 Gem rows (SkillsTab:CreateGemSlot 640-965). Row r of the displayed
+-- group; row #gemList+1 is the blank "add a gem" row.
+---------------------------------------------------------------------------
+
+local function gemSlot(st, index, row)
+    local sg = showGroup(st, index)
+    if not sg or sg.source then return nil end
+    row = tonumber(row) or -1
+    local slot = st.gemSlots[row]
+    if not slot or row > #sg.gemList + 1 then return nil end
+    return sg, slot, sg.gemList[row], row
+end
+
+-- Commit a picked gem (GemSelect callback with addUndo, bufMatchesGem).
+-- "" = the text matched no gem: legacy's focus-lost path deletes the row.
+function pob_skillsSetGem(index, row, gemId)
+    local bm, st = ctx()
+    local sg, slot, gi = gemSlot(st or { }, index, row)
+    if not sg then return fail("no such row") end
+    if not gemId or gemId == "" then
+        if not gi then return { ok = true } end
+        slot.delete.onClick()
+        return done()
+    end
+    if not bm.data.gems[gemId] then return fail("unknown gem") end
+    if gi and gi.gemId == gemId then return { ok = true } end
+    slot.nameSpec.gemChangeFunc(gemId, true, false, true)
+    return done()
+end
+
+function pob_skillsDeleteGem(index, row)
+    local bm, st = ctx()
+    local sg, slot, gi = gemSlot(st or { }, index, row)
+    if not (sg and gi) then return fail("no such gem") end
+    slot.delete.onClick()
+    return done()
+end
+
+-- Level / quality / count edits: the slot's own changeFunc (clamping via
+-- ProcessSocketGroup -> validateGemLevel).
+local function gemEdit(field)
+    return function(index, row, text)
+        local bm, st = ctx()
+        local sg, slot, gi = gemSlot(st or { }, index, row)
+        if not (sg and gi) then return fail("no such gem") end
+        slot[field].changeFunc(tostring(text or ""))
+        return done()
+    end
+end
+pob_skillsSetGemLevel = gemEdit("level")
+pob_skillsSetGemQuality = gemEdit("quality")
+pob_skillsSetGemCount = gemEdit("count")
+
+-- Enabled checkbox (SkillsTab.lua:842-860), lifted: legacy reads
+-- gi.gemData.vaalGem without a nil check and errors on an unresolved gem.
+function pob_skillsSetGemEnabled(index, row, state)
+    local bm, st = ctx()
+    local sg, slot, gi = gemSlot(st or { }, index, row)
+    if not (sg and gi) then return fail("no such gem") end
+    if not (gi.gemData and gi.gemData.vaalGem) then
+        slot.enableGlobal1.state = true
+        gi.enableGlobal1 = true
+        slot.enableGlobal2.state = true
+        gi.enableGlobal2 = true
+    end
+    gi.enabled = state and true or false
+    slot.enabled.state = gi.enabled
+    st:ProcessSocketGroup(sg)
+    st:AddUndoState()
+    bm.buildFlag = true
+    return done()
+end
+
+-- Vaal gems: enable the 1st / 2nd granted effect (no ProcessSocketGroup).
+function pob_skillsSetGemGlobal(index, row, n, state)
+    local bm, st = ctx()
+    local sg, slot, gi = gemSlot(st or { }, index, row)
+    local ctl = slot and slot["enableGlobal" .. tostring(n)]
+    if not (sg and gi and ctl) then return fail("no such gem") end
+    ctl.state = state and true or false
+    ctl.changeFunc(state and true or false)
+    return done()
+end
+
+-- Quality tooltip (775-834): quality stat lines + "Setting to 20 quality
+-- will give you:"; Enabled tooltip (862-874): the enable/disable diff.
+function pob_skillsGemQualityTooltip(index, row)
+    local bm, st = ctx()
+    local sg, slot, gi = gemSlot(st or { }, index, row)
+    if not (sg and gi) then return { lines = { } } end
+    pob_recalculate()
+    return { lines = tipLines(function(tip) slot.quality.tooltipFunc(tip) end) }
+end
+
+function pob_skillsGemEnabledTooltip(index, row)
+    local bm, st = ctx()
+    local sg, slot, gi = gemSlot(st or { }, index, row)
+    if not (sg and gi) then return { lines = { } } end
+    pob_recalculate()
+    return { lines = tipLines(function(tip) slot.enabled.tooltipFunc(tip) end) }
+end
+
+---------------------------------------------------------------------------
 -- Selftests
 ---------------------------------------------------------------------------
 
@@ -1036,6 +1139,88 @@ function pob_selftestSkillsDetail()
         res.gemTooltipOk = #pob_skillsGemTooltip(1, 1).lines > 3
         res.hintTooltipOk = pob_skillsGemTooltip(1, 2).lines[1].text:find(":fire:lightning", 1, true) ~= nil
         res.previewRestored = #a.gemList == 1
+    end)
+    stRestore(bm, st, snap)
+    res.ok = ok
+    if not ok then res.error = tostring(err) end
+    for k, v in pairs(res) do
+        if type(v) == "boolean" and not v then res.ok = false end
+    end
+    res.restored = true
+    return res
+end
+
+-- Part 5.3: gem rows + socket-group tooltip.
+function pob_selftestSkillsGems()
+    local bm, st = ctx()
+    if not st then return { ok = false, error = "no skillsTab" } end
+    local snap = stSnapshot(bm, st)
+    local res = { }
+    local ok, err = pcall(function()
+        local gfb = bm.data.gemForBaseName
+        pob_skillsDeleteAllGroups()
+        pob_skillsPasteGroup("Fireball 20/0  1\r\n")
+        local sg = st.socketGroupList[1]
+
+        -- Set a gem on the blank row: default level, one undo state.
+        local undoBefore = #st.undo
+        pob_skillsSetGem(1, 2, gfb["spell echo support"])
+        local echo = sg.gemList[2]
+        res.addOk = echo ~= nil and echo.gemData ~= nil and echo.gemData.name == "Spell Echo"
+            and echo.level == st:ProcessGemLevel(echo.gemData) and #st.undo == undoBefore + 1
+        pob_skillsSetGem(1, 2, gfb["spell echo support"])
+        res.sameGemNoop = #st.undo == undoBefore + 1
+
+        -- Cross-highlight links: Spell Echo supports Fireball.
+        local d = pob_skillsGetState().detail
+        res.linksOk = isValueInArray(d.gems[1].links, 2) ~= nil and isValueInArray(d.gems[2].links, 1) ~= nil
+
+        -- Level / quality / count edits.
+        pob_skillsSetGemLevel(1, 2, "5")
+        pob_skillsSetGemQuality(1, 2, "15")
+        pob_skillsSetGemCount(1, 1, "3")
+        res.editsOk = echo.level == 5 and echo.quality == 15 and sg.gemList[1].count == 3
+        res.countShownOk = d.gems[1].countShown == true and d.gems[2].countShown == false
+
+        -- Tooltips: quality stats + diff; enable/disable diff.
+        local qt = pob_skillsGemQualityTooltip(1, 2)
+        local et = pob_skillsGemEnabledTooltip(1, 2)
+        local function has(t, needle)
+            for _, l in ipairs(t.lines) do if l.text and l.text:find(needle, 1, true) then return true end end
+            return false
+        end
+        res.qualityTooltipOk = has(qt, "At +20% Quality:") and has(qt, "Setting to 20 quality will give you:")
+        res.enabledTooltipOk = has(et, "Disabling this gem will give you:")
+
+        -- Enabled toggle drops the gem out of the links.
+        pob_skillsSetGemEnabled(1, 2, false)
+        d = pob_skillsGetState().detail
+        res.disableOk = echo.enabled == false and d.gems[2].enabled == false and #d.gems[1].links == 0
+
+        -- Vaal gem: per-effect enable boxes on a second line.
+        pob_skillsSetGem(1, 3, gfb["vaal fireball"])
+        d = pob_skillsGetState().detail
+        res.vaalShown = d.gems[3].global1Shown == true and d.gems[3].global2Shown == true
+            and d.gems[3].global1Label:find("^Enable ") ~= nil
+        pob_skillsSetGemGlobal(1, 3, 2, false)
+        res.vaalGlobalOk = sg.gemList[3].enableGlobal2 == false
+
+        -- Unresolved gem: error text; the enable toggle does not error
+        -- (legacy's handler reads gemData.vaalGem without a nil check).
+        pob_skillsPasteGroup("Foobar Nonsense 20/0  1\r\n")
+        d = pob_skillsGetState().detail
+        res.errMsgOk = d.gems[1].errMsg ~= "" and d.gems[1].resolved == false
+        res.unresolvedToggleOk = pob_skillsSetGemEnabled(2, 1, false).ok == true
+
+        -- Delete: the x button, and an empty commit on an existing row.
+        pob_skillsDeleteGem(1, 3)
+        res.deleteOk = #sg.gemList == 2
+        pob_skillsSetGem(1, 2, "")
+        res.emptyCommitDeletes = #sg.gemList == 1
+
+        -- Socket-group tooltip (AddSocketGroupTooltip).
+        local gt = pob_skillsGroupTooltip(1)
+        res.groupTooltipOk = has(gt, "Active Skill #1:")
     end)
     stRestore(bm, st, snap)
     res.ok = ok

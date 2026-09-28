@@ -948,6 +948,9 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Phase 5 Part 5.2: group detail, gem options, imbued support, GemSelect
     // list (abbreviation, S/A + tag filters, DPS order, candidate tooltip).
     if (!pob_run_lua_check(engine, "pob_selftestSkillsDetail", "skills-detail")) return false;
+    // Phase 5 Part 5.3: gem rows (set/level/quality/count/enabled/Vaal/delete,
+    // error text, links, quality + enabled tooltips) + group tooltip.
+    if (!pob_run_lua_check(engine, "pob_selftestSkillsGems", "skills-gems")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

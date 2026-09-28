@@ -33,7 +33,7 @@ GemSelectControl (fuzzy matching + live DPS-sorted candidates + compare tooltips
 
 ## Part 5.3 — Gem rows (GemSelectControl)
 
-- [ ] Dynamic gem rows (one per gem, created on demand): delete X, **GemSelect**
+- [x] Dynamic gem rows (one per gem, created on demand): delete X, **GemSelect**
   (fuzzy/abbreviation match `FindSkillGem`, sorted-by-DPS dropdown with gem
   tooltips, `:tag`/`:-tag` filters, S/A overlay filters, ENTER/ESC commit/revert,
   supporting-gem cross-highlight), level edit (+N from supports), quality edit
@@ -42,7 +42,7 @@ GemSelectControl (fuzzy matching + live DPS-sorted candidates + compare tooltips
   (unrecognized/ambiguous/unsupported), per-Vaal enableGlobal1/2 checkboxes,
   tab-group nav, horizontal scrollbar. (L — GemSelect live compares depend on the
   Phase 2 calculator bridge + the async-calc decision.)
-- [ ] Socket-group tooltip builder (`AddSocketGroupTooltip`) reused by side bar +
+- [x] Socket-group tooltip builder (`AddSocketGroupTooltip`) reused by side bar +
   Calcs tab. (S)
 
 ## Part 5.4 — Persistence
@@ -145,3 +145,34 @@ only where legacy hit-tests the cursor or draws. Recon brief of the legacy tab
   box); `DropDownControl` row tooltips were inside the clipped ListView and
   never showed (also the Tree tab's spec dropdown) — now one tooltip outside
   the list, hidden only by the row that owns it.
+
+**Part 5.3 — DONE.**
+- Gem rows in SkillsView (legacy columns: x 0 delete, 22 name, 324 level,
+  386 quality, 464 enabled, 502 count, 564 error; headers 18px above; Vaal
+  "Enable <effect>:" boxes on a 2nd line, next row 24px lower). The blank last
+  row adds a gem. Rows are a COUNT model, so a refresh updates them in place
+  and a focused field keeps focus while typing.
+- Bridge: `pob_skillsSetGem` (the slot's `gemChangeFunc`; "" = legacy's
+  focus-lost delete), `DeleteGem` (`delete.onClick`), `SetGemLevel/Quality/
+  Count` (`changeFunc`, clamped by ProcessSocketGroup), `SetGemEnabled`
+  (lifted with a nil guard: legacy errors on an unresolved gem),
+  `SetGemGlobal`, `GemQualityTooltip` / `GemEnabledTooltip` (the slots'
+  `tooltipFunc`). Count tooltip is the static legacy text.
+- Supporting-gem cross-highlight: `links` per row from the live
+  `GemSelectControl:CheckSupporting`, shown while a gem name is hovered.
+- "+N from supports": legacy draws no badge; it is in the gem tooltip
+  ("Level: 21 (+1)") and the group tooltip, both from the live builders.
+- Tab / Shift+Tab walk name -> level -> quality -> count -> next row
+  (`activeFocusOnTab` added to EditControl and GemSelect).
+- Horizontal (and, when short, vertical) scrollbar like legacy; the page no
+  longer pans by dragging.
+- Socket-group tooltip builder: `pob_skillsGroupTooltip` (list rows) and the
+  existing `pob_getSocketGroupTooltip` (side bar) both call the live
+  `SkillsTab:AddSocketGroupTooltip`; the Calcs tab (Phase 8) can reuse either.
+- Selftest `skills-gems` (16 flags). Confirmed failing with legacy's missing
+  nil check restored.
+- Shared fix: `Tooltip` now shows itself in the window's popup overlay
+  (mapping coordinates from where it is declared), so no `clip: true`
+  ancestor cuts it and it draws above popups. Checked: tree node tooltip,
+  popup button tooltip, dropdown rows, all Skills tooltips. Capture diff of
+  the other views: only the checkbox-label alignment (and ~115 px noise).

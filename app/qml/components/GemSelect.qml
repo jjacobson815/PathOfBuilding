@@ -51,6 +51,10 @@ FocusScope {
     implicitWidth: 300
     implicitHeight: 20
 
+    // _setText() writes input.text directly (breaking its binding), so follow
+    // outside changes (refresh, undo) by hand while not being edited.
+    onTextChanged: if (!input.activeFocus) _setText(text)
+
     function _hex(code) {
         return (code && code.indexOf("^x") === 0) ? "#" + code.substr(2, 6) : theme.text
     }
@@ -144,6 +148,7 @@ FocusScope {
         text: root.text
         enabled: root.controlEnabled
         selectByMouse: true
+        activeFocusOnTab: true
         font.family: theme.fontVar
         font.pixelSize: 16
         color: !root.controlEnabled ? theme.muted

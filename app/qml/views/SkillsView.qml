@@ -23,6 +23,14 @@ import "../components/StatDiff.js" as StatDiff
 //   Control values are pushed imperatively after each refresh because the
 //   components write their own state (a binding would break on first edit).
 //
+// Part 5.3: gem rows (SkillsTab:CreateGemSlot 640-965) — delete "x", GemSelect,
+//   level, quality (tooltip: quality stats + "Setting to 20 quality..."),
+//   enabled (tooltip: enable/disable diff), count (shown for gems with an
+//   active skill), error text, Vaal "Enable <effect>:" boxes on a 2nd line,
+//   supporting-gem cross-highlight while a gem name is hovered. The last row
+//   is the blank "add a gem" row. Rows are a COUNT model so a refresh updates
+//   them in place (a focused field keeps focus while typing).
+//
 // STATE MODEL: `st` is pob_skillsGetState(), re-read (coalesced with
 // Qt.callLater) on skills/calcs/items/tree/mode signals only — no frame loop
 // (invariant #7). Everything is addressed by 1-based index because legacy
@@ -37,6 +45,8 @@ Item {
     readonly property var groups: st && st.groups && st.groups.length !== undefined ? st.groups : []
     readonly property var sets: st && st.sets && st.sets.length !== undefined ? st.sets : []
     readonly property var detail: st && st.detail ? st.detail : null
+    readonly property var gems: detail && detail.gems && detail.gems.length !== undefined ? detail.gems : []
+    property int hoverGemRow: 0          // 1-based gem row whose name is hovered
 
     property bool _pending: false
     function refresh() {
@@ -119,15 +129,25 @@ Item {
     Flickable {
         id: page
         anchors.fill: parent
+        anchors.bottomMargin: hScroll.visible ? 18 : 0
         contentWidth: Math.max(width, content.implicitWidth)
         contentHeight: Math.max(height, content.implicitHeight)
         boundsBehavior: Flickable.StopAtBounds
+        interactive: false          // scrolled by the bars / wheel, not by dragging
         clip: true
+        contentX: hScroll.offset
+        contentY: vScroll.offset
+        WheelHandler {
+            onWheel: function (event) {
+                if (event.modifiers & Qt.ShiftModifier) hScroll.handleWheel(event.angleDelta.y)
+                else vScroll.handleWheel(event.angleDelta.y)
+            }
+        }
 
         Item {
             id: content
-            implicitWidth: 400 + 700
-            implicitHeight: 560
+            implicitWidth: 400 + 564 + 350      // gem Count column + 350 (legacy maxX)
+            implicitHeight: Math.max(620, groupDetail.y + 100 + (root.gems.length + 1) * 44 + 20)
 
             // --- Skill set row (SkillsTab.lua:95-106) ---
             Widgets.Label {
@@ -359,6 +379,135 @@ Item {
                     }
                 }
 
+                // --- Gem rows (anchorGemSlots at y 100; headers 18 above) ---
+                Item {
+                    id: gemArea
+                    visible: !groupDetail.isSource
+                    y: 100
+                    Widgets.Label { x: 22; y: -18; label: "^7Gem name:"; size: 16 }
+                    Widgets.Label { x: 324; y: -18; label: "^7Level:"; size: 16 }
+                    Widgets.Label { x: 386; y: -18; label: "^7Quality:"; size: 16 }
+                    Widgets.Label { x: 448; y: -18; label: "^7Enabled:"; size: 16 }
+                    Widgets.Label { x: 510; y: -18; label: "^7Count:"; size: 16 }
+
+                    Column {
+                        spacing: 0
+                        Repeater {
+                            model: root.gems.length + 1
+                            delegate: Item {
+                                id: gemRow
+                                readonly property int r: index + 1
+                                readonly property var g: index < root.gems.length ? root.gems[index] : null
+                                readonly property bool hasGlobals: !!(g && (g.global1Shown || g.global2Shown))
+                                width: 700
+                                height: hasGlobals ? 44 : 22
+
+                                function push() {
+                                    if (!levelEdit.editing) levelEdit.text = g ? String(g.level) : ""
+                                    if (!qualityEdit.editing) qualityEdit.text = g ? String(g.quality) : ""
+                                    if (!countEdit.editing) countEdit.text = g ? String(g.count) : ""
+                                    enabledBox.state = !!(g && g.enabled)
+                                    global1.state = !!(g && g.global1)
+                                    global2.state = !!(g && g.global2)
+                                }
+                                onGChanged: push()
+                                Component.onCompleted: push()
+
+                                Debounce { id: levelDb; apply: function (v) { root.call("pob_skillsSetGemLevel", [groupDetail.gi, gemRow.r, v]) } }
+                                Debounce { id: qualityDb; apply: function (v) { root.call("pob_skillsSetGemQuality", [groupDetail.gi, gemRow.r, v]) } }
+                                Debounce { id: countDb; apply: function (v) { root.call("pob_skillsSetGemCount", [groupDetail.gi, gemRow.r, v]) } }
+
+                                Widgets.Button {
+                                    width: 20; height: 20
+                                    label: "x"
+                                    controlEnabled: gemRow.g !== null
+                                    tooltipText: "Remove this gem."
+                                    onClicked: root.call("pob_skillsDeleteGem", [groupDetail.gi, gemRow.r])
+                                }
+                                Widgets.GemSelect {
+                                    x: 22; width: 300; height: 20
+                                    groupIndex: groupDetail.gi
+                                    row: gemRow.r
+                                    text: gemRow.g ? gemRow.g.nameSpec : ""
+                                    textColor: gemRow.g ? gemRow.g.color : "^7"
+                                    highlighted: {
+                                        const h = root.hoverGemRow
+                                        if (h < 1 || h === gemRow.r || h > root.gems.length) return false
+                                        return root.gems[h - 1].links.indexOf(gemRow.r) >= 0
+                                    }
+                                    onHoverChanged: function (on) {
+                                        if (on) root.hoverGemRow = gemRow.r
+                                        else if (root.hoverGemRow === gemRow.r) root.hoverGemRow = 0
+                                    }
+                                    onPicked: function (id) { root.call("pob_skillsSetGem", [groupDetail.gi, gemRow.r, id]) }
+                                }
+                                Widgets.EditControl {
+                                    id: levelEdit
+                                    x: 324; width: 60; height: 20
+                                    isNumeric: true; maxChars: 2
+                                    controlEnabled: gemRow.g !== null
+                                    onEdited: function (t) { levelDb.push(t) }
+                                    onCommitted: function (t) { levelDb.flush(t) }
+                                }
+                                Widgets.EditControl {
+                                    id: qualityEdit
+                                    x: 386; width: 60; height: 20
+                                    isNumeric: true; maxChars: 2
+                                    controlEnabled: gemRow.g !== null
+                                    tooltipFunc: function (tt) {
+                                        StatDiff.fillFromLines(tt, luaEngine.invoke("pob_skillsGemQualityTooltip", [groupDetail.gi, gemRow.r]))
+                                    }
+                                    onEdited: function (t) { qualityDb.push(t) }
+                                    onCommitted: function (t) { qualityDb.flush(t) }
+                                }
+                                Widgets.CheckBox {
+                                    id: enabledBox
+                                    x: 464; width: 20; height: 20
+                                    controlEnabled: gemRow.g !== null
+                                    tooltipFunc: function (tt) {
+                                        StatDiff.fillFromLines(tt, luaEngine.invoke("pob_skillsGemEnabledTooltip", [groupDetail.gi, gemRow.r]))
+                                    }
+                                    onToggled: function (s) { root.call("pob_skillsSetGemEnabled", [groupDetail.gi, gemRow.r, s]) }
+                                }
+                                Widgets.EditControl {
+                                    id: countEdit
+                                    x: 502; width: 60; height: 20
+                                    visible: !!(gemRow.g && gemRow.g.countShown)
+                                    isNumeric: true; maxChars: 2
+                                    tooltipFunc: function (tt) {
+                                        tt.addLine(16, "^8Note: `count` integer value scales the DPS of associated skill by a scalar.")
+                                        tt.addLine(16, "^8To be used with totems, minions, shot-gunning of projectiles (e.g., VD, magma-orbs),")
+                                        tt.addLine(16, "^8multi-hit projectiles (e.g. ball-lightning), traps, mines.")
+                                    }
+                                    onEdited: function (t) { countDb.push(t) }
+                                    onCommitted: function (t) { countDb.flush(t) }
+                                }
+                                Widgets.Label {
+                                    x: 564; y: 2
+                                    visible: !!(gemRow.g && gemRow.g.errMsg !== "")
+                                    label: "^1" + (gemRow.g ? gemRow.g.errMsg : "")
+                                    size: 16
+                                }
+                                // Vaal gems: "Enable <effect>:" boxes on a second line.
+                                Widgets.CheckBox {
+                                    id: global1
+                                    visible: !!(gemRow.g && gemRow.g.global1Shown)
+                                    x: labelWidth + 12; y: 22; width: 20; height: 20
+                                    label: gemRow.g ? gemRow.g.global1Label : ""
+                                    onToggled: function (s) { root.call("pob_skillsSetGemGlobal", [groupDetail.gi, gemRow.r, 1, s]) }
+                                }
+                                Widgets.CheckBox {
+                                    id: global2
+                                    visible: !!(gemRow.g && gemRow.g.global2Shown)
+                                    x: (global1.visible ? global1.x + 20 : 0) + labelWidth + 16; y: 22; width: 20; height: 20
+                                    label: gemRow.g ? gemRow.g.global2Label : ""
+                                    onToggled: function (s) { root.call("pob_skillsSetGemGlobal", [groupDetail.gi, gemRow.r, 2, s]) }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Source note for item / node / explode-provided groups.
                 Widgets.ColorText {
                     visible: groupDetail.isSource
@@ -369,6 +518,32 @@ Item {
                 }
             }
         }
+    }
+
+    // Legacy's horizontal bar along the bottom (SkillsTab:Draw 531-540: the
+    // content reaches past the Count column); a vertical one when the window
+    // is shorter than the tab.
+    Widgets.ScrollBar {
+        id: hScroll
+        anchors.left: parent.left
+        anchors.right: vScroll.visible ? vScroll.left : parent.right
+        anchors.bottom: parent.bottom
+        height: 18
+        dir: "HORIZONTAL"
+        visible: active
+        contentDim: content.implicitWidth
+        viewDim: page.width
+    }
+    Widgets.ScrollBar {
+        id: vScroll
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: hScroll.visible ? hScroll.top : parent.bottom
+        width: 18
+        dir: "VERTICAL"
+        visible: active
+        contentDim: content.implicitHeight
+        viewDim: page.height
     }
 
     Widgets.SetManagePopup {
