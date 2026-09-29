@@ -12,11 +12,12 @@ stand and what the last session learned.
 | Draft PR | https://github.com/jjacobson815/PathOfBuilding/pull/7 (against `dev`); CI green on `6ddfc60`, see the session report for the 6.2 push |
 | Part 6.1 | DONE, ticked, committed, pushed (`6ddfc60`) |
 | Part 6.2 | DONE in the first Windows session, ticked, committed, pushed; check `items-lists` (44 flags). Drag-drop / tooltips / shared-sets pane NOT eyeballed (no computer-use tools) |
-| Parts 6.3 – 6.5 | NOT STARTED. Next: 6.3 item 1 (editor panel) |
-| Gate | Windows: `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0` (checks `items-slots`, `items-lists`) |
+| Part 6.3 | item 1 DONE (editor panel, variants, sockets/links, edit-text popup; check `items-editor`, 25 flags); items 2-4 open (item 4's edit-text half done). Next: 6.3 item 2 |
+| Parts 6.4 – 6.5 | NOT STARTED |
+| Gate | Windows: `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0` (checks `items-slots`, `items-lists`, `items-editor`) |
 | Phase 7 switch | NOT done. STATUS.md must keep "ACTIVE: Phase 6" until 6.5 is ticked |
 
-Continue at **Part 6.3**. Do not redo 6.1 / 6.2.
+Continue at **Part 6.3 item 2**. Do not redo 6.1 / 6.2 / 6.3 item 1.
 
 ## Setup traps (cost the last session time)
 

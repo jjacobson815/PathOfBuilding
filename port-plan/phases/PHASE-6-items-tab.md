@@ -1,6 +1,6 @@
 # Phase 6 — Items Tab (the largest tab)
 
-**Status:** IN PROGRESS — Parts 6.1 + 6.2 done (6.1: 2026-09-29 cloud session; 6.2: 2026-09-29 Windows session; branch `cloud/phase-6`). Next: 6.3.
+**Status:** IN PROGRESS — Parts 6.1 + 6.2 done, 6.3 item 1 done (6.1: 2026-09-29 cloud session; 6.2 + 6.3.1: 2026-09-29 Windows session; branch `cloud/phase-6`). Next: 6.3 item 2 (craft popups).
 **Goal:** Port the item planner: item sets, the full slot panel, item/DB/shared
 lists with the drag-drop matrix, and the deep display-item editor (variants,
 sockets, enchant/anoint/corrupt/implicit, influences, catalysts, cluster crafting,
@@ -39,7 +39,7 @@ tooltip. This is `ItemsTab.lua` — 4771 lines, the biggest single view.
 
 ## Part 6.3 — Display-item editor (deep)
 
-- [ ] Panel: Add-to-build/Save, Edit…, Cancel, **Buy Similar** (→ Phase 12 trader);
+- [x] Panel: Add-to-build/Save, Edit…, Cancel, **Buy Similar** (→ Phase 12 trader);
   variant dropdowns (up to 6); socket color/link editors (6 dropdowns + link
   checkboxes + add-socket). (M)
 - [ ] Craft popups: **Apply Enchantment** (lab/source/skill pickers, 2 slots),
@@ -54,6 +54,7 @@ tooltip. This is `ItemsTab.lua` — 4771 lines, the biggest single view.
   (option) stacked sliders for all unique ranges. (L)
 - [ ] Craft-item popup (rarity/title/type/base with live tooltip) + create/edit-
   text popup (raw text editor with live validity). (M)
+  (Edit-text half DONE with item 1: `ItemTextPopup.qml`; craft-item popup open.)
 
 ## Part 6.4 — Comparison tooltip & rules
 
@@ -233,3 +234,59 @@ Slot rows are DropAreas.
 - NOT verified (no computer-use tools in this session): mouse drag-drop onto
   slots / lists / the minion dropdown, hover tooltips, Ctrl+click in the GUI,
   the Manage Item Sets shared pane, the "Sorting... (N%)" progress text.
+
+## Session log — Tue Sep 29 2026 (Part 6.3, item 1; Windows session)
+
+Bridge (`app/lua/pob_items.lua`, section "6.3 Display-item editor"): the
+LIVE legacy controls stay the single source of truth. Each edit sets the
+control's state and calls its own closure: `pob_itemsDisplaySetVariant(n, i)`
+(`displayItemVariant` / `AltVariant..5` selFunc), `pob_itemsDisplaySetSocket`
+(socket dropdown selFunc), `pob_itemsDisplaySetLink` (link checkbox
+changeFunc), `pob_itemsDisplayAddSocket` ("+" onClick), `pob_itemsAddDisplayItem`
+(`AddDisplayItem`: new items auto-equip, an existing id is replaced in place).
+The editor state (`pob_itemsGetLists().display.editor`) is read back from the
+controls SetDisplayItem synced (shown(), selIndex, link state). The display
+tooltip is the live `displayItemTooltip`, regenerated only when the display
+item changed or a recalc happened (AddItemTooltip runs compare calcs per slot).
+Edit-text popup: `pob_itemsEditTextInit` / `Check` / `Save` (lift of
+ItemsTab.lua:2225-2273; `RARITIES` mirrors the file-local `rarityDropList`).
+`pob_addItemFromRaw` (pob_host.lua) fixed: text with no base used to re-add the
+stale display item and report success; it now refuses it, restores the
+previous display item, adds an undo state and sets `buildFlag` (its comment
+"AddItem sets build.buildFlag" was wrong). Gate check: `items-editor` (25
+flags).
+
+QML: column 3 of `ItemsView.qml` is now the editor panel (Save / Add to build,
+Edit..., Cancel, Buy similar, variant dropdowns 24 px apart, 6 socket colour
+dropdowns 64 px apart with link checkboxes and "+", then the item tooltip);
+with no display item it shows "Craft item..." (disabled until item 4) and
+"Create custom..." (opens the text popup). New `components/ItemTextPopup.qml`.
+The tab snaps right when a display item appears and left when it closes
+(legacy `snapHScroll`), and scrolls as wide as the display item.
+
+**Documented differences from legacy**
+- Buy similar is a disabled stub (tooltip points to Phase 12, the trader).
+- The edit-text popup validates 200 ms after the last keystroke (legacy: every
+  frame).
+- The display tooltip is refreshed after a recalc (legacy keeps the stale
+  compare lines until the next edit).
+- Item 4's edit-text popup is done here (Edit... needs it); its craft-item
+  popup is not, so item 4 stays unticked.
+
+**Verified**
+- `items-editor` (25 flags, pob-selftest and pob-qt --headless): create from
+  text (rarity prepended; text starting "Rarity:" used as-is), invalid text
+  refused with the legacy help lines, variant list + switch (tooltip shows the
+  variant-2 line), bad variant refused, no socket section on a belt, Add to
+  build auto-equips, socket list / colour / link / "+" (raw shows
+  `Sockets: R-R-B `), hidden socket refused, edit-in-place copy + Save replaces,
+  edit text keeps the id and "and add" saves, Cancel, `pob_addItemFromRaw`
+  invalid refused / valid adds and keeps the display item.
+- Fail-when-removed: dropping the base check in `pob_addItemFromRaw` ->
+  `rawInvalidRefused=false`.
+- Capture (Windows, OccVortex with the body armour opened by a scratchpad host
+  file): panel buttons, six socket boxes and links matching `G=B=G=B=B=B`, the
+  full item tooltip, the tab snapped right; resting capture unchanged; no QML
+  warnings.
+- NOT verified (no computer-use tools): clicking the controls in the GUI, the
+  edit-text popup on screen.

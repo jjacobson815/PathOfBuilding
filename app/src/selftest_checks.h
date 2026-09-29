@@ -960,6 +960,9 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Phase 6 Part 6.2: all-items list, Uniques / Rare DB (pumped loader, filters,
     // stat sort), shared items + shared item sets, drop targets.
     if (!pob_run_lua_check(engine, "pob_selftestItemsLists", "items-lists")) return false;
+    // Phase 6 Part 6.3: display-item editor (panel, variants, sockets / links,
+    // edit-text popup) + the pob_addItemFromRaw invalid-text fix.
+    if (!pob_run_lua_check(engine, "pob_selftestItemsEditor", "items-editor")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

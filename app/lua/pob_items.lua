@@ -427,11 +427,72 @@ local function sharedRows()
     return rows
 end
 
--- The display item (Part 6.3 builds the editor on this; 6.2 opens it).
+-- The display item's tooltip is the LIVE `displayItemTooltip`, which every
+-- legacy edit path refreshes itself (UpdateDisplayItemTooltip). It is only
+-- regenerated here when the display item changed identity or a recalc
+-- happened since (legacy never refreshes it on recalc; that is a stale-compare
+-- bug not worth copying). AddItemTooltip runs compare calcs per slot, so it
+-- must not run on every view refresh.
+local dispKey = { }
+
+local function markDisplayFresh(it)
+    dispKey.item, dispKey.rev = it.displayItem, it.build.outputRevision
+end
+
+local VARIANT_CONTROLS = { "displayItemVariant", "displayItemAltVariant", "displayItemAltVariant2",
+    "displayItemAltVariant3", "displayItemAltVariant4", "displayItemAltVariant5" }
+
+local function shownCtl(ctl)
+    local ok, shown = pcall(ctl.IsShown, ctl)
+    return ok and shown and true or false
+end
+
+local function dropLabels(list)
+    local out = { }
+    for i, v in ipairs(list or { }) do out[i] = type(v) == "table" and (v.label or "") or tostring(v) end
+    return out
+end
+
+-- Editor sections read back from the LIVE controls SetDisplayItem synced
+-- (ItemsTab.lua:1671-1747): variants (:351-421), sockets / links (:423-472).
+local function editorRecord(it)
+    local d, c = it.displayItem, it.controls
+    local variants = { }
+    for n, name in ipairs(VARIANT_CONTROLS) do
+        local ctl = c[name]
+        if shownCtl(ctl) then
+            variants[#variants + 1] = { n = n, list = dropLabels(ctl.list), sel = ctl.selIndex or 1 }
+        end
+    end
+    local sockets = { }
+    for i = 1, 6 do
+        local drop, link = c["displayItemSocket" .. i], c["displayItemLink" .. i]
+        sockets[i] = {
+            shown = shownCtl(drop),
+            sel = drop.selIndex or 1,
+            linkShown = link ~= nil and shownCtl(link),
+            link = link ~= nil and link.state and true or false,
+        }
+    end
+    return {
+        variants = variants,
+        sockets = sockets,
+        socketList = dropLabels(c.displayItemSocket1.list),
+        socketSection = d.selectableSocketCount > 0,
+        -- the "+" sits right of the last colour socket (ItemsTab.lua:457)
+        addSocketShown = shownCtl(c.displayItemAddSocket),
+        addSocketAt = #d.sockets - d.abyssalSocketCount,
+    }
+end
+
+-- The display item (the Part 6.3 editor).
 local function displayRecord(it)
     local d = it.displayItem
     if not d then return { shown = false } end
-    it:UpdateDisplayItemTooltip()
+    if dispKey.item ~= d or dispKey.rev ~= it.build.outputRevision then
+        it:UpdateDisplayItemTooltip()
+        markDisplayFresh(it)
+    end
     local lines = { }
     for _, l in ipairs(it.displayItemTooltip.lines or { }) do
         if l.text == nil then
@@ -446,6 +507,7 @@ local function displayRecord(it)
         -- ItemsTab.lua:327-329 addDisplayItem label
         addLabel = (d.id and it.items[d.id]) and "Save" or "Add to build",
         lines = lines,
+        editor = editorRecord(it),
     }
 end
 
@@ -531,6 +593,7 @@ function pob_itemsOpenForEdit(kind, key)
     else
         it:CreateDisplayItemFromRaw(item.raw, true)
     end
+    markDisplayFresh(it)                  -- SetDisplayItem built the tooltip
     return { ok = it.displayItem ~= nil, _emit = { "items" } }
 end
 
@@ -955,6 +1018,135 @@ function pob_itemsDBStep(which)
 end
 
 ---------------------------------------------------------------------------
+-- 6.3 Display-item editor. The LIVE legacy controls stay the single source
+-- of truth: set the control's state, then call its own closure (selFunc /
+-- changeFunc / onClick), which edits itemsTab.displayItem, rebuilds it and
+-- refreshes displayItemTooltip. Edits are not undo steps and do not recalc
+-- (the display item is not in the build) until Save / Add to build.
+---------------------------------------------------------------------------
+
+local function displayEdited(it)
+    markDisplayFresh(it)
+    return { ok = true, _emit = { "items" } }
+end
+
+-- Variant dropdown `n` (1 = Variant, 2..6 = Alt variants; ItemsTab.lua:362-421).
+function pob_itemsDisplaySetVariant(n, index)
+    local bm, it = ctx()
+    local ctl = it and it.displayItem and it.controls[VARIANT_CONTROLS[tonumber(n) or 0] or ""]
+    index = tonumber(index)
+    if not ctl or not index or not ctl.list[index] then return fail("bad variant") end
+    ctl.selIndex = index
+    ctl.selFunc(index, ctl.list[index])
+    return displayEdited(it)
+end
+
+-- Socket colour dropdown i (ItemsTab.lua:423-431); colourIndex into socketDropList.
+function pob_itemsDisplaySetSocket(i, colourIndex)
+    local bm, it = ctx()
+    local drop = it and it.displayItem and it.controls["displayItemSocket" .. (tonumber(i) or 0)]
+    colourIndex = tonumber(colourIndex)
+    if not drop or not shownCtl(drop) or not colourIndex or not drop.list[colourIndex] then return fail("bad socket") end
+    drop.selIndex = colourIndex
+    drop.selFunc(colourIndex, drop.list[colourIndex])
+    return displayEdited(it)
+end
+
+-- Link checkbox between socket i and i+1 (ItemsTab.lua:436-452).
+function pob_itemsDisplaySetLink(i, state)
+    local bm, it = ctx()
+    local link = it and it.displayItem and it.controls["displayItemLink" .. (tonumber(i) or 0)]
+    if not link or not shownCtl(link) then return fail("bad link") end
+    link.state = state and true or false
+    link.changeFunc(link.state)
+    return displayEdited(it)
+end
+
+-- "+" (ItemsTab.lua:457-472).
+function pob_itemsDisplayAddSocket()
+    local bm, it = ctx()
+    local btn = it and it.displayItem and it.controls.displayItemAddSocket
+    if not btn or not shownCtl(btn) then return fail("no socket to add") end
+    btn.onClick()
+    return displayEdited(it)
+end
+
+-- "Add to build" / "Save" (ItemsTab:AddDisplayItem, ItemsTab.lua:1519-1527):
+-- a new item auto-equips into the first empty valid slot; an existing id
+-- replaces the item in place.
+function pob_itemsAddDisplayItem()
+    local bm, it = ctx()
+    if not (it and it.displayItem) then return fail("no display item") end
+    it:AddDisplayItem()
+    return done(nil, EMIT_TREE)
+end
+
+-- Edit-text popup (ItemsTab:EditDisplayItemText, ItemsTab.lua:2225-2273).
+-- Mirrors ItemsTab.lua:20-26 `rarityDropList` (file-local in legacy).
+local RARITIES = { "NORMAL", "MAGIC", "RARE", "UNIQUE", "RELIC" }
+
+local function editTextRaw(text, rarityIndex)
+    -- buildRaw (ItemsTab.lua:2227-2234)
+    text = tostring(text or "")
+    if text:match("^Item Class: .*\nRarity: ") or text:match("^Rarity: ") then return text end
+    return "Rarity: " .. (RARITIES[tonumber(rarityIndex) or 3] or "RARE") .. "\n" .. text
+end
+
+function pob_itemsEditTextInit()
+    local bm, it = ctx()
+    if not it then return nil end
+    local labels = { }
+    for i, r in ipairs(RARITIES) do labels[i] = (colorCodes[r] or "^7") .. r:sub(1, 1) .. r:sub(2):lower() end
+    local d = it.displayItem
+    local sel = 3
+    if d then sel = isValueInArray(RARITIES, d.rarity) or 3 end
+    return {
+        isEdit = d ~= nil,
+        title = d and "Edit Item Text" or "Create Custom Item from Text",
+        saveLabel = d and "Save" or "Create",
+        text = d and (d:BuildRaw():gsub("Rarity: %w+\n", "")) or "",
+        rarities = labels,
+        raritySel = sel,
+    }
+end
+
+-- Live validity + the Save button tooltip (ItemsTab.lua:2250-2267).
+function pob_itemsEditTextCheck(text, rarityIndex)
+    local bm, it = ctx()
+    if not it then return { valid = false, lines = { } } end
+    local item = new("Item", editTextRaw(text, rarityIndex))
+    if item.base then
+        return { valid = true, lines = tipLines(function(tip) it:AddItemTooltip(tip, item, nil, true) end) }
+    end
+    return { valid = false, lines = tipLines(function(tip)
+        tip:AddLine(14, "The item is invalid.")
+        tip:AddLine(14, "Check that the item's title and base name are in the correct format.")
+        tip:AddLine(14, "For Rare and Unique items, the first 2 lines must be the title and base name. E.g.:")
+        tip:AddLine(14, "Abberath's Horn")
+        tip:AddLine(14, "Goat's Horn")
+        tip:AddLine(14, "For Normal and Magic items, the base name must be somewhere in the first line. E.g.:")
+        tip:AddLine(14, "Scholar's Platinum Kris of Joy")
+    end) }
+end
+
+-- Save / Create (ItemsTab.lua:2244-2251): re-create the display item from the
+-- text, keeping its id so Save still replaces in place.
+function pob_itemsEditTextSave(text, rarityIndex, alsoAdd)
+    local bm, it = ctx()
+    if not it then return fail("no build") end
+    local raw = editTextRaw(text, rarityIndex)
+    if not new("Item", raw).base then return fail("The item is invalid.") end
+    local id = it.displayItem and it.displayItem.id
+    it:CreateDisplayItemFromRaw(raw, not it.displayItem)
+    it.displayItem.id = id
+    if alsoAdd then
+        it:AddDisplayItem()
+        return done(nil, EMIT_TREE)
+    end
+    return displayEdited(it)
+end
+
+---------------------------------------------------------------------------
 -- Selftests
 ---------------------------------------------------------------------------
 
@@ -1348,6 +1540,100 @@ function pob_selftestItemsLists()
     pcall(dbRestore, uniq, uSnap)
     pcall(dbRestore, rare, rSnap)
     it.controls.selectDB.selIndex = selectDB
+    pcall(function() it:SetDisplayItem() end)
+    itRestore(bm, it, snap)
+    return finish(res, ok, err)
+end
+
+-- Part 6.3: display-item editor (panel buttons, variants, sockets / links,
+-- edit-text popup) and the pob_addItemFromRaw invalid-text fix.
+function pob_selftestItemsEditor()
+    local bm, it = ctx()
+    if not it then return { ok = false, error = "no itemsTab" } end
+    local snap = itSnapshot(bm, it)
+    local res = { }
+    local ok, err = pcall(function()
+        -- Create from text with no display item: the rarity is prepended.
+        it:SetDisplayItem()
+        local init = pob_itemsEditTextInit()
+        res.createInit = init.isEdit == false and init.saveLabel == "Create" and init.raritySel == 3 and #init.rarities == 5
+        local vText = "ET Variant\nLeather Belt\nVariant: One\nVariant: Two\nSelected Variant: 1\n"
+            .. "{variant:1}+10 to maximum Life\n{variant:2}+20 to maximum Life\n"
+        res.checkValid = pob_itemsEditTextCheck(vText, 4).valid == true
+        local bad = pob_itemsEditTextCheck("Nothing Here\nNot A Base\n", 3)
+        res.checkInvalid = bad.valid == false and linesText(bad.lines):find("The item is invalid.", 1, true) ~= nil
+        res.saveInvalidRefused = not pob_itemsEditTextSave("Nothing Here\nNot A Base\n", 3, false).ok and it.displayItem == nil
+        pob_itemsEditTextSave(vText, 4, false)
+        res.createdUnique = it.displayItem ~= nil and it.displayItem.rarity == "UNIQUE" and it.displayItem.id == nil
+
+        -- Variants: the live dropdown's selFunc rebuilds the item + tooltip.
+        local ed = pob_itemsGetLists().display
+        res.variantsListed = ed.shown == true and #ed.editor.variants == 1
+            and #ed.editor.variants[1].list == 2 and ed.editor.variants[1].sel == 1
+        pob_itemsDisplaySetVariant(1, 2)
+        res.variantSet = it.displayItem.variant == 2
+            and linesText(pob_itemsGetLists().display.lines):find("+20 to maximum Life", 1, true) ~= nil
+        res.badVariantRefused = not pob_itemsDisplaySetVariant(1, 9).ok
+        res.noSocketsOnBelt = pob_itemsGetLists().display.editor.socketSection == false
+
+        -- Add to build: a new item auto-equips into an empty valid slot.
+        local beltWasEmpty = it.slots["Belt"].selItemId == 0
+        local n = #it.itemOrderList
+        pob_itemsAddDisplayItem()
+        local beltId = it.itemOrderList[#it.itemOrderList]
+        res.added = #it.itemOrderList == n + 1 and it.displayItem == nil and it.items[beltId].variant == 2
+        res.addAutoEquips = not beltWasEmpty or it.slots["Belt"].selItemId == beltId
+
+        -- Sockets and links (text starting "Rarity:" is used as-is).
+        pob_itemsEditTextSave("Rarity: Rare\nET Chest\nPlate Vest\nSockets: R-R G\n", 1, false)
+        local e = pob_itemsGetLists().display.editor
+        res.socketsListed = e.socketSection == true and e.sockets[1].shown and e.sockets[3].shown
+            and not e.sockets[4].shown and e.sockets[1].link == true and e.sockets[2].link == false
+            and e.addSocketShown == true and e.addSocketAt == 3 and #e.socketList == 4
+        pob_itemsDisplaySetSocket(3, 3)
+        res.socketColour = it.displayItem.sockets[3].color == "B"
+        pob_itemsDisplaySetLink(2, true)
+        res.linkOn = it.displayItem.sockets[3].group == it.displayItem.sockets[2].group
+            and pob_itemsGetLists().display.editor.sockets[2].link == true
+        pob_itemsDisplayAddSocket()
+        res.socketAdded = #it.displayItem.sockets == 4 and pob_itemsGetLists().display.editor.sockets[4].shown == true
+        res.rawSockets = it.displayItem:BuildRaw():find("Sockets: R-R-B ", 1, true) ~= nil
+        res.hiddenSocketRefused = not pob_itemsDisplaySetSocket(6, 1).ok
+        pob_itemsAddDisplayItem()
+        local chestId = it.itemOrderList[#it.itemOrderList]
+
+        -- Edit in place: a same-id copy; Save replaces, the list keeps its size.
+        pob_itemsOpenForEdit("item", chestId)
+        res.saveLabel = pob_itemsGetLists().display.addLabel == "Save"
+        local nItems = #it.itemOrderList
+        pob_itemsDisplaySetSocket(1, 2)
+        res.editIsCopy = it.items[chestId].sockets[1].color == "R"
+        pob_itemsAddDisplayItem()
+        res.saveReplaces = #it.itemOrderList == nItems and it.items[chestId].sockets[1].color == "G"
+
+        -- Edit text on an existing item keeps its id; "and add" saves it.
+        pob_itemsOpenForEdit("item", chestId)
+        local ti = pob_itemsEditTextInit()
+        res.editInit = ti.isEdit == true and ti.saveLabel == "Save" and ti.raritySel == 3
+            and ti.text:find("^Rarity:") == nil and ti.text:find("ET Chest", 1, true) ~= nil
+        pob_itemsEditTextSave((ti.text:gsub("ET Chest", "ET Chest Two")), 3, true)
+        res.editTextKeepsId = it.items[chestId] ~= nil and it.items[chestId].title == "ET Chest Two"
+            and #it.itemOrderList == nItems and it.displayItem == nil
+
+        pob_itemsOpenForEdit("item", chestId)
+        pob_itemsCloseDisplayItem()
+        res.cancelOk = it.displayItem == nil
+
+        -- pob_addItemFromRaw: text with no base used to re-add the stale
+        -- display item and report success.
+        pob_itemsOpenForEdit("item", chestId)
+        local stale = it.displayItem
+        local n2 = #it.itemOrderList
+        res.rawInvalidRefused = pob_addItemFromRaw("Nothing Here\nNot A Base\n") == nil and #it.itemOrderList == n2
+        local rid = pob_addItemFromRaw("Rarity: Rare\nET Raw Ring\nGold Ring\n")
+        res.rawValidAdds = rid ~= nil and it.items[rid] ~= nil and it.items[rid] ~= stale and it.displayItem == stale
+        pob_itemsCloseDisplayItem()
+    end)
     pcall(function() it:SetDisplayItem() end)
     itRestore(bm, it, snap)
     return finish(res, ok, err)

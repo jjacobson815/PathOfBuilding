@@ -68,15 +68,17 @@ Item {
         const specs = (specList.specs && specList.specs.length !== undefined) ? specList.specs : []
         specSelect.model = specs.map(function (x) { return x.label })
         specSelect.currentIndex = (specList.active || 1) - 1
+        const wasShown = display.shown === true
         const l = call("pob_itemsGetLists")
         lists = l ? l : ({})
+        // SetDisplayItem snaps the tab right, Cancel snaps it left (snapHScroll).
+        if (display.shown === true && !wasShown) snapRight()
+        else if (display.shown !== true && wasShown) hflick.contentX = 0
     }
 
     // Double-click on any list row: open it as the display item and scroll
     // it into view (SetDisplayItem: snapHScroll = "RIGHT").
-    function openEdit(kind, key) {
-        if (call("pob_itemsOpenForEdit", [kind, key]).ok) snapRight()
-    }
+    function openEdit(kind, key) { call("pob_itemsOpenForEdit", [kind, key]) }
     function snapRight() { Qt.callLater(function () { hflick.contentX = Math.max(0, hflick.contentWidth - hflick.width) }) }
 
     // ItemListControl:OnSelDelete — ask only when the item is in use.
@@ -114,7 +116,8 @@ Item {
     Flickable {
         id: hflick
         anchors.fill: parent
-        contentWidth: Math.max(width, 810 + 340 + 20)
+        // Column 3 is as wide as the display item when one is shown.
+        contentWidth: Math.max(width, 810 + (itemsView.display.shown === true ? displayPane.width : 340) + 20)
         contentHeight: height
         // Not draggable: mouse drags belong to the item lists (drag-drop).
         interactive: false
@@ -391,31 +394,131 @@ Item {
                 }
             }
 
-            // Display item (read-only until the Part 6.3 editor lands).
+            // Craft / create buttons (ItemsTab.lua:296-304), shown with no display item.
+            Widgets.Button {
+                visible: !itemsView.display.shown
+                x: 0; y: 8
+                width: 120; height: 20
+                label: "Craft item..."
+                controlEnabled: false
+                tooltipText: "The craft-item popup arrives with the rest of Phase 6 Part 6.3."
+            }
+            Widgets.Button {
+                visible: !itemsView.display.shown
+                x: 128; y: 8
+                width: 120; height: 20
+                label: "Create custom..."
+                onClicked: textPopup.openFor(false)
+            }
+
+            // Display item editor (ItemsTab.lua:323-472): Save / Edit / Cancel /
+            // Buy similar, variant dropdowns, socket colours + links + "+", then
+            // the item tooltip. Every edit goes to the LIVE legacy control.
             Item {
                 id: displayPane
                 visible: itemsView.display.shown === true
                 x: 0; y: 8
-                width: 470
+                width: Math.max(470, tipCol.width + 16)
                 height: parent.height - 8
+                readonly property var ed: itemsView.display.editor ? itemsView.display.editor : ({})
+                readonly property var variants: ed.variants && ed.variants.length !== undefined ? ed.variants : []
+                readonly property var sockets: ed.sockets && ed.sockets.length !== undefined ? ed.sockets : []
+                readonly property var socketList: ed.socketList && ed.socketList.length !== undefined ? ed.socketList : []
+
                 Row {
                     spacing: 8
                     Widgets.Button {
                         width: 100; height: 20
                         label: itemsView.display.addLabel || "Add to build"
-                        controlEnabled: false
-                        tooltipText: "The item editor arrives in Phase 6 Part 6.3."
+                        onClicked: itemsView.call("pob_itemsAddDisplayItem")
                     }
                     Widgets.Button {
-                        width: 100; height: 20
+                        width: 60; height: 20
+                        label: "Edit..."
+                        onClicked: textPopup.openFor(false)
+                    }
+                    Widgets.Button {
+                        width: 60; height: 20
                         label: "Cancel"
                         onClicked: itemsView.call("pob_itemsCloseDisplayItem")
                     }
+                    // Buy similar opens the trade site (CompareBuySimilar): Phase 12.
+                    Widgets.Button {
+                        width: 100; height: 20
+                        label: "Buy similar"
+                        controlEnabled: false
+                        tooltipText: "Trade search arrives with the trader (Phase 12)."
+                    }
                 }
-                Rectangle {
+
+                Column {
+                    id: editCol
                     y: 28
+                    // Variants (ItemsTab.lua:351-421): 300 wide, 24 apart.
+                    Item {
+                        width: 300
+                        height: displayPane.variants.length > 0 ? 28 + 24 * (displayPane.variants.length - 1) : 0
+                        visible: height > 0
+                        Repeater {
+                            model: displayPane.variants.length
+                            delegate: Widgets.DropDownControl {
+                                readonly property var v: displayPane.variants[index]
+                                y: index * 24
+                                width: 300; height: 20
+                                function push() { model = v.list; currentIndex = v.sel - 1 }
+                                onVChanged: if (v) push()
+                                Component.onCompleted: if (v) push()
+                                onSelected: function (i) { itemsView.call("pob_itemsDisplaySetVariant", [v.n, i + 1]) }
+                            }
+                        }
+                    }
+                    // Sockets and links (ItemsTab.lua:423-472): colour boxes 64 apart.
+                    Item {
+                        width: 400
+                        height: displayPane.ed.socketSection ? 28 : 0
+                        visible: height > 0
+                        Repeater {
+                            model: 6
+                            delegate: Item {
+                                readonly property var s: displayPane.sockets[index]
+                                x: index * 64
+                                width: 64; height: 20
+                                function push() {
+                                    sockDrop.model = displayPane.socketList
+                                    sockDrop.currentIndex = s.sel - 1
+                                    linkBox.state = s.link
+                                }
+                                onSChanged: if (s) push()
+                                Component.onCompleted: if (s) push()
+                                Widgets.DropDownControl {
+                                    id: sockDrop
+                                    visible: !!(s && s.shown)
+                                    width: 36; height: 20
+                                    onSelected: function (i) { itemsView.call("pob_itemsDisplaySetSocket", [index + 1, i + 1]) }
+                                }
+                                Widgets.CheckBox {
+                                    id: linkBox
+                                    visible: !!(s && s.linkShown)
+                                    x: 40
+                                    width: 20; height: 20
+                                    onToggled: function (st) { itemsView.call("pob_itemsDisplaySetLink", [index + 1, st]) }
+                                }
+                            }
+                        }
+                        Widgets.Button {
+                            visible: displayPane.ed.addSocketShown === true
+                            x: (displayPane.ed.addSocketAt || 0) * 64 - 12
+                            width: 20; height: 20
+                            label: "+"
+                            onClicked: itemsView.call("pob_itemsDisplayAddSocket")
+                        }
+                    }
+                }
+
+                Rectangle {
+                    y: 28 + editCol.height
                     width: tipCol.width + 16
-                    height: Math.min(parent.height - 28, tipCol.height + 12)
+                    height: Math.min(parent.height - y, tipCol.height + 12)
                     color: theme.background
                     border.width: 1
                     border.color: theme.border
@@ -427,18 +530,21 @@ Item {
                             model: itemsView.displayLines.length
                             delegate: Item {
                                 readonly property var ln: itemsView.displayLines[index]
-                                width: Math.max(lineLbl.width, 300)
+                                // Painted width (implicitWidth), not the TextMetrics
+                                // one: Qt's font is wider (invariant #8).
+                                width: Math.max(lineLbl.implicitWidth, 300)
                                 height: ln.sep ? ln.size : ln.size + 2
                                 Rectangle {
                                     visible: !!ln.sep
                                     anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width; height: 1
+                                    width: tipCol.width; height: 1
                                     color: theme.border
                                 }
                                 Widgets.Label {
                                     id: lineLbl
                                     visible: !ln.sep
-                                    x: ln.center ? (parent.width - width) / 2 : 0
+                                    width: tipCol.width
+                                    horizontalAlignment: ln.center ? Text.AlignHCenter : Text.AlignLeft
                                     label: ln.sep ? "" : (ln.text.length > 0 ? ln.text : " ")
                                     size: ln.size || 14
                                 }
@@ -507,6 +613,10 @@ Item {
             remove: "pob_itemsDeleteSharedSet",
         })
         onListEdited: itemsView.refresh()
+    }
+    Widgets.ItemTextPopup {
+        id: textPopup
+        parent: itemsView
     }
     Widgets.SpecManagePopup {
         id: specManage

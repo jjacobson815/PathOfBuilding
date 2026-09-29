@@ -46,6 +46,7 @@
         <file>components/DragGhost.qml</file>
         <file>components/ItemListBox.qml</file>
         <file>components/ItemDBPanel.qml</file>
+        <file>components/ItemTextPopup.qml</file>
         <file>components/SocketGroupList.qml</file>
         <file>components/GemSelect.qml</file>
         <file>components/TreeImportPopup.qml</file>
