@@ -1,6 +1,6 @@
 # Phase 6 — Items Tab (the largest tab)
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS — Part 6.1 done (2026-09-29, cloud session, branch `cloud/phase-6`)
 **Goal:** Port the item planner: item sets, the full slot panel, item/DB/shared
 lists with the drag-drop matrix, and the deep display-item editor (variants,
 sockets, enchant/anoint/corrupt/implicit, influences, catalysts, cluster crafting,
@@ -14,16 +14,16 @@ tooltip. This is `ItemsTab.lua` — 4771 lines, the biggest single view.
 
 ## Part 6.1 — Item sets & slot panel
 
-- [ ] Item sets: dropdown (tooltip = set contents) + Manage popup; per-set slot
+- [x] Item sets: dropdown (tooltip = set contents) + Manage popup; per-set slot
   assignments; `useSecondWeaponSet`; `EquipItemInSet` with Shift=second-slot. (M)
-- [ ] Slot panel (ItemSlotControl per slot): all baseSlots — Weapon 1/2 + Swap
+- [x] Slot panel (ItemSlotControl per slot): all baseSlots — Weapon 1/2 + Swap
   variants (each with 6 abyssal sub-slots), Helmet/Body/Gloves/Boots/Belt (+ abyssal),
   Amulet, Rings 1/2, conditional **Ring 3** (AdditionalRingSlot), conditional
   **Graft 1/2** (3.27 tree), Flasks 1-5 (active checkboxes), Charms; jewel sockets
   from the tree (labelled "Socket #n", only allocated shown). **Weapon Set I/II
   buttons** (also re-point the main socket group). Each slot: item dropdown with
   validity filtering, tooltip with full item + swap-compare, drag-receive equip. (L)
-- [ ] Duplicate passive-tree selector inside the tab (specSelect + Manage). (S)
+- [x] Duplicate passive-tree selector inside the tab (specSelect + Manage). (S)
 
 ## Part 6.2 — Lists (drag-drop matrix)
 
@@ -93,3 +93,48 @@ tooltip. This is `ItemsTab.lua` — 4771 lines, the biggest single view.
   (Phase 11) — build the parser here or in Phase 11 but reuse it, not twice.
 - Jewel-radius compare needs the cloned-spec evaluation path — validate it against
   a radius jewel (e.g. a Watcher's Eye / threshold jewel) vs legacy.
+
+## Session log — 2026-09-29 (Part 6.1)
+
+Bridge: `app/lua/pob_items.lua` (new; `require`d by `pob_host.lua`). View: left
+column of `app/qml/views/ItemsView.qml`. Gate check: `items-slots` (31 flags).
+Recon brief (legacy file:line map) was written to the session scratchpad, not
+committed.
+
+- **Item sets:** dropdown (row tooltip = `AddItemSetTooltip`), Manage popup via
+  the generic `SetManagePopup` (`pob_items{GetSetList,SetActiveSet,NewSet,
+  CopySet,RenameSet,DeleteSet,MoveSet}`). Legacy has no Copy/Delete/Rename
+  methods, so those bodies are lifted from `ItemSetListControl.lua` with
+  pointers. New/Copy append to `itemSetOrderList` atomically (legacy's cancel
+  path left an orphan). `EquipItemInSet` is exposed as `pob_itemsEquipInSet`
+  with an explicit `shift` flag (legacy reads `IsKeyDown`, a stub in the host;
+  `withKeys` swaps `IsKeyDown` for the call and restores it). No QML caller yet
+  (the Build loadout dropdown is Phase 3 long tail).
+- **Weapon Set I/II:** `pob_itemsSetWeaponSet(n)`, lifted from `ItemsTab.lua:
+  222-262`, including moving the main socket group to the other weapon set.
+- **Slot panel:** reads the live `orderedSlots` (never rebuilt). Rows are the
+  slots whose legacy `shown()` is true and that are not inactive, so Ring 3,
+  Graft 1/2, abyssal sockets and unallocated jewel sockets hide exactly as
+  legacy does. `UpdateSockets()` is called in the state read because legacy
+  only runs it from `Draw`/`AddItemTooltip`. Candidate rows follow the
+  all-items list order (legacy `pairs` order is unstable). Equip re-checks
+  `IsItemValidForSlot` in the bridge. Flask "active" checkbox persists into the
+  set. Row tooltip = `AddItemTooltip(tip, item, slot)` (full item + compare).
+- **Passive tree selector:** reuses the Tree tab's `pob_getSpecList` /
+  `pob_setActiveSpec` and `SpecManagePopup` (no duplicate bridge).
+- Ctrl+Z / Ctrl+Y in the tab (`pob_itemsUndo/Redo`) landed here because they
+  were needed to test equip; the 6.4 keyboard item still lists the rest.
+
+**Documented differences from legacy**
+- Jewel socket rows do not draw the radius minimap (`ItemSlotHelper` draws with
+  SimpleGraphic). The Tree viewer embed is the planned replacement.
+- Dropping an item on a slot (drag-receive) is NOT done here; it belongs to the
+  Part 6.2 drag-drop matrix. Equipping is via the slot dropdown for now.
+- The right column is still the pre-Phase-6 item browser until Part 6.2.
+- Slot panel scrolls with the mouse wheel / bar (legacy scrolls the whole tab).
+
+**Verified visually (Xvfb, OccVortex build):** all 22 base/flask/socket rows
+populate (3 allocated sockets labelled Socket #1-3); Weapon Set II hides the
+main-hand rows and recalculates; Ring 1 dropdown lists only rings; a row
+tooltip shows the item with "Equipping this item in Ring 1 will give you" diffs;
+Manage Item Sets popup opens.
