@@ -43,6 +43,9 @@
         <file>components/StatDiff.js</file>
         <file>components/SpecManagePopup.qml</file>
         <file>components/SetManagePopup.qml</file>
+        <file>components/DragGhost.qml</file>
+        <file>components/ItemListBox.qml</file>
+        <file>components/ItemDBPanel.qml</file>
         <file>components/SocketGroupList.qml</file>
         <file>components/GemSelect.qml</file>
         <file>components/TreeImportPopup.qml</file>

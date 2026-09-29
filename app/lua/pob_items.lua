@@ -387,6 +387,574 @@ function pob_itemsRedo()
 end
 
 ---------------------------------------------------------------------------
+-- 6.2 Lists: all items (ItemListControl), Uniques / Rare Templates DB
+-- (ItemDBControl), shared items + shared item sets (SharedItemListControl,
+-- SharedItemSetListControl). Drag-drop payloads are { kind, key }:
+--   "item"   key = item id (itemsTab.items)
+--   "unique" key = item name (main.uniqueDB.list is keyed by name)
+--   "rare"   key = item name (main.rareDB.list)
+--   "shared" key = 1-based index into main.sharedItemList
+-- DB and shared items are never mutated: every path that adds one to the
+-- build copies it with new("Item", raw) first, as legacy does.
+---------------------------------------------------------------------------
+
+local function resolve(it, kind, key)
+    if kind == "item" then return it.items[tonumber(key) or -1] end
+    if kind == "unique" then return main.uniqueDB.list[key] end
+    if kind == "rare" then return main.rareDB.list[key] end
+    if kind == "shared" then return main.sharedItemList[tonumber(key) or -1] end
+end
+
+-- All-items rows: ItemListControl:GetRowValue adds "(Unused)" / "(Used in ..)".
+local function itemRows(it)
+    local ilc = it.controls.itemList
+    local rows = { }
+    for i, id in ipairs(it.itemOrderList) do
+        local item = it.items[id]
+        if item then
+            rows[#rows + 1] = { key = id, label = ilc:GetRowValue(1, i, id), name = item.name }
+        end
+    end
+    return rows
+end
+
+local function sharedRows()
+    local rows = { }
+    for i, item in ipairs(main.sharedItemList) do
+        -- SharedItemListControl.lua:24-28
+        rows[i] = { key = i, label = (colorCodes[item.rarity] or "^7") .. item.name, name = item.name }
+    end
+    return rows
+end
+
+-- The display item (Part 6.3 builds the editor on this; 6.2 opens it).
+local function displayRecord(it)
+    local d = it.displayItem
+    if not d then return { shown = false } end
+    it:UpdateDisplayItemTooltip()
+    local lines = { }
+    for _, l in ipairs(it.displayItemTooltip.lines or { }) do
+        if l.text == nil then
+            lines[#lines + 1] = { sep = true, size = l.size or 10 }
+        else
+            lines[#lines + 1] = { size = l.size or 14, text = l.text, center = (l.center or it.displayItemTooltip.center) and true or false }
+        end
+    end
+    return {
+        shown = true,
+        name = d.name or "",
+        -- ItemsTab.lua:327-329 addDisplayItem label
+        addLabel = (d.id and it.items[d.id]) and "Save" or "Add to build",
+        lines = lines,
+    }
+end
+
+-- Shift = second slot: the redirect ItemListControl / ItemDBControl OnSelClick
+-- apply before equipping (ItemListControl.lua:164-176).
+local function primarySlotFor(it, item, shift)
+    local slotName = item:GetPrimarySlot()
+    if not (slotName and it.slots[slotName]) then return nil end
+    if it.slots[slotName].weaponSet == 1 and it.activeItemSet.useSecondWeaponSet then
+        slotName = slotName .. " Swap"
+    end
+    if shift then
+        local altSlot = slotName:gsub("1", "2")
+        if it:IsItemValidForSlot(item, altSlot) then slotName = altSlot end
+    end
+    return slotName
+end
+
+function pob_itemsGetLists()
+    local bm, it = ctx()
+    if not it then return nil end
+    return {
+        items = itemRows(it),
+        shared = sharedRows(),
+        display = displayRecord(it),
+    }
+end
+
+-- Item tooltip for any list row. AddItemTooltip reads SHIFT (slot number of
+-- the compare), so the caller passes it explicitly.
+function pob_itemsTooltip(kind, key, shift)
+    local bm, it = ctx()
+    local item = it and resolve(it, kind, key)
+    if not item then return { lines = { } } end
+    local dbMode = (kind == "unique" or kind == "rare") or nil
+    return { lines = withKeys({ SHIFT = shift and true or false }, tipLines, function(tip)
+        it:AddItemTooltip(tip, item, nil, dbMode)
+    end) }
+end
+
+-- Ctrl+click. All items: ItemListControl.lua:161-185 (toggle in the primary
+-- slot). DB: ItemDBControl.lua:320-346 (copy into the build, then equip).
+-- Lifted because legacy reads IsKeyDown("CTRL"/"SHIFT").
+function pob_itemsCtrlClick(kind, key, shift)
+    local bm, it = ctx()
+    local item = it and resolve(it, kind, key)
+    if not item then return fail("no such item") end
+    if kind == "item" then
+        local slotName = primarySlotFor(it, item, shift)
+        if not slotName then return fail("item has no slot") end
+        local slot = it.slots[slotName]
+        slot:SetSelItemId(slot.selItemId == item.id and 0 or item.id)
+        it:PopulateSlots()
+        it:AddUndoState()
+        bm.buildFlag = true
+        return done({ slotName = slotName }, EMIT_TREE)
+    elseif kind == "unique" or kind == "rare" then
+        local newItem = new("Item", item.raw)
+        newItem:NormaliseQuality()
+        it:AddItem(newItem, true)
+        local slotName = primarySlotFor(it, newItem, shift)
+        if slotName then it.slots[slotName]:SetSelItemId(newItem.id) end
+        it:PopulateSlots()
+        it:AddUndoState()
+        bm.buildFlag = true
+        return done({ slotName = slotName or "", itemId = newItem.id }, EMIT_TREE)
+    end
+    return fail("ctrl+click does nothing on this list")   -- SharedItemListControl.lua:55
+end
+
+-- Double-click: open the item as the display item (the 6.3 editor).
+-- All items: a COPY holding the same id, so Save replaces in place
+-- (ItemListControl.lua:186-189). DB / shared: CreateDisplayItemFromRaw
+-- with normalise (ItemDBControl.lua:348, SharedItemListControl.lua:57).
+function pob_itemsOpenForEdit(kind, key)
+    local bm, it = ctx()
+    local item = it and resolve(it, kind, key)
+    if not item then return fail("no such item") end
+    if kind == "item" then
+        local newItem = new("Item", item:BuildRaw())
+        newItem.id = item.id
+        it:SetDisplayItem(newItem)
+    else
+        it:CreateDisplayItemFromRaw(item.raw, true)
+    end
+    return { ok = it.displayItem ~= nil, _emit = { "items" } }
+end
+
+function pob_itemsCloseDisplayItem()
+    local bm, it = ctx()
+    if not it then return fail("no build") end
+    it:SetDisplayItem()
+    return { ok = true, _emit = { "items" } }
+end
+
+-- Ctrl+C on a row (OnSelCopy): build / shared rows copy BuildRaw, DB rows
+-- their raw text; CRLF like legacy.
+function pob_itemsCopy(kind, key)
+    local bm, it = ctx()
+    local item = it and resolve(it, kind, key)
+    if not item then return fail("no such item") end
+    local raw = (kind == "unique" or kind == "rare") and item.raw or item:BuildRaw()
+    Copy((raw:gsub("\n", "\r\n")))
+    return { ok = true }
+end
+
+-- The confirm question ItemListControl:OnSelDelete asks (ItemListControl.lua:
+-- 198-232); "" = delete without asking.
+function pob_itemsDeleteQuery(itemId)
+    local bm, it = ctx()
+    local item = it and it.items[tonumber(itemId) or -1]
+    if not item then return fail("no such item") end
+    local ilc = it.controls.itemList
+    local equipSlot, equipSet = it:GetEquippedSlotForItem(item)
+    local msg = ""
+    if equipSlot then
+        local inSet = equipSet and (" in set '" .. (equipSet.title or "Default") .. "'") or ""
+        msg = item.name .. " is currently equipped in " .. equipSlot.label .. inSet .. ".\nAre you sure you want to delete it?"
+    else
+        local abyssSet = ilc:FindEquippedAbyssJewel(item.id, true)
+        if abyssSet then
+            msg = item.name .. " is currently equipped in an Abyssal Socket in set '" .. abyssSet .. "'.\nAre you sure you want to delete it?"
+        else
+            local equipTree = ilc:FindSocketedJewel(item.id, true)
+            if equipTree then
+                msg = item.name .. " is currently equipped in passive tree '" .. equipTree .. "'.\nAre you sure you want to delete it?"
+            end
+        end
+    end
+    return { ok = true, message = msg }
+end
+
+-- ItemsTab:DeleteItem (clears it from every slot, set and spec, then
+-- PopulateSlots + AddUndoState).
+function pob_itemsDeleteItem(itemId)
+    local bm, it = ctx()
+    local item = it and it.items[tonumber(itemId) or -1]
+    if not item then return fail("no such item") end
+    it:DeleteItem(item)
+    return done(nil, EMIT_TREE)
+end
+
+-- "Delete All" (ItemListControl.lua:22-39; the confirm is asked in QML).
+function pob_itemsDeleteAll()
+    local bm, it = ctx()
+    if not it then return fail("no build") end
+    for _, slot in pairs(it.slots) do
+        slot:SetSelItemId(0)
+    end
+    for _, spec in pairs(bm.treeTab.specList) do
+        for nodeId in pairs(spec.jewels) do
+            spec.jewels[nodeId] = 0
+        end
+    end
+    wipeTable(it.itemOrderList)
+    wipeTable(it.items)
+    it:PopulateSlots()
+    it:AddUndoState()
+    bm.buildFlag = true
+    return done(nil, EMIT_TREE)
+end
+
+-- "Delete Unused" (ItemListControl.lua:43-61).
+function pob_itemsDeleteUnused()
+    local bm, it = ctx()
+    if not it then return fail("no build") end
+    local ilc = it.controls.itemList
+    local delList = { }
+    for _, itemId in pairs(it.itemOrderList) do
+        if not it:GetEquippedSlotForItem(it.items[itemId]) and not ilc:FindEquippedAbyssJewel(itemId, false)
+                and not ilc:FindSocketedJewel(itemId, false) then
+            t_insert(delList, itemId)
+        end
+    end
+    for i = #delList, 1, -1 do
+        it:DeleteItem(it.items[delList[i]], true)
+    end
+    for _, spec in pairs(bm.treeTab.specList) do
+        spec:BuildClusterJewelGraphs()
+    end
+    it:PopulateSlots()
+    it:AddUndoState()
+    bm.buildFlag = true
+    return done({ deleted = #delList }, EMIT_TREE)
+end
+
+-- "Sort" (ItemsTab:SortItemList; adds its own undo state).
+function pob_itemsSortList()
+    local bm, it = ctx()
+    if not it then return fail("no build") end
+    it:SortItemList()
+    return { ok = true, _emit = { "items" } }
+end
+
+-- Drag-reorder inside the all-items list: ListControl moves the entry, then
+-- ItemListControl:OnOrderChange adds an undo state (ItemListControl.lua:157).
+function pob_itemsMoveItem(from, to)
+    local bm, it = ctx()
+    local list = it and it.itemOrderList
+    from, to = tonumber(from), tonumber(to)
+    if not list or not list[from] or not to or to < 1 or to > #list then return fail("bad index") end
+    t_insert(list, to, t_remove(list, from))
+    it:AddUndoState()
+    return { ok = true, _emit = { "items" } }
+end
+
+-- Drop from the DB / shared list onto the all-items list at `index`
+-- (ItemListControl:ReceiveDrag, ItemListControl.lua:147-155).
+function pob_itemsDropOnList(kind, key, index)
+    local bm, it = ctx()
+    local value = it and resolve(it, kind, key)
+    if not value or kind == "item" then return fail("not a droppable item") end
+    local newItem = new("Item", value.raw)
+    newItem:NormaliseQuality()
+    index = tonumber(index)
+    if index and (index < 1 or index > #it.itemOrderList + 1) then index = nil end
+    it:AddItem(newItem, true, index)
+    it:PopulateSlots()
+    it:AddUndoState()
+    return { ok = true, itemId = newItem.id, _emit = { "items" } }
+end
+
+-- ItemSlotControl:CanReceiveDrag / ReceiveDrag (ItemSlotControl.lua:114-130).
+function pob_itemsCanDropOnSlot(slotName, kind, key)
+    local bm, it = ctx()
+    local value = it and resolve(it, kind, key)
+    return value ~= nil and it.slots[slotName] ~= nil and it:IsItemValidForSlot(value, slotName) and true or false
+end
+
+function pob_itemsDropOnSlot(slotName, kind, key)
+    local bm, it = ctx()
+    local value = it and resolve(it, kind, key)
+    local slot = it and it.slots[slotName]
+    if not value or not slot then return fail("no such item or slot") end
+    if not it:IsItemValidForSlot(value, slotName) then return fail("item does not fit " .. slotName) end
+    if value.id and it.items[value.id] == value then
+        slot:SetSelItemId(value.id)
+    else
+        local newItem = new("Item", value.raw)
+        newItem:NormaliseQuality()
+        it:AddItem(newItem, true)
+        slot:SetSelItemId(newItem.id)
+    end
+    it:PopulateSlots()
+    it:AddUndoState()
+    bm.buildFlag = true
+    return done(nil, EMIT_TREE)
+end
+
+-- Sidebar minion dropdown (Animate Guardian's item sets) as a drop target
+-- (Build.lua:548-557): accepts an item whose primary slot the minion uses,
+-- then EquipItemInSet into the set the dropdown shows. EquipItemInSet copies
+-- items that are not in the build (DB / shared) itself.
+function pob_itemsCanDropOnMinion(kind, key)
+    local bm, it = ctx()
+    local value = it and resolve(it, kind, key)
+    if not value then return false end
+    local ok, uses = pcall(function()
+        local sg = bm.skillsTab.socketGroupList[bm.mainSocketGroup]
+        local minionUses = sg.displaySkillList[sg.mainActiveSkill].activeEffect.grantedEffect.minionUses
+        return minionUses and minionUses[value:GetPrimarySlot()]
+    end)
+    return ok and uses and true or false
+end
+
+function pob_itemsDropOnMinion(kind, key, itemSetId, shift)
+    local bm, it = ctx()
+    local value = it and resolve(it, kind, key)
+    itemSetId = tonumber(itemSetId)
+    if not value or not (itemSetId and it.itemSets[itemSetId]) then return fail("no such item or set") end
+    withKeys({ SHIFT = shift and true or false }, function()
+        it:EquipItemInSet(value, itemSetId)
+    end)
+    return done(nil, EMIT_TREE)
+end
+
+-- Shared items (SharedItemListControl). Drop from the build / DB list:
+-- ReceiveDrag (SharedItemListControl.lua:44-53) copies via BuildRaw and
+-- normalises quality only for items that are not in a build. Legacy inserts
+-- at `selDragIndex or #list` (BEFORE the last row when dropped below the
+-- list); here a drop past the end appends.
+function pob_itemsDropOnShared(kind, key, index)
+    local bm, it = ctx()
+    local value = it and resolve(it, kind, key)
+    if not value or kind == "shared" then return fail("not a droppable item") end
+    local newItem = new("Item", value:BuildRaw())
+    if not value.id then newItem:NormaliseQuality() end
+    local list = main.sharedItemList
+    index = tonumber(index)
+    if not index or index < 1 or index > #list + 1 then index = #list + 1 end
+    t_insert(list, index, newItem)
+    return { ok = true, index = index, _emit = { "items" } }
+end
+
+-- Drag-reorder inside the shared list (plain ListControl move).
+function pob_itemsMoveShared(from, to)
+    local list = main.sharedItemList
+    from, to = tonumber(from), tonumber(to)
+    if not list[from] or not to or to < 1 or to > #list then return fail("bad index") end
+    t_insert(list, to, t_remove(list, from))
+    return { ok = true, _emit = { "items" } }
+end
+
+function pob_itemsDeleteShared(index)
+    local list = main.sharedItemList
+    index = tonumber(index)
+    if not list[index] then return fail("bad index") end
+    t_remove(list, index)                   -- SharedItemListControl.lua:68
+    return { ok = true, _emit = { "items" } }
+end
+
+-- Shared item sets (SharedItemSetListControl), shown in Manage Item Sets.
+function pob_itemsGetSharedSets()
+    local sets = { }
+    for i, s in ipairs(main.sharedItemSetList) do
+        sets[i] = { title = s.title or "Default", rawTitle = s.title or "", listLabel = s.title or "Default" }
+    end
+    return { sets = sets }
+end
+
+-- SharedItemSetListControl:AddValueTooltip (SharedItemSetListControl.lua:53-64).
+function pob_itemsSharedSetTooltip(index)
+    local bm, it = ctx()
+    local s = main.sharedItemSetList[tonumber(index) or -1]
+    if not (it and s) then return { lines = { } } end
+    return { lines = tipLines(function(tip)
+        for _, slot in ipairs(it.orderedSlots) do
+            if not slot.nodeId then
+                local item = s.slots[slot.slotName]
+                if item then
+                    tip:AddLine(16, string.format("^7%s: %s%s", it.slots[slot.slotName].label, colorCodes[item.rarity], item.name))
+                end
+            end
+        end
+    end) }
+end
+
+-- Drag a build set onto the shared list (SharedItemSetListControl.lua:74-95).
+function pob_itemsShareSet(setIndex, at)
+    local bm, it = ctx()
+    local value = it and it.itemSets[it.itemSetOrderList[tonumber(setIndex) or -1] or -1]
+    if not value then return fail("no such set") end
+    local shared = { title = value.title, slots = { } }
+    for slotName, slot in pairs(it.slots) do
+        if not slot.nodeId then
+            if value ~= it.activeItemSet then slot = value[slotName] end
+            if slot.selItemId ~= 0 then
+                local item = it.items[slot.selItemId]
+                local newItem = new("Item", item:BuildRaw())
+                if not value.id then newItem:NormaliseQuality() end
+                shared.slots[slotName] = newItem
+            end
+        end
+    end
+    local list = main.sharedItemSetList
+    at = tonumber(at)
+    if not at or at < 1 or at > #list + 1 then at = #list + 1 end
+    t_insert(list, at, shared)
+    return { ok = true, index = at }
+end
+
+-- Drag a shared set onto the build's set list (ItemSetListControl.lua:93-106).
+-- Legacy skips PopulateSlots / SyncLoadouts here; both are added.
+function pob_itemsImportSharedSet(sharedIndex, at)
+    local bm, it = ctx()
+    local value = it and main.sharedItemSetList[tonumber(sharedIndex) or -1]
+    if not value then return fail("no such shared set") end
+    local itemSet = it:NewItemSet()
+    itemSet.title = value.title
+    for slotName, item in pairs(value.slots) do
+        local newItem = new("Item", item.raw)
+        newItem:NormaliseQuality()
+        it:AddItem(newItem, true)
+        itemSet[slotName].selItemId = newItem.id
+    end
+    local list = it.itemSetOrderList
+    at = tonumber(at)
+    if not at or at < 1 or at > #list + 1 then at = #list + 1 end
+    t_insert(list, at, itemSet.id)
+    it:PopulateSlots()
+    it:AddUndoState()
+    syncLoadouts(bm)
+    return { ok = true, index = at, _emit = { "build", "items" } }
+end
+
+function pob_itemsRenameSharedSet(index, title)
+    local bm, it = ctx()
+    local s = main.sharedItemSetList[tonumber(index) or -1]
+    if not s or not tostring(title or ""):match("%S") then return fail("bad index or empty title") end
+    s.title = tostring(title)
+    if it then it.modFlag = true end        -- SharedItemSetListControl.lua:36-37
+    return { ok = true }
+end
+
+function pob_itemsDeleteSharedSet(index)
+    index = tonumber(index)
+    if not main.sharedItemSetList[index] then return fail("bad index") end
+    t_remove(main.sharedItemSetList, index)
+    return { ok = true }
+end
+
+-- Uniques / Rare Templates DB (ItemDBControl). Filters are the LIVE legacy
+-- controls (selIndex / search.buf); the list is legacy's ListBuilder
+-- coroutine, pumped by pob_itemsDBStep because its only driver,
+-- ItemDBControl:Draw, never runs in the host.
+local DB_FILTERS = { "slot", "type", "sort", "league", "requirement", "obtainable", "searchMode" }
+
+local function dbCtl(which)
+    local bm, it = ctx()
+    if not it then return nil end
+    return which == "rare" and it.controls.rareDB or it.controls.uniqueDB, it, bm
+end
+
+local function dbBuilding(db, it)
+    return (db.listBuilder ~= nil or db.listBuildFlag or it.build.outputRevision ~= db.listOutputRevision) and true or false
+end
+
+function pob_itemsDBState(which)
+    local db, it = dbCtl(which)
+    if not db then return nil end
+    local res = {
+        which = which,
+        selectDB = it.controls.selectDB.selIndex,
+        loading = db.db.loading and true or false,
+        search = db.controls.search.buf,
+        filters = { },
+        rows = { },
+    }
+    res.building = res.loading or dbBuilding(db, it)
+    res.text = res.loading and "^7Loading..." or db.defaultText or ""
+    for _, name in ipairs(DB_FILTERS) do
+        local c = db.controls[name]
+        if c then
+            local labels = { }
+            for i, v in ipairs(c.list) do labels[i] = type(v) == "table" and (v.label or "") or tostring(v) end
+            res.filters[name] = { list = labels, sel = c.selIndex }
+        end
+    end
+    if not res.building then
+        for i, item in ipairs(db.list) do
+            res.rows[i] = { key = item.name, label = db:GetRowValue(1, i, item), name = item.name }
+        end
+    end
+    return res
+end
+
+-- Set one filter. `name` is a DB_FILTERS dropdown (1-based index), "search"
+-- (text) or "selectDB" (the Uniques / Rare Templates switch, 1 or 2). Each
+-- mirrors the control's own callback: listBuildFlag, or SetSortMode.
+function pob_itemsDBSetFilter(which, name, value)
+    local db, it = dbCtl(which)
+    if not db then return fail("no build") end
+    if name == "selectDB" then
+        it.controls.selectDB.selIndex = (tonumber(value) == 2) and 2 or 1
+        return { ok = true }
+    elseif name == "search" then
+        db.controls.search.buf = tostring(value or "")
+        db.listBuildFlag = true
+        return { ok = true }
+    end
+    local c = db.controls[name]
+    local idx = tonumber(value)
+    if not c or not isValueInArray(DB_FILTERS, name) or not idx or not c.list[idx] then
+        return fail("bad filter " .. tostring(name))
+    end
+    c.selIndex = idx
+    c.selFunc(idx, c.list[idx])
+    return { ok = true }
+end
+
+-- One slice of work: the Main.lua LoadItems coroutine while the DB is
+-- loading (pairsYield: ~20 ms), then ItemDBControl:Draw's list-build part
+-- (ItemDBControl.lua:274-296): restart on outputRevision / listBuildFlag,
+-- resume ListBuilder once (it yields every 50 ms on the stat-sort path with
+-- defaultText "^7Sorting... (N%)"). Driven by a job-scoped QML Timer.
+function pob_itemsDBStep(which)
+    local db, it = dbCtl(which)
+    if not db then return { running = false } end
+    if db.db.loading then
+        local loader = main.onFrameFuncs and main.onFrameFuncs.LoadItems
+        if not loader then return { running = false, error = "item DB loader missing" } end
+        local ok, err = pcall(loader)
+        if not ok then return { running = false, error = tostring(err) } end
+        return { running = true, loading = true, text = "^7Loading..." }
+    end
+    if not db.leaguesAndTypesLoaded then db:LoadLeaguesAndTypes() end
+    if it.build.outputRevision ~= db.listOutputRevision then db.listBuildFlag = true end
+    if db.listBuildFlag then
+        db.listBuildFlag = false
+        wipeTable(db.list)
+        db.listBuilder = coroutine.create(db.ListBuilder)
+        db.listOutputRevision = it.build.outputRevision
+    end
+    local finished = false
+    if db.listBuilder then
+        local ok, err = coroutine.resume(db.listBuilder, db)
+        if not ok then
+            db.listBuilder = nil
+            return { running = false, error = tostring(err) }
+        end
+        if coroutine.status(db.listBuilder) == "dead" then
+            db.listBuilder = nil
+            finished = true
+        end
+    end
+    return { running = db.listBuilder ~= nil, finished = finished, text = db.defaultText or "" }
+end
+
+---------------------------------------------------------------------------
 -- Selftests
 ---------------------------------------------------------------------------
 
@@ -553,5 +1121,234 @@ function pob_selftestItemsSlots()
     end)
     itRestore(bm, it, snap)
     -- restoring the undo state re-creates items; drop the fixtures we added.
+    return finish(res, ok, err)
+end
+
+local function linesText(lines)
+    local t = { }
+    for _, l in ipairs(lines or { }) do t[#t + 1] = l.text or "" end
+    return table.concat(t, "\n")
+end
+
+local function dbSnapshot(db)
+    local s = { search = db.controls.search.buf, sortMode = db.sortMode }
+    for _, name in ipairs(DB_FILTERS) do
+        if db.controls[name] then s[name] = db.controls[name].selIndex end
+    end
+    return s
+end
+
+local function dbRestore(db, s)
+    db.controls.search.buf = s.search
+    for _, name in ipairs(DB_FILTERS) do
+        if db.controls[name] and name ~= "sort" then db.controls[name].selIndex = s[name] end
+    end
+    db:SetSortMode(s.sortMode)      -- rebuilds sortOrder, re-selects the sort row
+    db.listBuildFlag = true
+end
+
+local function dbRun(which, maxSteps)
+    local r, steps = nil, 0
+    repeat
+        r = pob_itemsDBStep(which)
+        steps = steps + 1
+    until not r.running or steps >= maxSteps
+    return r, steps
+end
+
+-- Part 6.2: all-items list, Uniques / Rare Templates DB (pumped loader +
+-- list builder, filters, stat sort), shared items and shared item sets, and
+-- the drop targets (list, slot, shared, minion dropdown).
+function pob_selftestItemsLists()
+    local bm, it = ctx()
+    if not it then return { ok = false, error = "no itemsTab" } end
+    local snap = itSnapshot(bm, it)
+    local uniq, rare = it.controls.uniqueDB, it.controls.rareDB
+    local uSnap, rSnap = dbSnapshot(uniq), dbSnapshot(rare)
+    local selectDB = it.controls.selectDB.selIndex
+    -- Shared lists persist through main:SaveSettings: restore both in place
+    -- (the list controls hold these exact tables). Never call SaveSettings.
+    local sharedItems = copyTable(main.sharedItemList, true)
+    local sharedSets = copyTable(main.sharedItemSetList, true)
+    local savedCopy = Copy
+    local res = { }
+    local ok, err = pcall(function()
+        local copied
+        Copy = function(text) copied = text end   -- the real Copy() crashes pob-qt --headless
+        local function add(raw)
+            local item = new("Item", raw)
+            if not item.base then error("fixture base missing: " .. raw:match("\n(.-)\n")) end
+            item:NormaliseQuality()
+            it:AddItem(item, true)
+            return item
+        end
+        local ring = add("Rarity: Rare\nLT Ring\nGold Ring\n")
+        local ring2 = add("Rarity: Rare\nLT Other Ring\nIron Ring\n")
+        it:PopulateSlots()
+        it:AddUndoState()
+        local function row(id)
+            for _, r in ipairs(pob_itemsGetLists().items) do if r.key == id then return r end end
+            return { label = "" }
+        end
+        local function pos(id) return isValueInArray(it.itemOrderList, id) or 0 end
+        res.rowUnused = row(ring.id).label:find("(Unused)", 1, true) ~= nil
+        res.rowsListed = #pob_itemsGetLists().items == #it.itemOrderList
+
+        -- Ctrl+click toggles the primary slot; Shift targets the second slot.
+        pob_itemsCtrlClick("item", ring.id, false)
+        res.ctrlEquips = it.slots["Ring 1"].selItemId == ring.id
+            and row(ring.id).label:find("(Unused)", 1, true) == nil
+        pob_itemsCtrlClick("item", ring.id, false)
+        res.ctrlToggles = it.slots["Ring 1"].selItemId == 0
+        pob_itemsCtrlClick("item", ring.id, true)
+        res.shiftSecondSlot = it.slots["Ring 2"].selItemId == ring.id and it.slots["Ring 1"].selItemId == 0
+
+        -- Delete asks only for a used item (ItemListControl:OnSelDelete).
+        res.deleteAsks = pob_itemsDeleteQuery(ring.id).message:find("equipped in Ring 2", 1, true) ~= nil
+        res.deleteNoAsk = pob_itemsDeleteQuery(ring2.id).message == ""
+
+        -- Tooltip with an explicit SHIFT, then IsKeyDown is back; Copy is CRLF.
+        res.tooltipOk = linesText(pob_itemsTooltip("item", ring.id, true).lines):find("LT Ring", 1, true) ~= nil
+        res.keysRestored = IsKeyDown("SHIFT") == false
+        pob_itemsCopy("item", ring.id)
+        res.copyCRLF = copied ~= nil and copied:find("LT Ring\r\n", 1, true) ~= nil
+
+        -- Reorder (+ undo), then Sort puts the equipped ring first.
+        local n = #it.itemOrderList
+        pob_itemsMoveItem(pos(ring2.id), 1)
+        res.moveOk = it.itemOrderList[1] == ring2.id
+        pob_itemsUndo()
+        res.moveUndo = it.itemOrderList[n] == ring2.id
+        pob_itemsMoveItem(pos(ring2.id), 1)
+        pob_itemsSortList()
+        res.sortOk = #it.itemOrderList == n and pos(ring.id) < pos(ring2.id)
+
+        -- Double-click opens an editable COPY with the same id.
+        pob_itemsOpenForEdit("item", ring.id)
+        res.editCopy = it.displayItem ~= nil and it.displayItem.id == ring.id and it.displayItem ~= it.items[ring.id]
+        local d = pob_itemsGetLists().display
+        res.displayShown = d.shown == true and d.addLabel == "Save" and #d.lines > 0
+        pob_itemsCloseDisplayItem()
+        res.editClosed = it.displayItem == nil and pob_itemsGetLists().display.shown == false
+
+        -- Delete Unused keeps the equipped ring; Delete All; undo.
+        pob_itemsDeleteUnused()
+        res.deleteUnusedOk = it.items[ring2.id] == nil and it.items[ring.id] ~= nil
+        pob_itemsDeleteAll()
+        res.deleteAllOk = next(it.items) == nil and #it.itemOrderList == 0 and it.slots["Ring 2"].selItemId == 0
+        pob_itemsUndo()
+        res.deleteAllUndo = it.items[ring.id] ~= nil and it.itemSets[it.activeItemSetId]["Ring 2"].selItemId == ring.id
+
+        -- Uniques DB: loader and list builder run only when pumped.
+        local r = dbRun("unique", 20000)
+        res.dbLoaded = not main.uniqueDB.loading and not r.running and r.error == nil
+        res.leaguesLoaded = uniq.leaguesAndTypesLoaded == true and #uniq.typeList > 5
+        local all = #pob_itemsDBState("unique").rows
+        pob_itemsDBSetFilter("unique", "slot", isValueInArray(uniq.slotList, "Belt"))
+        dbRun("unique", 100)
+        local belts = pob_itemsDBState("unique").rows
+        local allBelts = #belts > 1
+        for _, b in ipairs(belts) do
+            if main.uniqueDB.list[b.key]:GetPrimarySlot() ~= "Belt" then allBelts = false end
+        end
+        res.dbSlotFilter = allBelts and #belts < all
+        res.dbCounts = all .. "/" .. #belts
+        pob_itemsDBSetFilter("unique", "searchMode", 2)
+        pob_itemsDBSetFilter("unique", "search", "headhunter")
+        dbRun("unique", 100)
+        local hh = pob_itemsDBState("unique").rows
+        res.dbSearch = #hh >= 1 and hh[1].name:find("Headhunter", 1, true) ~= nil
+        pob_itemsDBSetFilter("unique", "search", "")
+
+        -- Stat sort over the belt subset: calcFunc per item x slot, sliced.
+        local sortIdx
+        for i, v in ipairs(uniq.controls.sort.list) do if v.stat == "Life" then sortIdx = i end end
+        res.sortSet = pob_itemsDBSetFilter("unique", "sort", sortIdx).ok and uniq.sortDetail.stat == "Life"
+        local sr, steps = dbRun("unique", 20000)
+        local sorted = pob_itemsDBState("unique").rows
+        local desc = #sorted == #belts
+        for i = 2, #sorted do
+            local a = main.uniqueDB.list[sorted[i - 1].key].measuredPower
+            local b = main.uniqueDB.list[sorted[i].key].measuredPower
+            if not (type(a) == "number" and type(b) == "number" and a >= b) then desc = false end
+        end
+        res.statSortDone = sr.error == nil and not sr.running
+        res.statSortOrdered = desc
+        res.statSortSteps = steps
+
+        -- Ctrl+click a DB row copies it into the build and equips it.
+        local beltName = sorted[1].key
+        local dbItem = main.uniqueDB.list[beltName]
+        local before = #it.itemOrderList
+        local c = pob_itemsCtrlClick("unique", beltName, false)
+        res.dbCtrlEquips = c.ok and #it.itemOrderList == before + 1 and it.slots["Belt"].selItemId == c.itemId
+            and it.items[c.itemId] ~= dbItem and dbItem.id == nil
+
+        -- Drop targets: the list (at an index), a slot (valid only).
+        local d1 = pob_itemsDropOnList("unique", beltName, 1)
+        res.dropOnListOk = d1.ok and it.itemOrderList[1] == d1.itemId and dbItem.id == nil
+        res.canDropSlot = pob_itemsCanDropOnSlot("Belt", "unique", beltName)
+            and not pob_itemsCanDropOnSlot("Helmet", "unique", beltName)
+        res.dropOnSlotOk = pob_itemsDropOnSlot("Belt", "item", d1.itemId).ok and it.slots["Belt"].selItemId == d1.itemId
+            and not pob_itemsDropOnSlot("Helmet", "item", d1.itemId).ok
+
+        -- Rare Templates DB (no league / sort filters).
+        local rr = dbRun("rare", 20000)
+        local rst = pob_itemsDBState("rare")
+        res.rareDBOk = rr.error == nil and not rst.loading and #rst.rows > 0 and rst.filters.league == nil
+
+        -- Minion dropdown drop: a DB item is copied into the given set.
+        local ns = pob_itemsNewSet("LT Minion")
+        local setId = it.itemSetOrderList[ns.index]
+        pob_itemsDropOnMinion("unique", beltName, setId, false)
+        local mId = it.itemSets[setId]["Belt"].selItemId
+        res.minionDropOk = mId ~= 0 and it.items[mId] ~= nil and it.items[mId] ~= dbItem
+        res.minionCanDropBool = type(pob_itemsCanDropOnMinion("unique", beltName)) == "boolean"
+
+        -- Shared items: drop appends / inserts, copy back to the build, delete.
+        local ringName = it.items[ring.id].name       -- rares: "LT Ring, Gold Ring"
+        local nShared = #main.sharedItemList
+        local s1 = pob_itemsDropOnShared("item", ring.id, nil)
+        res.shareAppends = s1.ok and s1.index == nShared + 1 and main.sharedItemList[s1.index].name == ringName
+        pob_itemsDropOnShared("unique", beltName, s1.index)
+        res.shareInsertAt = main.sharedItemList[s1.index].name == dbItem.name
+            and main.sharedItemList[s1.index + 1].name == ringName
+        local fromShared = pob_itemsDropOnList("shared", s1.index + 1, nil)
+        res.sharedToList = fromShared.ok and it.items[fromShared.itemId].name == ringName
+            and it.items[fromShared.itemId] ~= main.sharedItemList[s1.index + 1]
+        res.sharedRows = #pob_itemsGetLists().shared == #main.sharedItemList
+        pob_itemsDeleteShared(s1.index)
+        res.sharedDelete = #main.sharedItemList == nShared + 1 and main.sharedItemList[s1.index].name == ringName
+        res.sharedNoCtrl = not pob_itemsCtrlClick("shared", s1.index, false).ok
+
+        -- Shared item sets: share the active set, rename, import, delete.
+        local nSets = #main.sharedItemSetList
+        local sh = pob_itemsShareSet(isValueInArray(it.itemSetOrderList, it.activeItemSetId), nil)
+        local shared = main.sharedItemSetList[sh.index]
+        res.shareSetOk = sh.ok and #main.sharedItemSetList == nSets + 1
+            and shared.slots["Ring 2"] ~= nil and shared.slots["Ring 2"].name == ringName
+        pob_itemsRenameSharedSet(sh.index, "LT Shared")
+        res.sharedSetRename = shared.title == "LT Shared" and not pob_itemsRenameSharedSet(sh.index, " ").ok
+        res.sharedSetTooltip = linesText(pob_itemsSharedSetTooltip(sh.index).lines):find("LT Ring", 1, true) ~= nil
+        local nOrder = #it.itemSetOrderList
+        local imp = pob_itemsImportSharedSet(sh.index, 1)
+        local newSet = it.itemSets[it.itemSetOrderList[1]]
+        res.importSetOk = imp.ok and #it.itemSetOrderList == nOrder + 1 and newSet.title == "LT Shared"
+            and newSet["Ring 2"].selItemId ~= 0 and it.items[newSet["Ring 2"].selItemId].name == ringName
+        pob_itemsDeleteSharedSet(sh.index)
+        res.sharedSetDelete = #main.sharedItemSetList == nSets
+    end)
+    Copy = savedCopy
+    pcall(function()
+        wipeTable(main.sharedItemList)
+        for i, v in ipairs(sharedItems) do main.sharedItemList[i] = v end
+        wipeTable(main.sharedItemSetList)
+        for i, v in ipairs(sharedSets) do main.sharedItemSetList[i] = v end
+    end)
+    pcall(dbRestore, uniq, uSnap)
+    pcall(dbRestore, rare, rSnap)
+    it.controls.selectDB.selIndex = selectDB
+    pcall(function() it:SetDisplayItem() end)
+    itRestore(bm, it, snap)
     return finish(res, ok, err)
 end

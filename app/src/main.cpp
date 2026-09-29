@@ -419,13 +419,13 @@ int main(int argc, char** argv) {
     // equipped slots; jewelSocketModel holds the tree jewel sockets. They are
     // refreshed every frame (throttled internally by a change signature) so
     // the ITEMS view stays in sync with the engine without QML polling.
-    ItemModel* itemModel = new ItemModel(&app);
+    // Phase 6 Part 6.2: the Items view reads pob_itemsGetLists (app/lua/
+    // pob_items.lua); ItemModel (the old right-column browser's model) is no
+    // longer instantiated. src/ItemModel.cpp stays in the build.
     ItemSlotModel* itemSlotModel = new ItemSlotModel(&app);
     JewelSocketModel* jewelSocketModel = new JewelSocketModel(&app);
-    itemModel->refresh(&engine);
     itemSlotModel->refresh(&engine);
     jewelSocketModel->refresh(&engine);
-    qml.rootContext()->setContextProperty("itemModel", itemModel);
     qml.rootContext()->setContextProperty("itemSlotModel", itemSlotModel);
     qml.rootContext()->setContextProperty("jewelSocketModel", jewelSocketModel);
 
@@ -489,7 +489,6 @@ int main(int argc, char** argv) {
     QObject::connect(&engine, &LuaEngine::buildDataChanged, [&]() { socketGroupModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::treeChanged, [&]() { treeViewController->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::configChanged, [&]() { configModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::itemsChanged, [&]() { itemModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::itemsChanged, [&]() { itemSlotModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::itemsChanged, [&]() { jewelSocketModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::calcsChanged, [&]() { calcModel->refresh(&engine); });
@@ -503,7 +502,6 @@ int main(int argc, char** argv) {
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { buildListModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { saveLoadModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { treeViewController->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { itemModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { itemSlotModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { jewelSocketModel->refresh(&engine); });
     QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { calcModel->refresh(&engine); });

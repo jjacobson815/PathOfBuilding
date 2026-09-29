@@ -9,13 +9,14 @@ stand and what the last session learned.
 | Item | State |
 |---|---|
 | Branch | `cloud/phase-6`, pushed, based on `origin/dev` @ 83100d2 (Phase 5 merged) |
-| Draft PR | https://github.com/jjacobson815/PathOfBuilding/pull/7 (against `dev`), CI all green on `6ddfc60` |
+| Draft PR | https://github.com/jjacobson815/PathOfBuilding/pull/7 (against `dev`); CI green on `6ddfc60`, see the session report for the 6.2 push |
 | Part 6.1 | DONE, ticked, committed, pushed (`6ddfc60`) |
-| Parts 6.2 – 6.5 | NOT STARTED |
-| Gate | `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0`, new check `items-slots` (31 flags) |
+| Part 6.2 | DONE in the first Windows session, ticked, committed, pushed; check `items-lists` (44 flags). Drag-drop / tooltips / shared-sets pane NOT eyeballed (no computer-use tools) |
+| Parts 6.3 – 6.5 | NOT STARTED. Next: 6.3 item 1 (editor panel) |
+| Gate | Windows: `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0` (checks `items-slots`, `items-lists`) |
 | Phase 7 switch | NOT done. STATUS.md must keep "ACTIVE: Phase 6" until 6.5 is ticked |
 
-Continue at **Part 6.2**. Do not redo 6.1.
+Continue at **Part 6.3**. Do not redo 6.1 / 6.2.
 
 ## Setup traps (cost the last session time)
 
@@ -69,7 +70,7 @@ sections, tooltip/compare, XML). It was written by a subagent from the legacy
 code. Trust it, spot-check line numbers. Per the protocol, have a subagent read
 legacy code and keep edits in the main session.
 
-## Next: Part 6.2 plan (from the recon, sections "6.2")
+## Part 6.2 plan (DONE — kept for reference; what landed is in the phase file's 6.2 session log)
 
 - All-items list (ItemListControl, `itemsTab.itemOrderList`): row text via
   `ItemListControl:GetRowValue` (adds "(Unused)"/"(Used in ...)"), tooltip via

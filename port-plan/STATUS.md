@@ -9,8 +9,8 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 6 — Items Tab — Part 6.1 DONE, next 6.2 (lists / drag-drop)**
-**Handoff for the next agent: `port-plan/handoff/HANDOFF-phase6.md` (read it, then the phase file). Stopped at: 6.1 pushed (PR #7 green); 6.2 not started.** (spec: `phases/PHASE-6-items-tab.md`).
+**ACTIVE: Phase 6 — Items Tab — Parts 6.1 + 6.2 DONE, next 6.3 (display-item editor)**
+**Handoff for the next agent: `port-plan/handoff/HANDOFF-phase6.md` (read it, then the phase file). Stopped at: 6.2 committed + pushed from the first Windows session (Windows gate green, check `items-lists`); 6.3 not started — begin with its first item (editor panel).** (spec: `phases/PHASE-6-items-tab.md`).
 Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → **6** → 7 → Phase 3 long tail
 → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.
 
@@ -332,7 +332,7 @@ Full detail in `reference/00-architecture.md`. The short list:
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
 
-**▶ Phase 6 (in progress).** Bridge `app/lua/pob_items.lua`. Traps found: legacy
+**▶ Phase 6 (in progress).** Windows (Qt 6.11.1, msys2) now builds and gates everything through 6.2; the only Windows fix needed was `SocketGroupList.qml`'s `"file://" + "C:/..."` icon URL (now `file:///` for drive paths). Item drag-drop: `components/DragGhost.qml` (overlay drag payload `{kind,key,shift}`, DropArea key "Item") + `ItemListBox.qml`; the item DB list is pumped by `ItemDBPanel`'s job-scoped timer via `pob_itemsDBStep`. `Label` is ONE line (height = size): split multi-line text into a Repeater. Bridge `app/lua/pob_items.lua`. Traps found: legacy
 `IsKeyDown` is a stub, so lifted click/equip code takes explicit shift/ctrl flags
 (`withKeys` temporarily swaps `IsKeyDown`); `ItemsTab:UpdateSockets` only runs
 from Draw/AddItemTooltip, so call it before reading sockets; `ItemSlotControl:

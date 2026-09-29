@@ -5,6 +5,12 @@ Files: `src/Classes/ItemsTab.lua` (IT), `ItemSlotControl.lua` (ISC), `ItemListCo
 Host: `app/lua/pob_host.lua` (PH), `app/lua/pob_skills.lua` (PS). All line numbers are current HEAD.
 The code-review-graph MCP tools were not exposed in this session, so this was done with Read/Grep.
 
+**Corrections (2026-09-29, Windows session; the line refs below are otherwise accurate):**
+- Build.lua:548-557 is the sidebar MINION dropdown drop (`mainSkillMinion.ReceiveDrag` -> `EquipItemInSet`), not a loadout dropdown.
+- `GetMiscCalculator` is CalcsTab.lua:743. SharedItemSetList `ReceiveDrag` is SISL:74-95.
+- 6.3: Scourge shows 3 implicit dropdowns for non-uniques and 4 for uniques (IT:2895). The influence special case sets all 6 influences (IT:554-557). `addModifier` does not call `checkLineForAllocates`.
+- 6.4: `CopyAnointsAndEldritchImplicits` runs only on the editor path (`CreateDisplayItemFromRaw`, IT:1661), never on compare or equip. The jewel-radius cloned-spec compare triggers only for Timeless, Thread of Hope / Intuitive Leap-like jewels and Impossible Escape (IT:3836-3839).
+
 ## 0. Host conventions to follow (from PS + PH)
 
 - Bridge fns are top-level globals named `pob_*`. `LuaEngine::callGlobal` does one `lua_getglobal`, so no dotted names. New module goes in `app/lua/pob_items.lua`, loaded by `require("pob_items")` next to `require("pob_skills")` (PH:6477). Installed by the same `*.lua` rule.
@@ -56,7 +62,7 @@ The code-review-graph MCP tools were not exposed in this session, so this was do
 - Reorder: `OnOrderChange` only sets `modFlag` (ISL:108). Same as `pob_skillsMoveSet` (PS:387).
 - Set tooltip: `AddItemSetTooltip(tooltip,set)` (IT:3753) lists `^7label: <rarity color>item.name` per non-socket slot.
 - Shared item sets (SISL, `main.sharedItemSetList`, entries `{title, slots={[slotName]=Item}}`) and shared items (SIL, `main.sharedItemList`, entries are Item objects) are cross-build state in Main. Drag-drop logic: ISL:93-106 (shared -> build) and SISL:80-100 (build -> shared). Lift those bodies as `pob_itemsShareSet(index)` / `pob_itemsUnshareSet(sharedIndex)`. The reader must use `value.slots` items' `.raw`.
-- EquipItemInSet(item,setId) (IT:1412) is used by the build loadout dropdown (Build.lua:556). It reads `IsKeyDown("SHIFT")` at line 1424, so pass a flag or wrap with a fake IsKeyDown if needed. If `item.id` is unknown it creates `new("Item", item.raw)` and adds it with noAutoEquip.
+- EquipItemInSet(item,setId) (IT:1412) is used by the sidebar MINION dropdown drop (Animate Guardian item sets: `mainSkillMinion.ReceiveDrag`, Build.lua:548-557; not a loadout dropdown). It reads `IsKeyDown("SHIFT")` at line 1424, so pass a flag or wrap with a fake IsKeyDown if needed. If `item.id` is unknown it creates `new("Item", item.raw)` and adds it with noAutoEquip.
 
 ### Weapon-set buttons (IT:222-262)
 - `weaponSwap1` ("I") when `useSecondWeaponSet` is true: set it false, `AddUndoState`, `build.buildFlag=true`, then if main socket group's slot has `weaponSet==2`, move `build.mainSocketGroup` to the first group whose slot has `weaponSet==1`. `weaponSwap2` is the mirror.
@@ -142,7 +148,7 @@ Never marshal `ListControl` objects. All three are `ListControl` subclasses whos
   ```
   - Non-stat sort: fast (`table.sort` on `name`/`measuredPower` per `sortOrder`, "The " stripped).
   - Stat sort (`sortDetail.stat`): for every filtered item and every valid slot it calls `calcFunc({repSlotName,repItem})` (or `toggleFlask`/`toggleTincture`) and stores `item.measuredPower` = max (IDB:225-245). It yields every 50 ms with `defaultText = "Sorting... (N%)"` (yield at IDB:241). For the Qt port: resume the coroutine slice by slice from a timer (or bounded loop), read `self.defaultText`/progress from `itemIndex/#list` (progress is only visible inside the local; capture by patching `defaultText` parse, or reimplement `ListBuilder` in the bridge as a lift and keep `itemIndex`), return `{done=false,percent=..}` until dead. Cancel: drop the coroutine when filters change (legacy just re-creates on `listBuildFlag`).
-  - `GetTime()` is used for the 50 ms slice test, so it works in host. `self.build` at IDB:228 is nil (`GetMiscCalculator(self.build)` is harmless, arg ignored, IT:743 unpack only).
+  - `GetTime()` is used for the 50 ms slice test, so it works in host. `self.build` at IDB:228 is nil (`GetMiscCalculator(self.build)` is harmless, arg ignored, CalcsTab.lua:743 unpack only).
 - `GetRowValue`: `<rarityColor>name`. `AddValueTooltip` -> `AddItemTooltip(tooltip,item,nil,true)` (dbMode=true adds Variant/League/Exclusive/Source/upgradePaths lines, IT:3979-4001).
 - `OnSelClick(index,item,doubleClick)` (IDB:320):
   - CTRL: `new("Item", item.raw); NormaliseQuality; AddItem(newItem,true)`; equip in primary slot (same weaponSet/SHIFT redirect as ILC) via `slots[slotName]:SetSelItemId(newItem.id)`; PopulateSlots, AddUndoState, buildFlag.
@@ -154,7 +160,7 @@ Never marshal `ListControl` objects. All three are `ListControl` subclasses whos
 ### SharedItemListControl (SIL)
 - List is `main.sharedItemList` (Items, cross-build, persisted to Settings.xml `<SharedItems>` by Main.lua:757-768 on `SaveSettings`, which the host settings path already calls).
 - `ReceiveDrag` (SIL:44): `new("Item", value:BuildRaw())` (NormaliseQuality if `not value.id`), then `t_insert(list, dragIndex or #list, newItem)`. Add via bridge `pob_itemsShareItem(itemId)`. Delete: `t_remove(list,index)` after confirm. Double-click: `CreateDisplayItemFromRaw(item.raw,true)`. Copy: `Copy(item:BuildRaw()...)`. Mutating `main.sharedItemList` needs `main:SaveSettings()`? Legacy relies on the normal settings save on exit/"Save" (check host's SaveSettings call site before promising persistence).
-- Shared item sets (SISL, list `main.sharedItemSetList`, `{title,slots}`): rename `title=..; itemsTab.modFlag=true` (no undo); delete = `t_remove`; drag from ISL = `ReceiveDrag` SISL:80-100; drag into ISL creates a new set (ISL:93-106): NewItemSet, title, for each `slots[slotName]` `AddItem(new Item(raw), true)` and `itemSet[slotName].selItemId = id`, insert into order list, AddUndoState (NOTE: no SyncLoadouts and no PopulateSlots; add both).
+- Shared item sets (SISL, list `main.sharedItemSetList`, `{title,slots}`): rename `title=..; itemsTab.modFlag=true` (no undo); delete = `t_remove`; drag from ISL = `ReceiveDrag` SISL:74-95; drag into ISL creates a new set (ISL:93-106): NewItemSet, title, for each `slots[slotName]` `AddItem(new Item(raw), true)` and `itemSet[slotName].selItemId = id`, insert into order list, AddUndoState (NOTE: no SyncLoadouts and no PopulateSlots; add both).
 
 ### Cursor/draw-dependent code to avoid in 6.2
 - `ListControl` Draw/hit-test/drag internals (`selDragIndex`, `dragIndex`, `GetHoverValue`, `OnHoverKeyUp`). `ItemDBClass:Draw` (only to be replaced by the manual coroutine pump). `IsKeyDown` reads inside OnSelClick (replace by explicit args). Popups (`main:OpenConfirmPopup`, `main:OpenPopup`) - replaced by QML dialogs.

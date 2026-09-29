@@ -957,6 +957,9 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Phase 6 Part 6.1: item sets, weapon sets, slot panel state, equip rules,
     // flask activation, undo/redo.
     if (!pob_run_lua_check(engine, "pob_selftestItemsSlots", "items-slots")) return false;
+    // Phase 6 Part 6.2: all-items list, Uniques / Rare DB (pumped loader, filters,
+    // stat sort), shared items + shared item sets, drop targets.
+    if (!pob_run_lua_check(engine, "pob_selftestItemsLists", "items-lists")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;
