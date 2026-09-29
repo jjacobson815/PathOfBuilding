@@ -9,7 +9,8 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 6 — Items Tab — Part 6.1 DONE, next 6.2 (lists / drag-drop)** (spec: `phases/PHASE-6-items-tab.md`).
+**ACTIVE: Phase 6 — Items Tab — Part 6.1 DONE, next 6.2 (lists / drag-drop)**
+**Handoff for the next agent: `port-plan/handoff/HANDOFF-phase6.md` (read it, then the phase file). Stopped at: 6.1 pushed (PR #7 green); 6.2 not started.** (spec: `phases/PHASE-6-items-tab.md`).
 Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → **6** → 7 → Phase 3 long tail
 → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.
 
