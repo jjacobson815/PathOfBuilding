@@ -79,6 +79,8 @@ Item {
     // Double-click on any list row: open it as the display item and scroll
     // it into view (SetDisplayItem: snapHScroll = "RIGHT").
     function openEdit(kind, key) { call("pob_itemsOpenForEdit", [kind, key]) }
+    // Craft buttons -> popups (Part 6.3 item 2).
+    function openCraft(kind, slot) { }
     function snapRight() { Qt.callLater(function () { hflick.contentX = Math.max(0, hflick.contentWidth - hflick.width) }) }
 
     // ItemListControl:OnSelDelete — ask only when the item is in use.
@@ -424,6 +426,37 @@ Item {
                 readonly property var variants: ed.variants && ed.variants.length !== undefined ? ed.variants : []
                 readonly property var sockets: ed.sockets && ed.sockets.length !== undefined ? ed.sockets : []
                 readonly property var socketList: ed.socketList && ed.socketList.length !== undefined ? ed.socketList : []
+                readonly property var influence: ed.influence ? ed.influence : ({})
+                readonly property var quality: ed.quality ? ed.quality : ({})
+                readonly property var catalyst: ed.catalyst ? ed.catalyst : ({})
+                readonly property var cluster: ed.cluster ? ed.cluster : ({})
+
+                // Imperative pushes: EditControl.text / Slider.value break an
+                // outside binding on the first user edit, so each refresh writes them.
+                function pushSections() {
+                    // Read from `ed` (not the derived properties): onEdChanged can fire
+                    // during construction, before those later bindings exist.
+                    const inf = ed.influence || ({}), q = ed.quality || ({})
+                    const cat = ed.catalyst || ({}), cl = ed.cluster || ({})
+                    if (inf.shown === true) {
+                        infl1.model = inf.list; infl1.currentIndex = inf.sel1 - 1
+                        infl2.model = inf.list; infl2.currentIndex = inf.sel2 - 1
+                    }
+                    if (q.shown === true) qualEdit.text = q.text
+                    if (cat.shown === true) { catDrop.model = cat.list; catDrop.currentIndex = cat.sel - 1 }
+                    if (cat.qualityShown === true) catQual.text = cat.qualityText
+                    if (cl.shown === true) {
+                        clusterDrop.model = cl.list; clusterDrop.currentIndex = cl.sel - 1
+                        if (!clusterSlider.dragging) {
+                            clusterSlider.pushing = true
+                            clusterSlider.divCount = cl.divCount || 0
+                            clusterSlider.value = cl.val
+                            clusterSlider.pushing = false
+                        }
+                    }
+                }
+                onEdChanged: pushSections()
+                Component.onCompleted: pushSections()
 
                 Row {
                     spacing: 8
@@ -511,6 +544,119 @@ Item {
                             width: 20; height: 20
                             label: "+"
                             onClicked: itemsView.call("pob_itemsDisplayAddSocket")
+                        }
+                    }
+                    // Craft buttons (ItemsTab.lua:475-545): hidden ones collapse,
+                    // the row wraps when wider than the pane.
+                    Item {
+                        width: displayPane.width
+                        readonly property bool any: {
+                            const b = displayPane.ed.craftButtons
+                            if (!b) return false
+                            for (const k in b) if (b[k] === true) return true
+                            return false
+                        }
+                        height: any ? craftFlow.height + 8 : 0
+                        visible: any
+                        Flow {
+                            id: craftFlow
+                            width: parent.width
+                            spacing: 8
+                            Repeater {
+                                model: [
+                                    { key: "enchant1", label: "Apply Enchantment...", w: 160, kind: "enchant", slot: 1 },
+                                    { key: "enchant2", label: "Apply Enchantment 2...", w: 160, kind: "enchant", slot: 2 },
+                                    { key: "anoint1", label: "Anoint...", w: 100, kind: "anoint", slot: 1 },
+                                    { key: "anoint2", label: "Anoint 2...", w: 100, kind: "anoint", slot: 2 },
+                                    { key: "anoint3", label: "Anoint 3...", w: 100, kind: "anoint", slot: 3 },
+                                    { key: "anoint4", label: "Anoint 4...", w: 100, kind: "anoint", slot: 4 },
+                                    { key: "corrupt", label: "Corrupt...", w: 100, kind: "corrupt", slot: 1 },
+                                    { key: "addImplicit", label: "Add Implicit...", w: 120, kind: "implicit", slot: 1 }
+                                ]
+                                delegate: Widgets.Button {
+                                    visible: !!(displayPane.ed.craftButtons && displayPane.ed.craftButtons[modelData.key] === true)
+                                    width: modelData.w; height: 20
+                                    label: modelData.label
+                                    onClicked: itemsView.openCraft(modelData.kind, modelData.slot)
+                                }
+                            }
+                        }
+                    }
+                    // Influence (ItemsTab.lua:547-592): two 100-wide dropdowns.
+                    Item {
+                        width: 400
+                        height: displayPane.influence.shown === true ? 28 : 0
+                        visible: height > 0
+                        Widgets.DropDownControl {
+                            id: infl1
+                            width: 100; height: 20
+                            onSelected: function (i) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemInfluence", i + 1]) }
+                        }
+                        Widgets.DropDownControl {
+                            id: infl2
+                            x: 108
+                            width: 100; height: 20
+                            onSelected: function (i) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemInfluence2", i + 1]) }
+                        }
+                    }
+                    // Quality (ItemsTab.lua:594-610).
+                    Item {
+                        width: 400
+                        height: displayPane.quality.shown === true ? 28 : 0
+                        visible: height > 0
+                        Widgets.Label { id: qualLbl; y: 2; label: "^7Quality:"; size: 16 }
+                        Widgets.EditControl {
+                            id: qualEdit
+                            x: qualLbl.width + 6
+                            width: 60; height: 20
+                            isNumeric: true
+                            maxChars: 2
+                            onCommitted: function (t) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemQualityEdit", t]) }
+                        }
+                    }
+                    // Catalyst (ItemsTab.lua:612-652): 250-wide dropdown + 60-wide quality.
+                    Item {
+                        width: 400
+                        height: (displayPane.catalyst.shown === true || displayPane.catalyst.qualityShown === true) ? 28 : 0
+                        visible: height > 0
+                        Widgets.DropDownControl {
+                            id: catDrop
+                            visible: displayPane.catalyst.shown === true
+                            width: 250; height: 20
+                            onSelected: function (i) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemCatalyst", i + 1]) }
+                        }
+                        Widgets.EditControl {
+                            id: catQual
+                            visible: displayPane.catalyst.qualityShown === true
+                            x: 252
+                            width: 60; height: 20
+                            isNumeric: true
+                            maxChars: 2
+                            onCommitted: function (t) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemCatalystQualityEdit", t]) }
+                        }
+                    }
+                    // Cluster jewel (ItemsTab.lua:654-674): skill dropdown + node count.
+                    Item {
+                        width: 400
+                        height: displayPane.cluster.shown === true ? 52 : 0
+                        visible: height > 0
+                        Widgets.DropDownControl {
+                            id: clusterDrop
+                            width: 300; height: 20
+                            onSelected: function (i) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemClusterJewelSkill", i + 1]) }
+                        }
+                        Widgets.Label { id: clusterLbl; y: 27; label: "^7Added Passives:"; size: 14 }
+                        Widgets.Slider {
+                            id: clusterSlider
+                            property bool pushing: false
+                            x: clusterLbl.width + 6; y: 24
+                            width: 150; height: 20
+                            onValueChanged: if (!pushing) itemsView.call("pob_itemsDisplaySetControl", ["displayItemClusterJewelNodeCount", value])
+                        }
+                        Widgets.Label {
+                            x: clusterSlider.x + clusterSlider.width + 8; y: 27
+                            label: "^7" + (displayPane.cluster.count !== undefined ? displayPane.cluster.count : "")
+                            size: 14
                         }
                     }
                 }
