@@ -1,6 +1,6 @@
 # Phase 6 — Items Tab (the largest tab)
 
-**Status:** IN PROGRESS — Parts 6.1 + 6.2 done, 6.3 item 1 done (6.1: 2026-09-29 cloud session; 6.2 + 6.3.1: 2026-09-29 Windows session; branch `cloud/phase-6`). Next: 6.3 item 2 (craft popups).
+**Status:** IN PROGRESS — Parts 6.1 + 6.2 done, 6.3 items 1-2 done (6.1: 2026-09-29 cloud session; 6.2 + 6.3.1: 2026-09-29 Windows session; 6.3.2: 2026-10-16 Windows session; branch `cloud/phase-6`). Next: 6.3 item 3 (affix dropdowns + custom / crucible popups).
 **Goal:** Port the item planner: item sets, the full slot panel, item/DB/shared
 lists with the drag-drop matrix, and the deep display-item editor (variants,
 sockets, enchant/anoint/corrupt/implicit, influences, catalysts, cluster crafting,
@@ -42,7 +42,7 @@ tooltip. This is `ItemsTab.lua` — 4771 lines, the biggest single view.
 - [x] Panel: Add-to-build/Save, Edit…, Cancel, **Buy Similar** (→ Phase 12 trader);
   variant dropdowns (up to 6); socket color/link editors (6 dropdowns + link
   checkboxes + add-socket). (M)
-- [ ] Craft popups: **Apply Enchantment** (lab/source/skill pickers, 2 slots),
+- [x] Craft popups: **Apply Enchantment** (lab/source/skill pickers, 2 slots),
   **Anoint** (up to 4, amulet/talisman rules, oil recipe tooltips), **Corrupt**
   (implicit selection incl. temple double-corrupt), **Add Implicit** (searchable
   incl. eldritch/synth), influence dropdowns (2 of 6), quality + catalyst + catalyst
@@ -290,3 +290,72 @@ The tab snaps right when a display item appears and left when it closes
   warnings.
 - NOT verified (no computer-use tools): clicking the controls in the GUI, the
   edit-text popup on screen.
+
+
+## Session log — Fri Oct 16 2026 (Part 6.3, item 2; Windows session)
+
+Bridge (`app/lua/pob_items.lua`): the LIVE legacy controls stay the single
+source of truth.
+- Generic helpers `ctlKind` / `ctlRecord` / `setCtl`; `pob_itemsDisplaySetControl`
+  drives the influence / quality / catalyst / cluster-jewel controls on
+  `itemsTab.controls` (set state, then the control's own closure). `editorRecord`
+  gained `craftButtons`, `influence`, `quality`, `catalyst`, `cluster`.
+- **Craft-session capture engine**: `EnchantDisplayItem` / `AnointDisplayItem` /
+  `CorruptDisplayItem` / `AddImplicitToDisplayItem` build their popup as a local
+  `controls` table for `main:OpenPopup`. `pob_itemsCraftOpen` swaps
+  `main.OpenPopup` for the call, keeps the table as one module-local session
+  (valid only for the display item it was opened on) and
+  `pob_itemsCraftState / Set / Click / Tooltip / Close / Step` drive the live
+  controls by name. `withFrame` puts a frame on `main.popups` for each call
+  because legacy callbacks write `main.popups[1].height`, `ClosePopup` pops it
+  (that is how "closed" is detected) and `NotableDBControl:AddValueTooltip`
+  checks its title.
+- The list-build half of `pob_itemsDBStep` is now `stepListBuilder`, shared with
+  the Anoint notable list (`pob_itemsCraftStep`).
+
+QML: `DropDownControl` gained opt-in `searchable` (SearchHost word-order
+filter, match highlight, filtered pick still emits the original index). New
+`components/Craft{PopupBase,Enchant,Anoint,Corrupt,Implicit}Popup.qml` and the
+helpers `CraftDrop / CraftButton / CraftEdit / CraftLabel` (name-driven wrappers
+over the captured controls). `ItemsView.qml` editor panel: craft-button row
+(wraps), influence pair, quality, catalyst (+quality), cluster skill + node-count
+slider.
+
+**Documented differences from legacy**
+- An emptied Quality / Catalyst quality box becomes 0 (legacy stores nil and
+  hides the field mid-edit).
+- The four popups are QML dialogs over the captured legacy controls (sizes and
+  positions are legacy's; the Anoint save button is sized with headroom for Qt's
+  wider text).
+- The searchable dropdown lists only matching rows and shows the typed filter
+  above them (legacy draws the term in the dropped list).
+- The craft-button row wraps when wider than the pane.
+- Plan fixture fix: `canBeInfluenced` follows the base, not the rarity (a unique
+  belt is influenceable), so the "not influenceable" guard uses a jewel.
+
+**Verified**
+- `items-craft` (40 flags, pob-selftest and pob-qt --headless): influence /
+  quality (incl. empty -> 0) / catalyst / cluster sections; Enchant (apply,
+  remove, tooltip, stale session refused, bad kind and bad slot refused); Anoint
+  (list pumped to completion, label "Anoint X" / "Remove X", tooltip, search
+  narrows, hidden on a belt); Corrupt (mod pair excludes the group, Scourge grows
+  the frame to 103+20*3, unique Roll Ranges 1.22), Add Implicit (sources, Exarch
+  replaces instead of stacking, custom appends, blank ignored). `items-slots`,
+  `items-lists` (44 flags, incl. the refactored DB pump), `items-editor` unchanged.
+- Fail-when-removed: skipping the frame push -> `enchantApplied=false`; a wrong
+  Anoint frame title -> `anointTooltip=false`; no frame for corrupt sessions only
+  -> `scourgeSource=false`.
+- Windows captures (temporary instrumentation in `ItemsView.qml` / `main.cpp`,
+  reverted, not committed): resting editor (ring: Corrupt / Add Implicit, no
+  Anoint, influence pair, catalyst), Enchant, Anoint (full list, "Remove ..."),
+  Corrupt in Scourge mode, Roll Ranges, Add Implicit (Exarch). No QML errors.
+- Review (`/code-review high`, 8 angles): fixed craft-slot validation (test),
+  Roll Ranges sliders recreated mid-drag (COUNT model), dead-session `set()`,
+  quality text clobbered by a refresh. Deferred: every notable row re-marshalled
+  per action, every craft dropdown model rebuilt per refresh, older setters
+  duplicate `setCtl`.
+- NOT eyeballed (no way to drive the exe with computer-use here): the dropdown
+  type-to-filter UI and row tooltips, picking and applying through real clicks,
+  dragging a Roll Ranges / node-count slider, the Custom implicit field, the
+  "All skills" checkbox, the quality and cluster rows. `qt-development-skills`
+  was not loaded; `qmllint` stood in (no warnings beyond pre-existing ones).
