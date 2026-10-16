@@ -435,6 +435,9 @@ end
 -- must not run on every view refresh.
 local dispKey = { }
 
+-- The open craft popup session (Part 6.3 item 2); see the craft block below.
+local craft
+
 local function markDisplayFresh(it)
     dispKey.item, dispKey.rev = it.displayItem, it.build.outputRevision
 end
@@ -663,6 +666,7 @@ end
 function pob_itemsCloseDisplayItem()
     local bm, it = ctx()
     if not it then return fail("no build") end
+    craft = nil
     it:SetDisplayItem()
     return { ok = true, _emit = { "items" } }
 end
@@ -1186,12 +1190,160 @@ function pob_itemsDisplaySetControl(name, value)
     return displayEdited(it)
 end
 
+---------------------------------------------------------------------------
+-- Craft popups (Part 6.3 item 2). Legacy builds each popup as a local
+-- `controls` table handed to main:OpenPopup. The bridge CAPTURES that table by
+-- swapping main.OpenPopup for the duration of the opener call, keeps it as one
+-- module-local "craft session", and drives the live controls by name (their
+-- own selFunc / onClick / tooltipFunc closures); QML only renders the state.
+---------------------------------------------------------------------------
+
+local CRAFT_OPENERS = { enchant = "EnchantDisplayItem", anoint = "AnointDisplayItem",
+    corrupt = "CorruptDisplayItem", implicit = "AddImplicitToDisplayItem" }
+
+-- The session is only valid for the display item it was opened on: cancel,
+-- replace, undo or a new paste all drop it.
+local function craftLive(it)
+    if craft ~= nil and it and it.displayItem ~= nil and craft.item == it.displayItem then return true end
+    craft = nil
+    return false
+end
+
+-- "a" -> controls.a ; "a.b" -> controls.a.controls.b (NotableDB's sub-controls).
+local function craftCtl(name)
+    if not craft or type(name) ~= "string" then return nil end
+    local a, b = name:match("^([^.]+)%.([^.]+)$")
+    if a then
+        local parent = craft.controls[a]
+        return parent and parent.controls and parent.controls[b]
+    end
+    return craft.controls[name]
+end
+
+-- Legacy callbacks write main.popups[1].height and AddValueTooltip checks its
+-- title, so the frame is on the popup stack for the call. Returns ok, closed,
+-- err; closed = legacy's main:ClosePopup() removed the frame.
+local function withFrame(fn)
+    local popups = main.popups
+    t_insert(popups, 1, craft.frame)
+    local ok, err = pcall(fn)
+    local closed = popups[1] ~= craft.frame
+    if not closed then t_remove(popups, 1) end
+    return ok, closed, err
+end
+
+local function craftRecord()
+    local rec = { open = true, kind = craft.kind, slot = craft.slot, title = craft.frame.title,
+        width = craft.frame.width, height = craft.frame.height, controls = { } }
+    for name, ctl in pairs(craft.controls) do
+        if type(name) == "string" and type(ctl) == "table" and ctl._className then
+            rec.controls[name] = ctlRecord(ctl)
+        end
+    end
+    return rec
+end
+
+local function craftFail(msg)
+    return { open = false, ok = false, error = msg }
+end
+
+-- The editor button that gates each popup (the same shown() legacy uses).
+local function craftButtonName(kind, slot)
+    if kind == "enchant" then return "displayItemEnchant" .. (slot == 2 and "2" or "") end
+    if kind == "anoint" then return "displayItemAnoint" .. (slot == 1 and "" or tostring(slot)) end
+    if kind == "corrupt" then return "displayItemCorrupt" end
+    if kind == "implicit" then return "displayItemAddImplicit" end
+end
+
+function pob_itemsCraftOpen(kind, slot)
+    local bm, it = ctx()
+    if not (it and it.displayItem) then return craftFail("no display item") end
+    local opener = CRAFT_OPENERS[kind]
+    slot = tonumber(slot) or 1
+    local btn = opener and it.controls[craftButtonName(kind, slot) or ""]
+    if not (btn and shownCtl(btn)) then return craftFail("not available for this item") end
+    local captured
+    local saved = main.OpenPopup
+    main.OpenPopup = function(_, width, height, title, controls)
+        captured = { title = title, width = width, height = height, controls = controls }
+        return captured
+    end
+    local arg = (kind == "enchant" or kind == "anoint") and slot or (kind == "corrupt" and "Corrupted" or nil)
+    local ok, err = pcall(it[opener], it, arg)
+    main.OpenPopup = saved
+    if not ok then craft = nil; return craftFail(tostring(err)) end
+    if not captured then craft = nil; return craftFail("popup did not open") end
+    craft = { kind = kind, slot = slot, item = it.displayItem, controls = captured.controls, frame = captured }
+    return craftRecord()
+end
+
+function pob_itemsCraftState()
+    local bm, it = ctx()
+    if not craftLive(it) then return { open = false } end
+    return craftRecord()
+end
+
+function pob_itemsCraftSet(name, value)
+    local bm, it = ctx()
+    if not craftLive(it) then return craftFail("no craft session") end
+    local ctl = craftCtl(name)
+    if not ctl then return craftFail("bad control " .. tostring(name)) end
+    local setOk, setErr
+    local ok, closed, err = withFrame(function() setOk, setErr = setCtl(ctl, value) end)
+    if not ok then return craftFail(tostring(err)) end
+    if closed then craft = nil; return { open = false, ok = true } end
+    local st = craftRecord()
+    st.ok = setOk and true or false
+    if not setOk then st.error = setErr end
+    return st
+end
+
+function pob_itemsCraftClick(name)
+    local bm, it = ctx()
+    if not craftLive(it) then return fail("no craft session") end
+    local ctl = craftCtl(name)
+    if not (ctl and ctl.onClick) then return fail("bad control " .. tostring(name)) end
+    local ok, closed, err = withFrame(ctl.onClick)
+    if not ok then return fail(tostring(err)) end
+    if closed then craft = nil end
+    return { ok = true, closed = closed, _emit = closed and { "items" } or nil }
+end
+
+-- Hover text for a dropdown row (index), a button, or a list row (index).
+function pob_itemsCraftTooltip(name, index)
+    local bm, it = ctx()
+    if not craftLive(it) then return { lines = { } } end
+    local ctl = craftCtl(name)
+    if not ctl then return { lines = { } } end
+    index = tonumber(index)
+    local kind, lines = ctlKind(ctl), { }
+    withFrame(function()
+        lines = tipLines(function(tip)
+            if kind == "drop" and ctl.tooltipFunc and index then
+                ctl.tooltipFunc(tip, "HOVER", index, ctl.list[index])
+            elseif kind == "button" and ctl.tooltipFunc then
+                ctl.tooltipFunc(tip)
+            elseif kind == "list" and index and ctl.list[index] then
+                ctl:AddValueTooltip(tip, index, ctl.list[index])
+            end
+        end)
+    end)
+    return { lines = lines }
+end
+
+-- Legacy Cancel only closes; so does this.
+function pob_itemsCraftClose()
+    craft = nil
+    return { ok = true }
+end
+
 -- "Add to build" / "Save" (ItemsTab:AddDisplayItem, ItemsTab.lua:1519-1527):
 -- a new item auto-equips into the first empty valid slot; an existing id
 -- replaces the item in place.
 function pob_itemsAddDisplayItem()
     local bm, it = ctx()
     if not (it and it.displayItem) then return fail("no display item") end
+    craft = nil
     it:AddDisplayItem()
     return done(nil, EMIT_TREE)
 end
@@ -1809,7 +1961,30 @@ function pob_selftestItemsCraft()
         res.unknownControlRefused = not pob_itemsDisplaySetControl("displayItemAffix1", 1).ok
         -- canBeInfluenced follows the BASE (Item.lua:792), not the rarity: a jewel has none.
         pob_itemsEditTextSave("Rarity: Unique\nCF Unique\nCobalt Jewel\n", 4, false)
-        res.noInfluenceOnJewel =pob_itemsGetLists().display.editor.influence.shown == false
+        res.noInfluenceOnJewel = pob_itemsGetLists().display.editor.influence.shown == false
+
+        -- Apply Enchantment through the captured legacy popup.
+        pob_itemsEditTextSave("Rarity: Rare\nCF Enchant\nIron Hat\n", 3, false)
+        res.enchantButton = pob_itemsGetLists().display.editor.craftButtons.enchant1 == true
+        local st = pob_itemsCraftOpen("enchant", 1)
+        res.enchantOpened = st.open == true and st.title == "Enchant Item"
+            and st.controls.enchantment.type == "drop" and #st.controls.enchantment.list > 0
+            and st.controls.save.label == "Enchant"
+        local label = st.controls.enchantment.list[1]
+        res.enchantTooltip = linesText(pob_itemsCraftTooltip("enchantment", 1).lines):find((label:match("^([^/]+)/") or label), 1, true) ~= nil
+        pob_itemsCraftSet("enchantment", 1)
+        local click = pob_itemsCraftClick("save")
+        res.enchantApplied = click.ok and click.closed and pob_itemsCraftState().open == false
+            and it.displayItem.enchantModLines[1].line == (label:match("^([^/]+)/") or label)
+        pob_itemsCraftOpen("enchant", 1)
+        pob_itemsCraftClick("remove")
+        res.enchantRemoved = #it.displayItem.enchantModLines == 0
+        -- Stale session (Review Focus 1).
+        pob_itemsCraftOpen("enchant", 1)
+        pob_itemsCloseDisplayItem()
+        res.staleRefused = not pob_itemsCraftClick("save").ok and it.displayItem == nil
+            and pob_itemsCraftState().open == false
+        res.badKindRefused = pob_itemsCraftOpen("nope", 1).open == false
     end)
     pcall(function() it:SetDisplayItem() end)
     itRestore(bm, it, snap)
