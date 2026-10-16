@@ -31,6 +31,10 @@ CraftPopupBase {
         return out
     }
 
+    // A COUNT model: `rollRows` is a fresh array on every state change, and a
+    // Repeater over it would recreate the slider the user is dragging.
+    readonly property int rollCount: rollRows.length
+
     Item {
         implicitWidth: 605
         implicitHeight: root.frameH
@@ -59,13 +63,14 @@ CraftPopupBase {
         }
 
         Repeater {
-            model: root.rollRows
+            model: root.rollCount
             delegate: Row {
                 id: rollRow
-                readonly property int n: modelData.i
+                readonly property var rr: root.rollRows[index]
+                readonly property int n: rr ? rr.i : 0
                 readonly property var sliderRec: root.rec("rollRangeSlider" + n)
                 visible: sliderRec.shown === true
-                x: 10; y: modelData.y
+                x: 10; y: rr ? rr.y : 0
                 spacing: 5
                 Label {
                     label: root.rec("rollRangeValue" + rollRow.n).label || ""
@@ -87,7 +92,7 @@ CraftPopupBase {
                 }
                 Column {
                     Repeater {
-                        model: modelData.lines
+                        model: rollRow.rr ? rollRow.rr.lines : []
                         delegate: Label { label: modelData; size: 16 }
                     }
                 }

@@ -446,9 +446,10 @@ Item {
                         infl1.model = inf.list; infl1.currentIndex = inf.sel1 - 1
                         infl2.model = inf.list; infl2.currentIndex = inf.sel2 - 1
                     }
-                    if (q.shown === true) qualEdit.text = q.text
+                    // Not while typing: an unrelated refresh would eat the keystroke.
+                    if (q.shown === true && !qualEdit.editing) qualEdit.text = q.text
                     if (cat.shown === true) { catDrop.model = cat.list; catDrop.currentIndex = cat.sel - 1 }
-                    if (cat.qualityShown === true) catQual.text = cat.qualityText
+                    if (cat.qualityShown === true && !catQual.editing) catQual.text = cat.qualityText
                     if (cl.shown === true) {
                         clusterDrop.model = cl.list; clusterDrop.currentIndex = cl.sel - 1
                         if (!clusterSlider.dragging) {

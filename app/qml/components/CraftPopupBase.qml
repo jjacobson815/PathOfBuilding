@@ -21,7 +21,6 @@ PopupBase {
 
     property var st: ({})
     readonly property bool live: st && st.open === true
-    readonly property real frameW: (st && st.width) ? st.width : 400
     readonly property real frameH: (st && st.height) ? st.height : 100
 
     padding: 0
@@ -59,6 +58,7 @@ PopupBase {
         if (!r) return
         if (r.open === true) { if (!quiet) st = r }
         else if (r.ok === true) close()
+        else refresh()      // dead session: refresh() closes the popup
     }
 
     function click(name) {

@@ -1281,6 +1281,9 @@ function pob_itemsCraftOpen(kind, slot)
     if not (it and it.displayItem) then return craftFail("no display item") end
     local opener = CRAFT_OPENERS[kind]
     slot = tonumber(slot) or 1
+    -- A real slot only: enchant 1-2, anoint 1-4 (others take no slot).
+    local maxSlot = (kind == "enchant" and 2) or (kind == "anoint" and 4) or 1
+    if slot < 1 or slot > maxSlot or slot % 1 ~= 0 then return craftFail("bad slot") end
     local btn = opener and it.controls[craftButtonName(kind, slot) or ""]
     if not (btn and shownCtl(btn)) then return craftFail("not available for this item") end
     local captured
@@ -2018,6 +2021,11 @@ function pob_selftestItemsCraft()
         res.staleRefused = not pob_itemsCraftClick("save").ok and it.displayItem == nil
             and pob_itemsCraftState().open == false
         res.badKindRefused = pob_itemsCraftOpen("nope", 1).open == false
+        -- Slot must be a real slot of its popup (review fix).
+        pob_itemsEditTextSave("Rarity: Rare\nCF Slot\nIron Hat\n", 3, false)
+        res.badSlotRefused = pob_itemsCraftOpen("enchant", 3).open == false
+            and pob_itemsCraftOpen("anoint", 9).open == false
+            and pob_itemsCraftOpen("enchant", 1.5).open == false
 
         -- Anoint through the live NotableDB list (pumped like the item DB).
         local function pump(max)
