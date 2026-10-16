@@ -47,6 +47,15 @@
         <file>components/ItemListBox.qml</file>
         <file>components/ItemDBPanel.qml</file>
         <file>components/ItemTextPopup.qml</file>
+        <file>components/CraftPopupBase.qml</file>
+        <file>components/CraftDrop.qml</file>
+        <file>components/CraftButton.qml</file>
+        <file>components/CraftEdit.qml</file>
+        <file>components/CraftLabel.qml</file>
+        <file>components/CraftEnchantPopup.qml</file>
+        <file>components/CraftAnointPopup.qml</file>
+        <file>components/CraftCorruptPopup.qml</file>
+        <file>components/CraftImplicitPopup.qml</file>
         <file>components/SocketGroupList.qml</file>
         <file>components/GemSelect.qml</file>
         <file>components/TreeImportPopup.qml</file>

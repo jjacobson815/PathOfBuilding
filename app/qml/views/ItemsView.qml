@@ -80,7 +80,11 @@ Item {
     // it into view (SetDisplayItem: snapHScroll = "RIGHT").
     function openEdit(kind, key) { call("pob_itemsOpenForEdit", [kind, key]) }
     // Craft buttons -> popups (Part 6.3 item 2).
-    function openCraft(kind, slot) { }
+    function openCraft(kind, slot) {
+        const p = kind === "enchant" ? craftEnchant : kind === "anoint" ? craftAnoint
+                : kind === "corrupt" ? craftCorrupt : craftImplicit
+        p.openCraft(kind, slot)
+    }
     function snapRight() { Qt.callLater(function () { hflick.contentX = Math.max(0, hflick.contentWidth - hflick.width) }) }
 
     // ItemListControl:OnSelDelete — ask only when the item is in use.
@@ -764,6 +768,11 @@ Item {
         id: textPopup
         parent: itemsView
     }
+    // Craft popups over the captured legacy controls (Part 6.3 item 2).
+    Widgets.CraftEnchantPopup { id: craftEnchant; parent: itemsView }
+    Widgets.CraftAnointPopup { id: craftAnoint; parent: itemsView }
+    Widgets.CraftCorruptPopup { id: craftCorrupt; parent: itemsView }
+    Widgets.CraftImplicitPopup { id: craftImplicit; parent: itemsView }
     Widgets.SpecManagePopup {
         id: specManage
         parent: itemsView
