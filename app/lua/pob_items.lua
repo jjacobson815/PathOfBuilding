@@ -453,6 +453,39 @@ local function dropLabels(list)
     return out
 end
 
+-- Generic live-control record / setter (Part 6.3 item 2). The same helpers
+-- serve the editor sections and the captured craft-popup controls.
+local function ctlKind(ctl)
+    local cls = ctl and ctl._className
+    if cls == "DropDownControl" then return "drop" end
+    if cls == "CheckBoxControl" then return "check" end
+    if cls == "EditControl" then return "edit" end
+    if cls == "SliderControl" then return "slider" end
+    if cls == "ButtonControl" then return "button" end
+    if cls == "LabelControl" then return "label" end
+    if cls == "NotableDBControl" or (cls and cls:find("ListControl")) then return "list" end
+end
+
+local function ctlRecord(ctl)
+    local kind = ctlKind(ctl)
+    local rec = { type = kind, shown = shownCtl(ctl) }
+    local ok, enabled = pcall(ctl.IsEnabled, ctl)
+    rec.enabled = ok and enabled and true or false
+    if kind == "drop" then
+        rec.list, rec.sel = dropLabels(ctl.list), ctl.selIndex or 1
+    elseif kind == "check" then
+        rec.state, rec.label = ctl.state and true or false, tostring(ctl.label or "")
+    elseif kind == "edit" then
+        rec.text = ctl.buf or ""
+    elseif kind == "slider" then
+        rec.val, rec.divCount = ctl.val or 0, ctl.divCount
+    elseif kind == "button" or kind == "label" then
+        local lok, label = pcall(ctl.GetProperty, ctl, "label")
+        rec.label = lok and tostring(label or "") or ""
+    end
+    return rec
+end
+
 -- Editor sections read back from the LIVE controls SetDisplayItem synced
 -- (ItemsTab.lua:1671-1747): variants (:351-421), sockets / links (:423-472).
 local function editorRecord(it)
@@ -482,6 +515,36 @@ local function editorRecord(it)
         -- the "+" sits right of the last colour socket (ItemsTab.lua:457)
         addSocketShown = shownCtl(c.displayItemAddSocket),
         addSocketAt = #d.sockets - d.abyssalSocketCount,
+        craftButtons = {
+            enchant1 = shownCtl(c.displayItemEnchant), enchant2 = shownCtl(c.displayItemEnchant2),
+            anoint1 = shownCtl(c.displayItemAnoint), anoint2 = shownCtl(c.displayItemAnoint2),
+            anoint3 = shownCtl(c.displayItemAnoint3), anoint4 = shownCtl(c.displayItemAnoint4),
+            corrupt = shownCtl(c.displayItemCorrupt), addImplicit = shownCtl(c.displayItemAddImplicit),
+        },
+        influence = {
+            shown = shownCtl(c.displayItemInfluence),
+            list = dropLabels(c.displayItemInfluence.list),
+            sel1 = c.displayItemInfluence.selIndex or 1,
+            sel2 = c.displayItemInfluence2.selIndex or 1,
+        },
+        quality = { shown = shownCtl(c.displayItemQualityEdit), text = c.displayItemQualityEdit.buf or "" },
+        catalyst = {
+            shown = shownCtl(c.displayItemCatalyst),
+            list = dropLabels(c.displayItemCatalyst.list),
+            sel = c.displayItemCatalyst.selIndex or 1,
+            qualityShown = shownCtl(c.displayItemCatalystQualityEdit),
+            qualityText = c.displayItemCatalystQualityEdit.buf or "",
+        },
+        cluster = {
+            shown = shownCtl(c.displayItemClusterJewelSkill),
+            list = dropLabels(c.displayItemClusterJewelSkill.list),
+            sel = c.displayItemClusterJewelSkill.selIndex or 1,
+            val = c.displayItemClusterJewelNodeCount.val or 0,
+            divCount = c.displayItemClusterJewelNodeCount.divCount,
+            count = d.clusterJewelNodeCount,
+            minNodes = d.clusterJewel and d.clusterJewel.minNodes,
+            maxNodes = d.clusterJewel and d.clusterJewel.maxNodes,
+        },
     }
 end
 
@@ -1071,6 +1134,58 @@ function pob_itemsDisplayAddSocket()
     return displayEdited(it)
 end
 
+-- Set a live control's state, then run its own closure (selFunc / changeFunc),
+-- which is what a user click / keystroke does. Returns ok, err.
+local function setCtl(ctl, value)
+    local kind = ctlKind(ctl)
+    if kind == "drop" then
+        local i = tonumber(value)
+        if not i or not ctl.list[i] then return false, "bad value" end
+        ctl.selIndex = i
+        if ctl.selFunc then ctl.selFunc(i, ctl.list[i]) end
+    elseif kind == "check" then
+        ctl.state = value and true or false
+        if ctl.changeFunc then ctl.changeFunc(ctl.state) end
+    elseif kind == "edit" then
+        local buf = tostring(value or "")
+        -- An empty numeric box would make legacy store quality=nil and hide the
+        -- field mid-edit; keep it and read it as 0 (documented difference).
+        if ctl.filter == "%D" and buf == "" then buf = "0" end
+        ctl.buf = buf
+        if ctl.changeFunc then ctl.changeFunc(buf) end
+    elseif kind == "slider" then
+        local v = tonumber(value)
+        if not v then return false, "bad value" end
+        ctl.val = math.max(0, math.min(1, v))
+        if ctl.changeFunc then ctl.changeFunc(ctl.val) end
+    elseif kind == "list" then
+        local i = tonumber(value)
+        if not i or not ctl.list[i] then return false, "bad value" end
+        ctl.selIndex = i
+        ctl:SelectIndex(i)
+    else
+        return false, "bad value"
+    end
+    return true
+end
+
+local SECTION_CONTROLS = { "displayItemInfluence", "displayItemInfluence2", "displayItemQualityEdit",
+    "displayItemCatalyst", "displayItemCatalystQualityEdit", "displayItemClusterJewelSkill",
+    "displayItemClusterJewelNodeCount" }
+
+-- Influence / quality / catalyst / cluster-jewel controls of the editor panel
+-- (ItemsTab.lua:547-673). `value` is a 1-based index, text, or 0..1 slider value.
+function pob_itemsDisplaySetControl(name, value)
+    local bm, it = ctx()
+    if not (it and it.displayItem) then return fail("no display item") end
+    if not isValueInArray(SECTION_CONTROLS, name) then return fail("bad control " .. tostring(name)) end
+    local ctl = it.controls[name]
+    if not (ctl and shownCtl(ctl)) then return fail("control hidden") end
+    local ok, err = setCtl(ctl, value)
+    if not ok then return fail(err) end
+    return displayEdited(it)
+end
+
 -- "Add to build" / "Save" (ItemsTab:AddDisplayItem, ItemsTab.lua:1519-1527):
 -- a new item auto-equips into the first empty valid slot; an existing id
 -- replaces the item in place.
@@ -1633,6 +1748,68 @@ function pob_selftestItemsEditor()
         local rid = pob_addItemFromRaw("Rarity: Rare\nET Raw Ring\nGold Ring\n")
         res.rawValidAdds = rid ~= nil and it.items[rid] ~= nil and it.items[rid] ~= stale and it.displayItem == stale
         pob_itemsCloseDisplayItem()
+    end)
+    pcall(function() it:SetDisplayItem() end)
+    itRestore(bm, it, snap)
+    return finish(res, ok, err)
+end
+
+-- Part 6.3 item 2: craft controls (influence / quality / catalyst / cluster
+-- sections and the Enchant / Anoint / Corrupt / Add Implicit popups).
+function pob_selftestItemsCraft()
+    local bm, it = ctx()
+    if not it then return { ok = false, error = "no itemsTab" } end
+    local snap = itSnapshot(bm, it)
+    local res = { }
+    local ok, err = pcall(function()
+        it:SetDisplayItem()
+        -- Influence (armour gets the eldritch list).
+        pob_itemsEditTextSave("Rarity: Rare\nCF Helm\nIron Hat\n", 3, false)
+        local e = pob_itemsGetLists().display.editor
+        res.influenceShown = e.influence.shown == true and #e.influence.list == 1 + #itemLib.influenceInfo.all
+        local shaperIdx, elderIdx
+        for i, label in ipairs(e.influence.list) do
+            if label == "Shaper" then shaperIdx = i elseif label == "Elder" then elderIdx = i end
+        end
+        res.influenceSet = pob_itemsDisplaySetControl("displayItemInfluence", shaperIdx).ok
+            and pob_itemsDisplaySetControl("displayItemInfluence2", elderIdx).ok
+            and it.displayItem.shaper == true and it.displayItem.elder == true
+            and it.displayItem:BuildRaw():find("Shaper Item", 1, true) ~= nil
+        -- Quality, incl. the empty box (Review Focus 2).
+        pob_itemsDisplaySetControl("displayItemQualityEdit", "15")
+        res.qualitySet = it.displayItem.quality == 15
+        pob_itemsDisplaySetControl("displayItemQualityEdit", "")
+        res.qualityEmptyIsZero = it.displayItem.quality == 0
+            and pob_itemsGetLists().display.editor.quality.shown == true
+        -- A ring is not influence-list "all"; a unique is not influenceable.
+        pob_itemsEditTextSave("Rarity: Rare\nCF Ring\nGold Ring\nCrafted: true\n", 3, false)
+        e = pob_itemsGetLists().display.editor
+        res.ringDefaultInfluence = #e.influence.list == 1 + #itemLib.influenceInfo.default
+        -- Catalyst on a crafted ring.
+        res.catalystShown = e.catalyst.shown == true and e.catalyst.qualityShown == false and #e.catalyst.list == 13
+        pob_itemsDisplaySetControl("displayItemCatalyst", 2)
+        e = pob_itemsGetLists().display.editor
+        res.catalystSet = it.displayItem.catalyst == 1 and it.displayItem.catalystQuality == 20
+            and e.catalyst.qualityShown == true and e.catalyst.qualityText == "20"
+        pob_itemsDisplaySetControl("displayItemCatalystQualityEdit", "10")
+        res.catalystQuality = it.displayItem.catalystQuality == 10
+        -- Cluster jewel (crafted Large).
+        pob_itemsEditTextSave("Rarity: Rare\nCF Cluster\nLarge Cluster Jewel\nCrafted: true\n", 3, false)
+        e = pob_itemsGetLists().display.editor
+        local cj = it.displayItem.clusterJewel
+        res.clusterShown = e.cluster.shown == true and #e.cluster.list > 1 and e.cluster.count == cj.minNodes
+        pob_itemsDisplaySetControl("displayItemClusterJewelSkill", 2)
+        local skillId = it.controls.displayItemClusterJewelSkill.list[2].skillId
+        res.clusterSkill = it.displayItem.clusterJewelSkill == skillId
+            and it.displayItem.enchantModLines[#it.displayItem.enchantModLines].line == table.concat(cj.skills[skillId].enchant, "\n")
+        pob_itemsDisplaySetControl("displayItemClusterJewelNodeCount", 1)
+        res.clusterNodes = it.displayItem.clusterJewelNodeCount == cj.maxNodes
+            and it.displayItem.enchantModLines[1].line == "Adds " .. cj.maxNodes .. " Passive Skills"
+        -- Guard rails.
+        res.unknownControlRefused = not pob_itemsDisplaySetControl("displayItemAffix1", 1).ok
+        -- canBeInfluenced follows the BASE (Item.lua:792), not the rarity: a jewel has none.
+        pob_itemsEditTextSave("Rarity: Unique\nCF Unique\nCobalt Jewel\n", 4, false)
+        res.noInfluenceOnJewel =pob_itemsGetLists().display.editor.influence.shown == false
     end)
     pcall(function() it:SetDisplayItem() end)
     itRestore(bm, it, snap)
