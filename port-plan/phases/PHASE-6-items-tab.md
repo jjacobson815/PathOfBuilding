@@ -334,7 +334,8 @@ slider.
   belt is influenceable), so the "not influenceable" guard uses a jewel.
 
 **Verified**
-- `items-craft` (40 flags, pob-selftest and pob-qt --headless): influence /
+- `items-craft` (45 flags after the Opus review fixes below; 40 when first
+  landed; pob-selftest and pob-qt --headless): influence /
   quality (incl. empty -> 0) / catalyst / cluster sections; Enchant (apply,
   remove, tooltip, stale session refused, bad kind and bad slot refused); Anoint
   (list pumped to completion, label "Anoint X" / "Remove X", tooltip, search
@@ -342,9 +343,14 @@ slider.
   the frame to 103+20*3, unique Roll Ranges 1.22), Add Implicit (sources, Exarch
   replaces instead of stacking, custom appends, blank ignored). `items-slots`,
   `items-lists` (44 flags, incl. the refactored DB pump), `items-editor` unchanged.
-- Fail-when-removed: skipping the frame push -> `enchantApplied=false`; a wrong
-  Anoint frame title -> `anointTooltip=false`; no frame for corrupt sessions only
-  -> `scourgeSource=false`.
+- Fail-when-removed (re-run after the Opus review; the original claims were
+  incomplete): skipping the frame push -> `enchantApplied`, `scourgeSource` and
+  `dropChangeResets` all false; a wrong Anoint frame title -> `anointTooltip=false`;
+  no frame for Corrupt sessions only -> `scourgeSource` and `dropChangeResets`
+  false. CORRECTION: `staleRefused` and `badKindRefused` as first written did
+  NOT fail when their guard was removed (`pob_itemsCloseDisplayItem` already
+  clears the session, and with no display item `pob_itemsCraftOpen` refuses
+  anything); see the review fixes below for the tests that do.
 - Windows captures (temporary instrumentation in `ItemsView.qml` / `main.cpp`,
   reverted, not committed): resting editor (ring: Corrupt / Add Implicit, no
   Anoint, influence pair, catalyst), Enchant, Anoint (full list, "Remove ..."),
@@ -359,3 +365,42 @@ slider.
   dragging a Roll Ranges / node-count slider, the Custom implicit field, the
   "All skills" checkbox, the quality and cluster rows. `qt-development-skills`
   was not loaded; `qmllint` stood in (no warnings beyond pre-existing ones).
+
+**Opus review fixes (6.3 item 2, second pass)** — each Lua fix has a new
+`items-craft` flag that was shown to FAIL with the fix removed (temporary
+mutation, then restored):
+- `setCtl` dropdowns call `selFunc` only when the index changes (legacy
+  `DropDownControl:SetSel`): `dropRepickKeeps` (re-picking Corrupt "Source" keeps
+  both implicits) fails without it; `dropChangeResets` is the control.
+- The NotableDB list record reports the row of `selValue` in the CURRENT list,
+  or nil, instead of the stale `selIndex`: `notableSelFollowsNode`.
+- `setCtl` edits apply `filterPattern` and `limit` ("1a" -> 1, "150" -> 15,
+  "" -> 0): `editFilterLimit`.
+- `staleReplacedRefused`: replaces the display item (edit-text save) while
+  Enchant is open; only `craftLive`'s identity check refuses the Save. Fails with
+  that check removed. `badKindRefused` now opens a display item first; it fails
+  only when BOTH the opener lookup and the editor-button gate are removed (two
+  layers refuse an unknown kind).
+- QML: Quality / Catalyst quality send on each edit (`edited`, plus `reverted`
+  for Esc) and resync the box on focus-out; the display record carries a `key`
+  that bumps when the display item changes, and a changed key overwrites the
+  box even while it has focus (no stale text commits into the next item). The
+  cluster slider snaps to `round(v*divCount)/divCount` and skips the bridge
+  call when the detent has not changed. `DropDownControl._rebuildView` reads
+  `model.length` (guarded for the empty-map case) instead of the `count`
+  binding, which can lag `onModelChanged`.
+- `DropDownControl`: `Keys.onShortcutOverride` claims Escape while a searchable
+  filter is non-empty, so Escape clears the filter before the popup closes.
+  Not exercised interactively (no way to drive the exe here).
+- SKIPPED: Enter on the craft popups. Legacy only gives Add Implicit an
+  `enterControl` ("save"); Enchant / Anoint / Corrupt do nothing on Enter. The
+  `PopupBase` `Keys.onReturnPressed -> accept()` is attached to a Dialog (not an
+  Item) and never fires (known separate bug, see STATUS.md), so nothing closes
+  without applying today. When that bug is fixed, `CraftPopupBase` must override
+  it: Enter -> click "save" for Add Implicit, nothing for the other three.
+
+**Documented differences added by the review fixes**
+- Quality / Catalyst quality apply per keystroke as in legacy; an emptied box
+  still reads as 0 (unchanged difference) and shows "0" once it loses focus.
+- The cluster slider sends only on a change of detent (legacy re-crafts on every
+  continuous val change; the result is identical).

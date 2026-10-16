@@ -84,22 +84,27 @@ Item {
         valueAccessor: root._plain
         listAccessor: function () {
             var a = []
-            for (var i = 0; i < root.count; i++) a.push(root.model[i])
+            var n = (root.model && root.model.length !== undefined) ? root.model.length : 0
+            for (var i = 0; i < n; i++) a.push(root.model[i])
             return a
         }
     }
     function _rebuildView() {
+        // Read the model itself, not `count`: onModelChanged can run before the
+        // `count` binding has re-evaluated. An empty Lua table arrives as a map
+        // (no `length`), which counts as zero rows.
+        var n = (root.model && root.model.length !== undefined) ? root.model.length : 0
         var out = []
-        if (root.searchable && root._filter.length > 0) {
+        if (root.searchable && root._filter.length > 0 && n > 0) {
             sh.searchTerm = root._filter
             sh.updateSearch()
-            for (var i = 0; i < root.count; i++) {
+            for (var i = 0; i < n; i++) {
                 var info = sh.searchInfos[i]
                 if (info && info.matches) out.push(i)
             }
         } else {
             sh.resetSearch()
-            for (var j = 0; j < root.count; j++) out.push(j)
+            for (var j = 0; j < n; j++) out.push(j)
         }
         root._viewIdx = out
     }
@@ -306,6 +311,13 @@ Item {
                             rowTip.showAt(p.x, p.y, row.width, row.height, viewport)
                         }
                     }
+                }
+
+                // The popup's CloseOnEscape would take Escape before Keys.onPressed
+                // runs; claim it while a filter is active so it clears the filter first.
+                Keys.onShortcutOverride: (event) => {
+                    if (event.key === Qt.Key_Escape && root.searchable && root._filter.length > 0)
+                        event.accepted = true
                 }
 
                 Keys.onPressed: (event) => {

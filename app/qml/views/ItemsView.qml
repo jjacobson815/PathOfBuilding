@@ -437,25 +437,33 @@ Item {
 
                 // Imperative pushes: EditControl.text / Slider.value break an
                 // outside binding on the first user edit, so each refresh writes them.
+                // A different display item drops whatever the user was typing:
+                // the text belonged to the previous item.
+                property var syncedKey: undefined
                 function pushSections() {
-                    // Read from `ed` (not the derived properties): onEdChanged can fire
-                    // during construction, before those later bindings exist.
-                    const inf = ed.influence || ({}), q = ed.quality || ({})
-                    const cat = ed.catalyst || ({}), cl = ed.cluster || ({})
+                    // Read from `display` (not the derived properties): onEdChanged can
+                    // fire during construction, before those later bindings exist.
+                    const d = itemsView.display
+                    const e = d.editor || ({})
+                    const force = d.key !== syncedKey
+                    syncedKey = d.key
+                    const inf = e.influence || ({}), q = e.quality || ({})
+                    const cat = e.catalyst || ({}), cl = e.cluster || ({})
                     if (inf.shown === true) {
                         infl1.model = inf.list; infl1.currentIndex = inf.sel1 - 1
                         infl2.model = inf.list; infl2.currentIndex = inf.sel2 - 1
                     }
                     // Not while typing: an unrelated refresh would eat the keystroke.
-                    if (q.shown === true && !qualEdit.editing) qualEdit.text = q.text
+                    if (q.shown === true && (force || !qualEdit.editing)) qualEdit.text = q.text
                     if (cat.shown === true) { catDrop.model = cat.list; catDrop.currentIndex = cat.sel - 1 }
-                    if (cat.qualityShown === true && !catQual.editing) catQual.text = cat.qualityText
+                    if (cat.qualityShown === true && (force || !catQual.editing)) catQual.text = cat.qualityText
                     if (cl.shown === true) {
                         clusterDrop.model = cl.list; clusterDrop.currentIndex = cl.sel - 1
                         if (!clusterSlider.dragging) {
                             clusterSlider.pushing = true
                             clusterSlider.divCount = cl.divCount || 0
                             clusterSlider.value = cl.val
+                            clusterSlider.lastSent = cl.val
                             clusterSlider.pushing = false
                         }
                     }
@@ -616,7 +624,12 @@ Item {
                             width: 60; height: 20
                             isNumeric: true
                             maxChars: 2
-                            onCommitted: function (t) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemQualityEdit", t]) }
+                            // Per keystroke like legacy's changeFunc. Esc reverts the box
+                            // text, so send that too; on focus-out show the stored value
+                            // (an emptied box reads back as 0).
+                            onEdited: function (t) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemQualityEdit", t]) }
+                            onReverted: itemsView.call("pob_itemsDisplaySetControl", ["displayItemQualityEdit", text])
+                            onEditingChanged: if (!editing) displayPane.pushSections()
                         }
                     }
                     // Catalyst (ItemsTab.lua:612-652): 250-wide dropdown + 60-wide quality.
@@ -637,7 +650,9 @@ Item {
                             width: 60; height: 20
                             isNumeric: true
                             maxChars: 2
-                            onCommitted: function (t) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemCatalystQualityEdit", t]) }
+                            onEdited: function (t) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemCatalystQualityEdit", t]) }
+                            onReverted: itemsView.call("pob_itemsDisplaySetControl", ["displayItemCatalystQualityEdit", text])
+                            onEditingChanged: if (!editing) displayPane.pushSections()
                         }
                     }
                     // Cluster jewel (ItemsTab.lua:654-674): skill dropdown + node count.
@@ -654,9 +669,18 @@ Item {
                         Widgets.Slider {
                             id: clusterSlider
                             property bool pushing: false
+                            // Last detent sent; legacy's val is continuous but only the
+                            // rounded node count matters, and each call re-crafts the jewel.
+                            property real lastSent: -1
                             x: clusterLbl.width + 6; y: 24
                             width: 150; height: 20
-                            onValueChanged: if (!pushing) itemsView.call("pob_itemsDisplaySetControl", ["displayItemClusterJewelNodeCount", value])
+                            onValueChanged: {
+                                if (pushing || divCount < 1) return
+                                const snapped = Math.round(value * divCount) / divCount
+                                if (snapped === lastSent) return
+                                lastSent = snapped
+                                itemsView.call("pob_itemsDisplaySetControl", ["displayItemClusterJewelNodeCount", snapped])
+                            }
                         }
                         Widgets.Label {
                             x: clusterSlider.x + clusterSlider.width + 8; y: 27

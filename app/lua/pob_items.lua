@@ -442,6 +442,10 @@ local function markDisplayFresh(it)
     dispKey.item, dispKey.rev = it.displayItem, it.build.outputRevision
 end
 
+-- Bumps whenever the display item is a different object, so the QML side can
+-- drop half-typed edit text that belonged to the previous item.
+local dispStamp = { item = nil, n = 0 }
+
 local VARIANT_CONTROLS = { "displayItemVariant", "displayItemAltVariant", "displayItemAltVariant2",
     "displayItemAltVariant3", "displayItemAltVariant4", "displayItemAltVariant5" }
 
@@ -491,7 +495,11 @@ local function ctlRecord(ctl)
         rec.building = (ctl.listBuilder ~= nil or ctl.listBuildFlag
             or (it ~= nil and it.build.outputRevision ~= ctl.listOutputRevision)) and true or false
         rec.text = ctl.defaultText or ""
-        rec.sel = ctl.selIndex
+        -- The list is rebuilt on every filter / sort change but selIndex is not
+        -- (ListControl keeps selValue), so report where selValue now sits, or nil.
+        for i, row in ipairs(ctl.list) do
+            if row == ctl.selValue then rec.sel = i break end
+        end
         rec.rows = { }
         if not rec.building then
             for i, row in ipairs(ctl.list) do rec.rows[i] = { label = ctl:GetRowValue(1, i, row) } end
@@ -582,8 +590,10 @@ local function displayRecord(it)
             lines[#lines + 1] = { size = l.size or 14, text = l.text, center = (l.center or it.displayItemTooltip.center) and true or false }
         end
     end
+    if dispStamp.item ~= d then dispStamp.item, dispStamp.n = d, dispStamp.n + 1 end
     return {
         shown = true,
+        key = dispStamp.n,
         name = d.name or "",
         -- ItemsTab.lua:327-329 addDisplayItem label
         addLabel = (d.id and it.items[d.id]) and "Save" or "Add to build",
@@ -1166,13 +1176,21 @@ local function setCtl(ctl, value)
     if kind == "drop" then
         local i = tonumber(value)
         if not i or not ctl.list[i] then return false, "bad value" end
-        ctl.selIndex = i
-        if ctl.selFunc then ctl.selFunc(i, ctl.list[i]) end
+        -- Like DropDownControl:SetSel (DropDownControl.lua:157): re-picking the
+        -- current row is a no-op, selFunc only runs when the index changes.
+        if i ~= ctl.selIndex then
+            ctl.selIndex = i
+            if ctl.selFunc then ctl.selFunc(i, ctl.list[i]) end
+        end
     elseif kind == "check" then
         ctl.state = value and true or false
         if ctl.changeFunc then ctl.changeFunc(ctl.state) end
     elseif kind == "edit" then
         local buf = tostring(value or "")
+        -- EditControl:Insert (EditControl.lua:165-171): characters matching
+        -- filterPattern are dropped, and input stops growing at `limit`.
+        if ctl.filterPattern then buf = buf:gsub(ctl.filterPattern, "") end
+        if ctl.limit then buf = buf:sub(1, ctl.limit) end
         -- An empty numeric box would make legacy store quality=nil and hide the
         -- field mid-edit; keep it and read it as 0 (documented difference).
         if ctl.filter == "%D" and buf == "" then buf = "0" end
@@ -1969,6 +1987,12 @@ function pob_selftestItemsCraft()
         pob_itemsDisplaySetControl("displayItemQualityEdit", "")
         res.qualityEmptyIsZero = it.displayItem.quality == 0
             and pob_itemsGetLists().display.editor.quality.shown == true
+        -- EditControl filter ("%D") and limit (2): "1a" -> 1, "150" -> 15.
+        pob_itemsDisplaySetControl("displayItemQualityEdit", "1a")
+        local q1 = it.displayItem.quality
+        pob_itemsDisplaySetControl("displayItemQualityEdit", "150")
+        res.editFilterLimit = q1 == 1 and it.displayItem.quality == 15
+            and pob_itemsGetLists().display.editor.quality.text == "15"
         -- A ring is not influence-list "all"; a unique is not influenceable.
         pob_itemsEditTextSave("Rarity: Rare\nCF Ring\nGold Ring\nCrafted: true\n", 3, false)
         e = pob_itemsGetLists().display.editor
@@ -2020,7 +2044,16 @@ function pob_selftestItemsCraft()
         pob_itemsCloseDisplayItem()
         res.staleRefused = not pob_itemsCraftClick("save").ok and it.displayItem == nil
             and pob_itemsCraftState().open == false
-        res.badKindRefused = pob_itemsCraftOpen("nope", 1).open == false
+        -- A replaced display item (paste / edit-text save) leaves the session
+        -- non-nil; only craftLive's identity check can refuse the stale Save.
+        pob_itemsEditTextSave("Rarity: Rare\nCF Replace\nIron Hat\n", 3, false)
+        pob_itemsCraftOpen("enchant", 1)
+        pob_itemsCraftSet("enchantment", 1)
+        pob_itemsEditTextSave("Rarity: Rare\nCF Replacement\nIron Hat\n", 3, false)
+        res.staleReplacedRefused = not pob_itemsCraftClick("save").ok
+            and #it.displayItem.enchantModLines == 0 and pob_itemsCraftState().open == false
+        -- With a display item open, only the unknown kind can refuse.
+        res.badKindRefused = it.displayItem ~= nil and pob_itemsCraftOpen("nope", 1).open == false
         -- Slot must be a real slot of its popup (review fix).
         pob_itemsEditTextSave("Rarity: Rare\nCF Slot\nIron Hat\n", 3, false)
         res.badSlotRefused = pob_itemsCraftOpen("enchant", 3).open == false
@@ -2054,6 +2087,17 @@ function pob_selftestItemsCraft()
         local rows = pob_itemsCraftState().controls.notableDB.rows
         res.anointSearch = #rows >= 1 and #rows < allRows
         pob_itemsCraftClose()
+        -- The selection follows the node, not the row number, across a rebuild.
+        pob_itemsCraftOpen("anoint", 1); pump(5000)
+        local ndb = craft.controls.notableDB
+        local selNode, otherNode = ndb.list[1], ndb.list[2]
+        pob_itemsCraftSet("notableDB", 1)
+        pob_itemsCraftSet("notableDB.search", otherNode.dn); pump(5000)
+        local rec = pob_itemsCraftState().controls.notableDB
+        res.notableSelFollowsNode = ndb.list[1] ~= selNode
+            and (rec.sel == nil or ndb.list[rec.sel] == selNode)
+            and pob_itemsCraftState().controls.save.label == "Anoint " .. selNode.dn
+        pob_itemsCraftClose()
         res.anointHiddenOnBelt = (function()
             pob_itemsEditTextSave("Rarity: Rare\nCF Belt2\nLeather Belt\n", 3, false)
             return pob_itemsCraftOpen("anoint", 1).open == false
@@ -2078,6 +2122,19 @@ function pob_selftestItemsCraft()
         st = pob_itemsCraftSet("source", 2)
         res.scourgeSource = st.ok and st.controls.implicit3.shown and not st.controls.implicit4.shown
             and st.height == 103 + 20 * 3
+        pob_itemsCraftClose()
+        -- Re-picking the current row is a no-op (DropDownControl:SetSel);
+        -- changing it resets the implicit pickers.
+        pob_itemsEditTextSave("Rarity: Rare\nCF Belt4\nLeather Belt\n", 3, false)
+        pob_itemsCraftOpen("corrupt", nil)
+        pob_itemsCraftSet("implicit1", 2)
+        pob_itemsCraftSet("implicit2", 2)
+        local pick1, pick2 = craft.controls.implicit1.selIndex, craft.controls.implicit2.selIndex
+        pob_itemsCraftSet("source", craft.controls.source.selIndex)
+        res.dropRepickKeeps = pick1 == 2 and craft.controls.implicit1.selIndex == pick1
+            and craft.controls.implicit2.selIndex == pick2
+        pob_itemsCraftSet("source", 2)
+        res.dropChangeResets = craft.controls.implicit1.selIndex == 1
         pob_itemsCraftClose()
         -- Unique Roll Ranges.
         pob_itemsEditTextSave("Rarity: Unique\nCF Roll\nLeather Belt\nImplicits: 1\n+(25-40) to maximum Life\n+(40-50) to maximum Life\n", 4, false)
