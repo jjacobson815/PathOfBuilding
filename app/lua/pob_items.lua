@@ -2050,6 +2050,61 @@ function pob_selftestItemsCraft()
             pob_itemsEditTextSave("Rarity: Rare\nCF Belt2\nLeather Belt\n", 3, false)
             return pob_itemsCraftOpen("anoint", 1).open == false
         end)()
+        -- Corrupt a rare belt.
+        pob_itemsEditTextSave("Rarity: Rare\nCF Belt\nLeather Belt\n", 3, false)
+        st = pob_itemsCraftOpen("corrupt", nil)
+        res.corruptOpened = st.open and st.title == "Corrupted Item" and st.controls.implicit1.shown
+            and st.controls.implicit2.shown and not st.controls.implicit3.shown and not st.controls.implicits.shown
+        pob_itemsCraftSet("implicit1", 2)
+        local g = craft.controls.implicit1.list[2].mod.group
+        local clash = false
+        for _, row in ipairs(craft.controls.implicit2.list) do if row.mod and row.mod.group == g then clash = true end end
+        res.corruptExcludesGroup = not clash                                   -- Review Focus 5
+        local modLine = craft.controls.implicit1.list[2].mod[1]
+        pob_itemsCraftClick("save")
+        res.corruptApplied = it.displayItem.corrupted == true
+            and it.displayItem.implicitModLines[1].line:find(modLine, 1, true) ~= nil
+        -- Scourge: 3 dropdowns for a non-unique, popup grows (writes main.popups[1].height).
+        pob_itemsEditTextSave("Rarity: Rare\nCF Belt3\nLeather Belt\n", 3, false)
+        pob_itemsCraftOpen("corrupt", nil)
+        st = pob_itemsCraftSet("source", 2)
+        res.scourgeSource = st.ok and st.controls.implicit3.shown and not st.controls.implicit4.shown
+            and st.height == 103 + 20 * 3
+        pob_itemsCraftClose()
+        -- Unique Roll Ranges.
+        pob_itemsEditTextSave("Rarity: Unique\nCF Roll\nLeather Belt\nImplicits: 1\n+(25-40) to maximum Life\n+(40-50) to maximum Life\n", 4, false)
+        st = pob_itemsCraftOpen("corrupt", nil)
+        res.rollButtons = st.controls.implicits.shown and st.controls.rolls.shown
+        pob_itemsCraftClick("rolls")
+        pob_itemsCraftSet("rollRangeSlider1", 1)
+        res.rollLabel = pob_itemsCraftState().controls.rollRangeValue1.label == "^71.22"
+        pob_itemsCraftClick("save")
+        res.rollApplied = it.displayItem.corrupted == true
+            and math.abs((it.displayItem.explicitModLines[1].corruptedRange or 0) - 1.22) < 1e-9  -- 0.78 + 0.44 is not exactly 1.22 in floating point
+        -- Add Implicit: Exarch replaces (Review Focus 4), Custom appends, blank adds nothing.
+        pob_itemsEditTextSave("Rarity: Rare\nCF Helm2\nIron Hat\nSearing Exarch Item\n", 3, false)
+        st = pob_itemsCraftOpen("implicit", nil)
+        res.implicitSources = table.concat(st.controls.source.list, ",") == "Searing Exarch,Delve,Custom"
+        local function exarchCount()
+            local n = 0
+            for _, l in ipairs(it.displayItem.implicitModLines) do if l.exarch then n = n + 1 end end
+            return n
+        end
+        pob_itemsCraftClick("save")
+        local n1 = exarchCount()
+        pob_itemsCraftOpen("implicit", nil); pob_itemsCraftClick("save")
+        res.eldritchReplaces = n1 > 0 and exarchCount() == n1
+        pob_itemsCraftOpen("implicit", nil)
+        pob_itemsCraftSet("source", 3); pob_itemsCraftSet("custom", "+10 to Strength")
+        local before = #it.displayItem.implicitModLines
+        pob_itemsCraftClick("save")
+        local last = it.displayItem.implicitModLines[#it.displayItem.implicitModLines]
+        res.customImplicit = #it.displayItem.implicitModLines == before + 1 and last.line == "+10 to Strength" and last.custom == true
+        pob_itemsCraftOpen("implicit", nil)
+        pob_itemsCraftSet("source", 3); pob_itemsCraftSet("custom", "   ")
+        before = #it.displayItem.implicitModLines
+        pob_itemsCraftClick("save")
+        res.blankCustomIgnored = #it.displayItem.implicitModLines == before
     end)
     pcall(function() it:SetDisplayItem() end)
     itRestore(bm, it, snap)
