@@ -485,6 +485,21 @@ local function ctlRecord(ctl)
     elseif kind == "button" or kind == "label" then
         local lok, label = pcall(ctl.GetProperty, ctl, "label")
         rec.label = lok and tostring(label or "") or ""
+    elseif kind == "list" then
+        -- NotableDBControl: rows only once its coroutine list build has finished.
+        local it = ctl.itemsTab
+        rec.building = (ctl.listBuilder ~= nil or ctl.listBuildFlag
+            or (it ~= nil and it.build.outputRevision ~= ctl.listOutputRevision)) and true or false
+        rec.text = ctl.defaultText or ""
+        rec.sel = ctl.selIndex
+        rec.rows = { }
+        if not rec.building then
+            for i, row in ipairs(ctl.list) do rec.rows[i] = { label = ctl:GetRowValue(1, i, row) } end
+        end
+        rec.sub = { }
+        for name, sub in pairs(ctl.controls or { }) do
+            if type(name) == "string" and type(sub) == "table" and sub._className then rec.sub[name] = ctlRecord(sub) end
+        end
     end
     return rec
 end
@@ -1046,11 +1061,36 @@ function pob_itemsDBSetFilter(which, name, value)
     return { ok = true }
 end
 
+-- The list-build half of a slice (ItemDBControl.lua:274-296 / NotableDBControl.lua
+-- :189-207, both only driven by their Draw, which never runs in the host):
+-- restart on outputRevision / listBuildFlag, resume ListBuilder once (it
+-- yields every 50 ms on the stat-sort path with defaultText "^7Sorting... (N%)").
+local function stepListBuilder(ctl, it)
+    if it.build.outputRevision ~= ctl.listOutputRevision then ctl.listBuildFlag = true end
+    if ctl.listBuildFlag then
+        ctl.listBuildFlag = false
+        wipeTable(ctl.list)
+        ctl.listBuilder = coroutine.create(ctl.ListBuilder)
+        ctl.listOutputRevision = it.build.outputRevision
+    end
+    local finished = false
+    if ctl.listBuilder then
+        local ok, err = coroutine.resume(ctl.listBuilder, ctl)
+        if not ok then
+            ctl.listBuilder = nil
+            return { running = false, error = tostring(err) }
+        end
+        if coroutine.status(ctl.listBuilder) == "dead" then
+            ctl.listBuilder = nil
+            finished = true
+        end
+    end
+    return { running = ctl.listBuilder ~= nil, finished = finished, text = ctl.defaultText or "" }
+end
+
 -- One slice of work: the Main.lua LoadItems coroutine while the DB is
--- loading (pairsYield: ~20 ms), then ItemDBControl:Draw's list-build part
--- (ItemDBControl.lua:274-296): restart on outputRevision / listBuildFlag,
--- resume ListBuilder once (it yields every 50 ms on the stat-sort path with
--- defaultText "^7Sorting... (N%)"). Driven by a job-scoped QML Timer.
+-- loading (pairsYield: ~20 ms), then the list build. Driven by a job-scoped
+-- QML Timer.
 function pob_itemsDBStep(which)
     local db, it = dbCtl(which)
     if not db then return { running = false } end
@@ -1062,26 +1102,7 @@ function pob_itemsDBStep(which)
         return { running = true, loading = true, text = "^7Loading..." }
     end
     if not db.leaguesAndTypesLoaded then db:LoadLeaguesAndTypes() end
-    if it.build.outputRevision ~= db.listOutputRevision then db.listBuildFlag = true end
-    if db.listBuildFlag then
-        db.listBuildFlag = false
-        wipeTable(db.list)
-        db.listBuilder = coroutine.create(db.ListBuilder)
-        db.listOutputRevision = it.build.outputRevision
-    end
-    local finished = false
-    if db.listBuilder then
-        local ok, err = coroutine.resume(db.listBuilder, db)
-        if not ok then
-            db.listBuilder = nil
-            return { running = false, error = tostring(err) }
-        end
-        if coroutine.status(db.listBuilder) == "dead" then
-            db.listBuilder = nil
-            finished = true
-        end
-    end
-    return { running = db.listBuilder ~= nil, finished = finished, text = db.defaultText or "" }
+    return stepListBuilder(db, it)
 end
 
 ---------------------------------------------------------------------------
@@ -1335,6 +1356,18 @@ end
 function pob_itemsCraftClose()
     craft = nil
     return { ok = true }
+end
+
+-- One slice of the Anoint popup's notable list build (NotableDBControl:Draw's
+-- list part). Driven by a job-scoped QML Timer until `running` is false.
+function pob_itemsCraftStep()
+    local bm, it = ctx()
+    if not craftLive(it) or craft.kind ~= "anoint" then return { running = false } end
+    local ctl = craft.controls.notableDB
+    local res
+    local ok, _, err = withFrame(function() res = stepListBuilder(ctl, it) end)
+    if not ok then return { running = false, error = tostring(err) } end
+    return res
 end
 
 -- "Add to build" / "Save" (ItemsTab:AddDisplayItem, ItemsTab.lua:1519-1527):
@@ -1985,6 +2018,38 @@ function pob_selftestItemsCraft()
         res.staleRefused = not pob_itemsCraftClick("save").ok and it.displayItem == nil
             and pob_itemsCraftState().open == false
         res.badKindRefused = pob_itemsCraftOpen("nope", 1).open == false
+
+        -- Anoint through the live NotableDB list (pumped like the item DB).
+        local function pump(max)
+            for _ = 1, max do if not pob_itemsCraftStep().running then return true end end
+            return false
+        end
+        pob_itemsEditTextSave("Rarity: Rare\nCF Amulet\nGold Amulet\n", 3, false)
+        st = pob_itemsCraftOpen("anoint", 1)
+        res.anointOpened = st.open == true and st.title == "Anoint Item" and st.controls.notableDB.type == "list"
+        res.anointListed = pump(5000) and #pob_itemsCraftState().controls.notableDB.rows > 0
+        local node = craft.controls.notableDB.list[1]
+        pob_itemsCraftSet("notableDB", 1)
+        res.anointLabel = pob_itemsCraftState().controls.save.label == "Anoint " .. node.dn
+        res.anointTooltip = linesText(pob_itemsCraftTooltip("notableDB", 1).lines):find(node.dn, 1, true) ~= nil
+        pob_itemsCraftClick("save")
+        res.anointApplied = it.displayItem.enchantModLines[1].line == "Allocates " .. node.dn
+        -- Re-open with no selection: "Remove <name>" (Review Focus 3).
+        pob_itemsCraftOpen("anoint", 1); pump(5000)
+        res.anointRemove = pob_itemsCraftState().controls.save.label == "Remove " .. node.dn
+        pob_itemsCraftClick("save")
+        res.anointRemove = res.anointRemove and #it.displayItem.enchantModLines == 0
+        -- Search filter narrows the list.
+        pob_itemsCraftOpen("anoint", 1); pump(5000)
+        local allRows = #pob_itemsCraftState().controls.notableDB.rows
+        pob_itemsCraftSet("notableDB.search", node.dn); pump(5000)
+        local rows = pob_itemsCraftState().controls.notableDB.rows
+        res.anointSearch = #rows >= 1 and #rows < allRows
+        pob_itemsCraftClose()
+        res.anointHiddenOnBelt = (function()
+            pob_itemsEditTextSave("Rarity: Rare\nCF Belt2\nLeather Belt\n", 3, false)
+            return pob_itemsCraftOpen("anoint", 1).open == false
+        end)()
     end)
     pcall(function() it:SetDisplayItem() end)
     itRestore(bm, it, snap)
