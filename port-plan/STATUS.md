@@ -325,6 +325,11 @@ Full detail in `reference/00-architecture.md`. The short list:
   before shipping. 104 item/gem/tree sites will use VAR until then.
 - **Parity baseline snapshot** (Phase 0) — Qt repo has 18 System specs, legacy 26;
   pick one as the calc-parity reference.
+- **Ease of use over 1:1 layout** (owner, 2026-10-16; app-wide, Phase 11 first)
+  — the port must be easy to navigate. Where a legacy screen is confusing (the
+  Import/Export tab is the known worst case, see `phases/PHASE-11-import-export.md`
+  "Usability requirements"), a clearer layout is allowed; logic stays legacy's,
+  and each layout change is a documented difference.
 - **OAuth token storage** (Phase 11) — keep Settings.xml plaintext (legacy) or move
   to OS keychain (deviation; changes LoadSettings/SaveSettings).
 

@@ -12,6 +12,31 @@ Phase 3 (shell/level/title write-backs).
 (OAuth/LaunchServer, build sites, share codes), [[host-api-contract]] (SetForeground
 after OAuth).
 
+## Usability requirements (owner, 2026-10-16) — read before building this tab
+
+The owner could not find how to import his own character in legacy PoB's
+Import/Export tab: two near-identical sections show the same character list,
+the buttons that actually import are unlabeled as such, and importing silently
+overwrites the open build ("Delete skills" / "Delete equipment" are pre-checked).
+The port must be easy to navigate, even where that means NOT copying the legacy
+layout. Record each layout change as a documented difference.
+
+- One guided flow, top to bottom: 1) sign in or enter account name,
+  2) pick character, 3) choose what to bring in, 4) one **Import** button.
+  Do not show the same character picker twice.
+- Default target is a **new build named after the character**. Importing into
+  the open build is an explicit choice with a confirm that says what will be
+  replaced.
+- Tree, items and skills import together by default; the delete / ignore
+  weapon-swap options sit under a collapsed "Options" with one plain sentence
+  each.
+- Status in plain words ("Signed in as X", "Importing items... 2 of 3");
+  a disabled button says why it is disabled.
+- Build sharing is its own clearly titled area: "Share this build" and
+  "Open a build from a link or code" (a pasted maxroll / pobb.in link opens
+  as a new build by default).
+- Readable spacing and section titles; no cramped, unlabeled control rows.
+
 ## Part 11.1 — OAuth account import
 
 - [ ] "Import From Your Account": Authorize with Path of Exile (30 s timer, rate-
