@@ -86,6 +86,7 @@ public:
     // (switching the engine to BUILD). setListMode() switches the engine to LIST
     // mode (calls setMode("LIST")). All return false on failure.
     Q_INVOKABLE bool openBuild(const QString& fullFileName);
+    Q_INVOKABLE QString openBuildError();
     Q_INVOKABLE bool createBuild();
     Q_INVOKABLE bool deleteBuild(const QString& fullFileName);
     Q_INVOKABLE bool renameBuild(const QString& fullFileName, const QString& newName);

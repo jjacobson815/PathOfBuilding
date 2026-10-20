@@ -246,7 +246,12 @@ Window {
             }
 
             // ===== Page 1: LIST (build library browser) =====
-            BuildListPage {}
+            BuildListPage {
+                onOpenFailed: function(message) {
+                    openErrorPopup.message = message
+                    openErrorPopup.open()
+                }
+            }
         }
 
         // --- Bottom bar: Options / About / (inert) Check for Update + version ---
@@ -350,6 +355,11 @@ Window {
                 saveErrorPopup.open()
             }
         }
+    }
+
+    Widgets.MessagePopup {
+        id: openErrorPopup
+        title: " Open Failed "
     }
 
     Widgets.MessagePopup {

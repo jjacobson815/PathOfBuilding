@@ -395,11 +395,42 @@ end
 -- openBuild: load a build .xml by its full file path into BUILD mode. Mirrors
 -- BuildListControl:LoadBuild for a file entry (main:SetMode("BUILD", dbFileName,
 -- buildName) -> Build:Init -> LoadDBFile).
+_lastOpenError = ""
+function pob_openBuildError() return _lastOpenError end
+
+-- Returns true only if the engine actually landed in BUILD. On failure the
+-- reason is kept for pob_openBuildError so the QML shell can show a popup
+-- (engine errors otherwise only reach the log and the UI just stays on LIST).
 function pob_openBuild(fullFileName)
+    _lastOpenError = ""
     if not main or not fullFileName or fullFileName == "" then return false end
     local buildName = fullFileName:match("([^/\\]+)%.xml$") or "Unnamed build"
+    -- A build saved with a passive-tree version this engine has no data for
+    -- leaves buildMode:Init with an empty spec list and aborts mid-load, so
+    -- refuse it up front with a readable reason.
+    local f = io.open(fullFileName, "rb")
+    if f then
+        local xml = f:read("*a")
+        f:close()
+        for ver in xml:gmatch('treeVersion="([^"]+)"') do
+            if not treeVersions[ver] then
+                local dotted = ver:gsub("_", ".")
+                _lastOpenError = "^7Could not open ^xFFFFFF" .. buildName .. "^7.\n\n"
+                    .. "It uses passive tree version ^1" .. dotted
+                    .. "^7, which this version does not include.\n"
+                    .. "Add the " .. dotted .. " tree data to src/TreeData."
+                return false
+            end
+        end
+    end
+    _lastEngineError = nil
     main:SetMode("BUILD", fullFileName, buildName)
     runCallback("OnFrame")
+    if main.mode ~= "BUILD" then
+        _lastOpenError = "^7Could not open ^xFFFFFF" .. buildName .. "^7.\n\n"
+            .. "^1" .. tostring(_lastEngineError or "The build failed to load (see the log).")
+        return false
+    end
     return true
 end
 
@@ -2088,6 +2119,7 @@ if mainObject and mainObject.ShowErrMsg then
     local origShowErr = mainObject.ShowErrMsg
     mainObject.ShowErrMsg = function(self, fmt, ...)
         local ok, msg = pcall(string.format, fmt, ...)
+        _lastEngineError = ok and msg or fmt
         pob.log("ENGINE ERROR: " .. (ok and msg or fmt))
     end
 end

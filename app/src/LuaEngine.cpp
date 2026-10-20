@@ -915,13 +915,31 @@ void LuaEngine::setActiveView(const QString& viewId) {
 // real app uses are exercised.
 bool LuaEngine::openBuild(const QString& fullFileName) {
     bool ok = callGlobal("pob_openBuild", { fullFileName }).toBool();
-    if (ok) emit modeChanged();
+    if (ok) {
+        // Same republish as setMode()/closeBuild(): the QML shell binds to the
+        // view/current-mode signals, so modeChanged alone left it stuck on LIST.
+        emit modeChanged();
+        emit viewChanged();
+        emit currentModeChanged();
+        emit currentViewChanged();
+    }
     return ok;
+}
+
+QString LuaEngine::openBuildError() {
+    return callGlobal("pob_openBuildError").toString();
 }
 
 bool LuaEngine::createBuild() {
     bool ok = callGlobal("pob_createBuild").toBool();
-    if (ok) emit modeChanged();
+    if (ok) {
+        // Same republish as setMode()/closeBuild(): the QML shell binds to the
+        // view/current-mode signals, so modeChanged alone left it stuck on LIST.
+        emit modeChanged();
+        emit viewChanged();
+        emit currentModeChanged();
+        emit currentViewChanged();
+    }
     return ok;
 }
 

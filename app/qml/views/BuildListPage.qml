@@ -32,6 +32,7 @@ ColumnLayout {
     Layout.bottomMargin: theme.space3
 
     // LIST-mode selection state (local to this page).
+    signal openFailed(string message)
     property int listSelectedIndex: -1
     property string listSelectedName: ""
     property string listSelectedFullFileName: ""
@@ -44,7 +45,8 @@ ColumnLayout {
             // Folders are not openable as builds; ignore (UI disables Open).
             return
         }
-        luaEngine.openBuild(listSelectedFullFileName)
+        if (!luaEngine.openBuild(listSelectedFullFileName))
+            buildListPage.openFailed(luaEngine.openBuildError())
     }
 
     Widgets.Label {
@@ -126,6 +128,7 @@ ColumnLayout {
 
     // The build/folder list, bound to the BuildListModel.
     ListView {
+        id: buildListView
         Layout.fillWidth: true
         Layout.fillHeight: true
         model: buildListModel
@@ -166,7 +169,7 @@ ColumnLayout {
                     buildListPage.listSelectedName = model.isFolder ? model.folderName : model.buildName
                     buildListPage.listSelectedFullFileName = model.fullFileName
                     buildListPage.listSelectedIsFolder = model.isFolder
-                    ListView.view.currentIndex = index
+                    buildListView.currentIndex = index
                 }
                 onDoubleClicked: buildListPage.openSelected()
             }
