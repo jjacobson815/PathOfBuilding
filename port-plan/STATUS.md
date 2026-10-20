@@ -337,6 +337,8 @@ Full detail in `reference/00-architecture.md`. The short list:
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
 
+- << Back / Ctrl+W fixed: pob_closeBuild pumps OnFrame (selftest close-build)
+
 **▶ Phase 6 (in progress).** Windows (Qt 6.11.1, msys2) now builds and gates everything through 6.2; the only Windows fix needed was `SocketGroupList.qml`'s `"file://" + "C:/..."` icon URL (now `file:///` for drive paths). Item drag-drop: `components/DragGhost.qml` (overlay drag payload `{kind,key,shift}`, DropArea key "Item") + `ItemListBox.qml`; the item DB list is pumped by `ItemDBPanel`'s job-scoped timer via `pob_itemsDBStep`. `Label` is ONE line (height = size): split multi-line text into a Repeater. Bridge `app/lua/pob_items.lua`. Traps found: legacy
 `IsKeyDown` is a stub, so lifted click/equip code takes explicit shift/ctrl flags
 (`withKeys` temporarily swaps `IsKeyDown`); `ItemsTab:UpdateSockets` only runs

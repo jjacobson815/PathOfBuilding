@@ -195,6 +195,10 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         }
     }
 
+    // "<< Back" / Ctrl+W: pob_closeBuild must land in LIST (it only queued the
+    // switch once the frame timer was removed). Restores an Unnamed build.
+    if (!pob_run_lua_check(engine, "pob_selftestCloseBuild", "close-build")) return false;
+
     // Phase 4a: prove the passive-tree data seam (pob_getTreeData) yields a
     // non-empty, well-formed tree.
     QVariant trCheck = engine.callGlobal("pob_selftestTreeRender");
