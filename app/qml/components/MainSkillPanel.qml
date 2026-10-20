@@ -197,6 +197,32 @@ ColumnLayout {
                     else if (v.minionId !== undefined)
                         luaEngine.setSkillMinion({ minionId: v.minionId }, root.suffix)
                 }
+                // Items tab drag target (Build.lua:548-557, sidebar only): an
+                // item the minion can use is equipped in the item set this
+                // dropdown shows (EquipItemInSet; DB / shared items are copied).
+                DropArea {
+                    id: minionItemDrop
+                    anchors.fill: parent
+                    keys: ["Item"]
+                    enabled: root.suffix === "" && root.payload.minion.isItemSet === true
+                    onEntered: (drag) => {
+                        var p = drag.source ? drag.source.dragValue : null
+                        drag.accepted = !!p && luaEngine.invoke("pob_itemsCanDropOnMinion", [p.kind, p.key]) === true
+                    }
+                    onDropped: (ev) => {
+                        var p = ev.source ? ev.source.dragValue : null
+                        var cur = minionDrop.currentIndex >= 0 ? minionDrop.model[minionDrop.currentIndex] : null
+                        if (p && cur && cur.itemSetId !== undefined)
+                            luaEngine.invoke("pob_itemsDropOnMinion", [p.kind, p.key, cur.itemSetId, p.shift === true])
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: minionItemDrop.containsDrag
+                        color: "transparent"
+                        border.width: 2
+                        border.color: theme.success
+                    }
+                }
             }
             Button {
                 label: "Manage Spectres..."

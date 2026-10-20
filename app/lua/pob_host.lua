@@ -580,6 +580,22 @@ function pob_selftestListFlow()
     }
 end
 
+-- "<< Back" / Ctrl+W selftest: pob_closeBuild must actually land in LIST.
+-- It used to only queue the switch (no OnFrame pump after the frame timer was
+-- removed), so the button did nothing. Restores a fresh Unnamed build after.
+function pob_selftestCloseBuild()
+    if not main then return { ok = false, error = "no main" } end
+    local r = pob_closeBuild()
+    local mode = main.mode
+    main:SetMode("BUILD", false, "Unnamed build")
+    runCallback("OnFrame")
+    return {
+        ok = (mode == "LIST" and r and r.ok == true and main.mode == "BUILD"),
+        mode = tostring(mode),
+        restored = tostring(main.mode),
+    }
+end
+
 -- Part 1.4 selftest: prove the mode bar's BUILD button reopens the LAST build
 -- via GetArgs persistence instead of forcing a fresh "Unnamed build" (the bug
 -- LuaEngine::setMode used to have). Establishes a distinctively-named build on
@@ -813,15 +829,22 @@ end
 function pob_addItemFromRaw(raw)
     local it = main and main.modes and main.modes.BUILD and main.modes.BUILD.itemsTab
     if not it or not raw then return nil end
-    -- CreateDisplayItemFromRaw returns nil; on success it sets self.displayItem.
+    -- CreateDisplayItemFromRaw is a silent no-op for text with no base, which
+    -- used to leave the PREVIOUS displayItem in place and re-add it as a
+    -- false success (Phase 6.3 fix). Validate first, and give the editor its
+    -- previous display item back afterwards.
+    if not new("Item", raw).base then return nil end
+    local prev = it.displayItem
     it:CreateDisplayItemFromRaw(raw)
     local item = it.displayItem
-    if not item or not item.base then return nil end
+    if not item or item == prev or not item.base then return nil end
     it:AddItem(item, true)
+    it:SetDisplayItem(prev)
     it:PopulateSlots()
-    -- AddItem sets build.buildFlag = true internally but nothing consumed it
-    -- before this returned; without this, calc output goes stale (mainOutput
-    -- is already non-nil so pob_getCalcOutput's lazy rebuild never fires).
+    it:AddUndoState()
+    -- AddItem does NOT set buildFlag (nothing is equipped: noAutoEquip), but
+    -- the item list changed; recalc so any output that reads it is current.
+    main.modes.BUILD.buildFlag = true
     pob_recalculate()
     return item.id
 end
@@ -4049,7 +4072,11 @@ function pob_closeBuild()
     local bm = main and main.modes and main.modes.BUILD
     if not bm then return { ok = false, error = "no build" } end
     bm:CloseBuild()
-    return { ok = true, mode = main.mode or "LIST" }
+    -- CloseBuild only queues the switch (main:SetMode sets newMode); it applies
+    -- on the next OnFrame. There is no frame timer any more, so pump one here
+    -- (as LuaEngine::setMode does) or "<< Back" / Ctrl+W never leave the build.
+    runCallback("OnFrame")
+    return { ok = main.mode == "LIST", mode = main.mode or "LIST" }
 end
 
 -- ---------------------------------------------------------------------------
@@ -6475,6 +6502,7 @@ end
 -- the same *.lua rule as this file). It defines the pob_timeless* globals.
 require("pob_timeless")
 require("pob_skills")
+require("pob_items")
 
 -- Old-tree art (follow-up to Phase 4): every data era must resolve node icons
 -- and frames. <= 3_24 trees carry no sprites.lua and no skillSprites filenames,

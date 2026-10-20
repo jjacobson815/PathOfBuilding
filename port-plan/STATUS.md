@@ -9,7 +9,8 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 6 — Items Tab — NOT STARTED** (spec: `phases/PHASE-6-items-tab.md`).
+**ACTIVE: Phase 6 — Items Tab — Parts 6.1 + 6.2 DONE, 6.3 items 1-2 DONE, next 6.3 item 3 (affix dropdowns + custom / crucible popups)**
+**Handoff for the next agent: `port-plan/handoff/HANDOFF-phase6.md` (read it, then the phase file). Stopped at: 6.3 item 2 (craft popups: Enchant / Anoint / Corrupt / Add Implicit + influence, quality, catalyst, cluster sections) committed + pushed from the Windows clone (Windows gate green: `items-slots`, `items-lists`, `items-editor`, `items-craft`). Next: 6.3 item 3 — the legacy map for it is ItemsTab.lua:2973-3388 (custom modifier / crucible popups) plus the affix dropdowns at ~:1792-2224; reuse the craft-session capture engine in `pob_items.lua` (`pob_itemsCraftOpen` + name-driven `Set/Click/Tooltip`) for the popups.** (spec: `phases/PHASE-6-items-tab.md`).
 Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → **6** → 7 → Phase 3 long tail
 → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.
 
@@ -324,12 +325,27 @@ Full detail in `reference/00-architecture.md`. The short list:
   before shipping. 104 item/gem/tree sites will use VAR until then.
 - **Parity baseline snapshot** (Phase 0) — Qt repo has 18 System specs, legacy 26;
   pick one as the calc-parity reference.
+- **Ease of use over 1:1 layout** (owner, 2026-10-16; app-wide, Phase 11 first)
+  — the port must be easy to navigate. Where a legacy screen is confusing (the
+  Import/Export tab is the known worst case, see `phases/PHASE-11-import-export.md`
+  "Usability requirements"), a clearer layout is allowed; logic stays legacy's,
+  and each layout change is a documented difference.
 - **OAuth token storage** (Phase 11) — keep Settings.xml plaintext (legacy) or move
   to OS keychain (deviation; changes LoadSettings/SaveSettings).
 
 ---
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
+
+- << Back / Ctrl+W fixed: pob_closeBuild pumps OnFrame (selftest close-build)
+
+**▶ Phase 6 (in progress).** Windows (Qt 6.11.1, msys2) now builds and gates everything through 6.2; the only Windows fix needed was `SocketGroupList.qml`'s `"file://" + "C:/..."` icon URL (now `file:///` for drive paths). Item drag-drop: `components/DragGhost.qml` (overlay drag payload `{kind,key,shift}`, DropArea key "Item") + `ItemListBox.qml`; the item DB list is pumped by `ItemDBPanel`'s job-scoped timer via `pob_itemsDBStep`. `Label` is ONE line (height = size): split multi-line text into a Repeater. Bridge `app/lua/pob_items.lua`. Traps found: legacy
+`IsKeyDown` is a stub, so lifted click/equip code takes explicit shift/ctrl flags
+(`withKeys` temporarily swaps `IsKeyDown`); `ItemsTab:UpdateSockets` only runs
+from Draw/AddItemTooltip, so call it before reading sockets; `ItemSlotControl:
+Populate` uses `pairs` (unstable order), so sort by `itemOrderList`; `AddItem`
+alone pushes no undo state (legacy adds one after), so selftest fixtures must
+call `AddUndoState`; undo REPLACES `items`/`itemSets`, so address by id/index.
 
 **▶ Phase 5 — COMPLETE (2026-09-28).** What a future session must know:
 - **Skills tab pattern:** almost every legacy control keeps its callback as a

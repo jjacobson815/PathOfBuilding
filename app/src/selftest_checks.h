@@ -195,6 +195,10 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         }
     }
 
+    // "<< Back" / Ctrl+W: pob_closeBuild must land in LIST (it only queued the
+    // switch once the frame timer was removed). Restores an Unnamed build.
+    if (!pob_run_lua_check(engine, "pob_selftestCloseBuild", "close-build")) return false;
+
     // Phase 4a: prove the passive-tree data seam (pob_getTreeData) yields a
     // non-empty, well-formed tree.
     QVariant trCheck = engine.callGlobal("pob_selftestTreeRender");
@@ -954,6 +958,17 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Phase 5 Part 5.4: <Skills> XML round trip (sets, every group/gem attrib
     // incl. variantId and *Calcs fields, options), legacy flat <Skill>, undo.
     if (!pob_run_lua_check(engine, "pob_selftestSkillsPersist", "skills-persist")) return false;
+    // Phase 6 Part 6.1: item sets, weapon sets, slot panel state, equip rules,
+    // flask activation, undo/redo.
+    if (!pob_run_lua_check(engine, "pob_selftestItemsSlots", "items-slots")) return false;
+    // Phase 6 Part 6.2: all-items list, Uniques / Rare DB (pumped loader, filters,
+    // stat sort), shared items + shared item sets, drop targets.
+    if (!pob_run_lua_check(engine, "pob_selftestItemsLists", "items-lists")) return false;
+    // Phase 6 Part 6.3: display-item editor (panel, variants, sockets / links,
+    // edit-text popup) + the pob_addItemFromRaw invalid-text fix.
+    if (!pob_run_lua_check(engine, "pob_selftestItemsEditor", "items-editor")) return false;
+    // Phase 6 Part 6.3 item 2: craft controls + the four craft popups.
+    if (!pob_run_lua_check(engine, "pob_selftestItemsCraft", "items-craft")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

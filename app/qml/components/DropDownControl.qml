@@ -20,6 +20,13 @@ import QtQuick.Controls as QC
 // Per-row rich tooltips come from `tooltipForItem(item, tooltip)`, matching the
 // `tooltipFunc(tooltip)` contract used by Button/CheckBox/EditControl.
 //
+// `searchable: true` ports legacy's type-to-filter while the list is dropped
+// (SearchHost word-order caseless matching, color codes ignored): typed
+// characters build a filter, Backspace edits it, Escape clears it and then
+// closes; only matching rows are listed, with the matched text highlighted.
+// A filtered pick still emits `selected(originalIndex)`. With the default
+// `searchable: false` the plain type-ahead below is unchanged.
+//
 // Selection semantics mirror legacy: `selected(index)` fires ONLY on a real
 // user pick (click / ENTER / type-ahead commit), never when `currentIndex` is
 // assigned programmatically by a model refresh. Callers can therefore drive
@@ -34,6 +41,7 @@ Item {
     property int size: theme.fontSize
     property int maxVisibleItems: 12
     property int popupMinWidth: 0        // 0 = at least the control's width
+    property bool searchable: false      // opt-in type-to-filter (see header)
 
     // function(item) -> string
     property var labelFor: null
@@ -60,6 +68,50 @@ Item {
         currentItem !== undefined ? root.labelOf(currentItem) : ""
 
     signal selected(int index)
+
+    // --- searchable filter -------------------------------------------------
+    property string _filter: ""
+    // Original model indices currently listed (identity when not filtering).
+    property var _viewIdx: []
+    readonly property int viewCount: (_viewIdx && _viewIdx.length !== undefined) ? _viewIdx.length : 0
+    readonly property int _headerH: (searchable && _filter.length > 0) ? _rowHeight : 0
+
+    function _plain(item) {
+        return root.labelOf(item).replace(/\^x[0-9a-fA-F]{6}|\^[0-9]/g, "")
+    }
+    SearchHost {
+        id: sh
+        valueAccessor: root._plain
+        listAccessor: function () {
+            var a = []
+            var n = (root.model && root.model.length !== undefined) ? root.model.length : 0
+            for (var i = 0; i < n; i++) a.push(root.model[i])
+            return a
+        }
+    }
+    function _rebuildView() {
+        // Read the model itself, not `count`: onModelChanged can run before the
+        // `count` binding has re-evaluated. An empty Lua table arrives as a map
+        // (no `length`), which counts as zero rows.
+        var n = (root.model && root.model.length !== undefined) ? root.model.length : 0
+        var out = []
+        if (root.searchable && root._filter.length > 0 && n > 0) {
+            sh.searchTerm = root._filter
+            sh.updateSearch()
+            for (var i = 0; i < n; i++) {
+                var info = sh.searchInfos[i]
+                if (info && info.matches) out.push(i)
+            }
+        } else {
+            sh.resetSearch()
+            for (var j = 0; j < n; j++) out.push(j)
+        }
+        root._viewIdx = out
+    }
+    on_FilterChanged: _rebuildView()
+    onModelChanged: _rebuildView()
+    onSearchableChanged: _rebuildView()
+    Component.onCompleted: _rebuildView()
 
     implicitWidth: 160
     implicitHeight: theme.controlSize
@@ -142,8 +194,9 @@ Item {
         x: 0
         y: root._flipUp ? -implicitHeight : root.height
         width: Math.max(root.width, root.popupMinWidth)
-        implicitHeight: Math.min(root.count, root.maxVisibleItems) * root._rowHeight
-                        + 2 * theme.space1
+        implicitHeight: Math.min(Math.max(root.viewCount, root.searchable ? 1 : 0),
+                                 root.maxVisibleItems) * root._rowHeight
+                        + root._headerH + 2 * theme.space1
         padding: theme.space1
 
         closePolicy: QC.Popup.CloseOnEscape | QC.Popup.CloseOnPressOutside
@@ -156,38 +209,66 @@ Item {
         }
 
         onOpened: {
-            list.currentIndex = root.currentIndex
-            list.positionViewAtIndex(Math.max(0, root.currentIndex), ListView.Contain)
+            var at = root._viewIdx.indexOf(root.currentIndex)
+            list.currentIndex = at
+            list.positionViewAtIndex(Math.max(0, at), ListView.Contain)
             list.forceActiveFocus()
         }
         // One row tooltip for the whole list, OUTSIDE the clipped ListView
         // (a tooltip inside a delegate was clipped to the list and never
         // showed beside it).
-        onClosed: { root._typeBuffer = ""; rowTip.hide() }
+        onClosed: { root._typeBuffer = ""; root._filter = ""; rowTip.hide() }
 
         contentItem: Item {
             Tooltip { id: rowTip; z: 100; property int ownerRow: -1 }
+            ColorText {
+                visible: root._headerH > 0
+                anchors.left: parent.left
+                anchors.leftMargin: 4
+                y: (root._headerH - height) / 2
+                sourceText: "^7Search: " + sh.searchTermPretty()
+                defaultColor: theme.text
+                font.pixelSize: root.size
+            }
             ListView {
                 id: list
                 anchors.fill: parent
+                anchors.topMargin: root._headerH
                 anchors.rightMargin: sb.visible ? sb.width + 2 : 0
                 clip: true
                 // Scrolling is driven by our own ScrollBar (below) so the list
                 // matches every other scrollable surface in the app.
                 interactive: false
                 contentY: sb.offset
-                model: root.model
+                model: root._viewIdx
                 highlightMoveDuration: 0
 
                 delegate: Rectangle {
                     id: row
                     width: list.width
                     height: root._rowHeight
+                    // `modelData` is the ORIGINAL model index of this row.
+                    readonly property int orig: modelData
+                    readonly property var item: root.model[orig]
                     readonly property bool rowEnabled:
-                        root.itemEnabled ? root.itemEnabled(modelData, index) : true
-                    color: index === root.currentIndex ? theme.active
+                        root.itemEnabled ? root.itemEnabled(item, orig) : true
+                    color: orig === root.currentIndex ? theme.active
                          : rowMa.containsMouse ? theme.hover
                          : "transparent"
+
+                    // Matched search text (ranges index the colour-stripped label).
+                    Repeater {
+                        model: (root.searchable && root._filter.length > 0
+                                && sh.searchInfos[row.orig]) ? sh.searchInfos[row.orig].ranges : []
+                        delegate: Rectangle {
+                            readonly property string plain: root._plain(row.item)
+                            x: 4 + textMetrics.width(root.size, "VAR", plain.slice(0, modelData.from))
+                            width: textMetrics.width(root.size, "VAR", plain.slice(modelData.from, modelData.to))
+                            anchors.verticalCenter: parent.verticalCenter
+                            height: root.size + 2
+                            color: Qt.rgba(0.9, 0.75, 0.2, 0.35)
+                        }
+                    }
 
                     Label {
                         anchors.left: parent.left
@@ -196,7 +277,7 @@ Item {
                         anchors.rightMargin: 4
                         anchors.verticalCenter: parent.verticalCenter
                         clip: true
-                        label: root.labelOf(modelData)
+                        label: root.labelOf(row.item)
                         size: root.size
                         defaultColor: row.rowEnabled ? theme.text : theme.muted
                     }
@@ -207,7 +288,7 @@ Item {
                         hoverEnabled: true
                         onClicked: {
                             if (!row.rowEnabled) return
-                            root._pick(index)
+                            root._pick(row.orig)
                             listPopup.close()
                         }
                         onContainsMouseChanged: {
@@ -217,7 +298,7 @@ Item {
                             if (!containsMouse) { if (rowTip.ownerRow === index) rowTip.hide(); return }
                             rowTip.ownerRow = index
                             rowTip.clear()
-                            root.tooltipForItem(modelData, rowTip)
+                            root.tooltipForItem(row.item, rowTip)
                             if (rowTip.lines.length === 0) { rowTip.hide(); return }
                             var host = rowTip.parent
                             var p = row.mapToItem(host, 0, 0)
@@ -232,19 +313,40 @@ Item {
                     }
                 }
 
+                // The popup's CloseOnEscape would take Escape before Keys.onPressed
+                // runs; claim it while a filter is active so it clears the filter first.
+                Keys.onShortcutOverride: (event) => {
+                    if (event.key === Qt.Key_Escape && root.searchable && root._filter.length > 0)
+                        event.accepted = true
+                }
+
                 Keys.onPressed: (event) => {
                     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                        if (list.currentIndex >= 0) {
-                            root._pick(list.currentIndex)
+                        if (list.currentIndex >= 0 && list.currentIndex < root.viewCount) {
+                            root._pick(root._viewIdx[list.currentIndex])
                             listPopup.close()
                         }
                         event.accepted = true
                     } else if (event.key === Qt.Key_Escape) {
-                        listPopup.close()
+                        if (root.searchable && root._filter.length > 0) root._filter = ""
+                        else listPopup.close()
+                        event.accepted = true
+                    } else if (root.searchable && event.key === Qt.Key_Backspace) {
+                        root._filter = root._filter.slice(0, -1)
+                        list.currentIndex = root.viewCount > 0 ? 0 : -1
                         event.accepted = true
                     } else if (event.text && event.text.length === 1
                                && event.text >= " ") {
-                        root._typeAhead(event.text)
+                        if (root.searchable) {
+                            if (event.text === " " && (root._filter === "" || root._filter.slice(-1) === " ")) {
+                                event.accepted = true
+                                return
+                            }
+                            root._filter = root._filter + event.text
+                            list.currentIndex = root.viewCount > 0 ? 0 : -1
+                        } else {
+                            root._typeAhead(event.text)
+                        }
                         event.accepted = true
                     }
                 }
@@ -260,7 +362,7 @@ Item {
                 autoHide: true
                 visible: contentDim > viewDim
                 step: root._rowHeight
-                contentDim: root.count * root._rowHeight
+                contentDim: root.viewCount * root._rowHeight
                 viewDim: list.height
 
                 function scrollIndexIntoView(i) {
@@ -291,7 +393,8 @@ Item {
         var win = Window.window
         if (!win) return false
         var origin = root.mapToItem(win.contentItem, 0, 0)
-        var need = Math.min(count, maxVisibleItems) * _rowHeight + 2 * theme.space1
+        var need = Math.min(Math.max(viewCount, searchable ? 1 : 0), maxVisibleItems) * _rowHeight
+                   + _headerH + 2 * theme.space1
         return (origin.y + root.height + need > win.height) && (origin.y - need >= 0)
     }
 

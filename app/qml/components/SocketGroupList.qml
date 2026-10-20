@@ -123,7 +123,9 @@ FocusScope {
                     x: 0
                     width: 16; height: 16
                     visible: modelData.icon !== ""
-                    source: modelData.icon !== "" ? "file://" + modelData.icon : ""
+                    // Windows paths ("C:/...") need a third slash or "C" parses as the host.
+                    source: modelData.icon === "" ? ""
+                          : (modelData.icon.charAt(0) === "/" ? "file://" : "file:///") + modelData.icon
                     smooth: true
                 }
                 Label {
