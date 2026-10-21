@@ -247,6 +247,11 @@ Full detail in `reference/00-architecture.md`. The short list:
    via `pob.imageSize` (`sheetInfo` in `pob_host.lua`) and takes `sw/sh` from the
    sprite data's integer `width`/`height`. `pob_selftestTreeRender` gates it
    (`spriteBad == 0`, `spriteMinW >= 1`).
+11. **Build engine objects as `new("X"):X(args)`** (upstream class rework
+   bcbca9b60, synced 2026-10-20). `new()` with any extra argument raises an
+   error, and `new("X")` without `:X()` returns an unconstructed object that
+   errors on first use. Errors raised inside a bridge `pcall` only show as an
+   empty feature, so grep `app/` for `new("` after any upstream sync.
 
 ---
 
@@ -337,6 +342,7 @@ Full detail in `reference/00-architecture.md`. The short list:
 
 ## ✅ Done log — what is ALREADY TRUE (most important first)
 
+- Upstream sync 2026-10-20 (branch `cloud/sync-upstream-dev`): merged v2.67.2 then origin/dev `16de4b82d`; tree 3_29 builds open. runtime/*.dll are PINNED to the pre-sync versions (upstream's refresh deferred; take it explicitly with `git checkout origin/dev -- runtime/<dll>`). Suggest Path dropped in sync; re-port from a60a9d35a if wanted. Main.lua carries one stock-LuaJIT compat line (upstream `+=`), see HOST_CONTRACT.md step 3.
 - << Back / Ctrl+W fixed: pob_closeBuild pumps OnFrame (selftest close-build)
 
 **▶ Phase 6 (in progress).** Windows (Qt 6.11.1, msys2) now builds and gates everything through 6.2; the only Windows fix needed was `SocketGroupList.qml`'s `"file://" + "C:/..."` icon URL (now `file:///` for drive paths). Item drag-drop: `components/DragGhost.qml` (overlay drag payload `{kind,key,shift}`, DropArea key "Item") + `ItemListBox.qml`; the item DB list is pumped by `ItemDBPanel`'s job-scoped timer via `pob_itemsDBStep`. `Label` is ONE line (height = size): split multi-line text into a Repeater. Bridge `app/lua/pob_items.lua`. Traps found: legacy
