@@ -421,6 +421,8 @@ function CalcBreakdownClass:AddModSection(sectionData, modList)
 			row.sourceName = row.mod.source:match("Pantheon:(.+)")
 		elseif sourceType == "Spectre" then
 			row.sourceName = row.mod.source:match("Spectre:(.+)")
+		elseif sourceType == "Custom" then
+			row.sourceName = row.mod.source:match("Custom:(.+)")
 		end
 
 		if row.mod.flags ~= 0 or row.mod.keywordFlags ~= 0 then
@@ -474,6 +476,8 @@ function CalcBreakdownClass:AddModSection(sectionData, modList)
 					if not desc then
 						desc = "Skill type: "..(tag.neg and "Not " or "").."?"
 					end
+				elseif tag.type == "BaseFlag" then
+					desc = "Base flag: "..(tag.neg and "Not " or "")..self:FormatModName(tostring(tag.baseFlag))
 				elseif tag.type == "SlotNumber" then
 					desc = "When in slot #"..tag.num
 				elseif tag.type == "GlobalEffect" then
@@ -689,10 +693,11 @@ function CalcBreakdownClass:Draw(viewPort)
 	else
 		SetDrawColor(0.33, 0.66, 0.33)
 	end
-	DrawImage(nil, x, y, width, 2)
-	DrawImage(nil, x, y + height - 2, width, 2)
-	DrawImage(nil, x, y, 2, height)
-	DrawImage(nil, x + width - 2, y, 2, height)
+	local borderThickness = 2
+	DrawImage(nil, x, y, width, borderThickness)
+	DrawImage(nil, x, y + height - borderThickness, width, borderThickness)
+	DrawImage(nil, x, y, borderThickness, height)
+	DrawImage(nil, x + width - borderThickness, y, borderThickness, height)
 	SetDrawLayer(nil, 10)
 	self:DrawControls(viewPort)
 	-- Draw the sections

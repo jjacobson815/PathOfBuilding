@@ -25,6 +25,7 @@ manifest-updated.xml
 # GGPK Export
 src/Export/ggpk/metadata/
 src/Export/ggpk/data/
+src/Export/ggpk/art/
 src/Export/ggpk/*.exe
 src/Export/ggpk/*.dll
 
@@ -84,3 +85,5 @@ captures/
 # Leaked credentials / junk — DO NOT COMMIT (delete + rotate the key)
 /AQ.*.txt
 /$null
+
+src/poe_api_response.json
