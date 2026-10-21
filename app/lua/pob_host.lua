@@ -73,6 +73,7 @@ function SetClearColor(r, g, b, a) end
 function SetDrawLayer(layer, subLayer) end
 function SetViewport(x, y, width, height) end
 function SetDrawColor(r, g, b, a) end
+function GetDrawColor() return 1, 1, 1, 1 end
 function DrawImage(imgHandle, left, top, width, height, tcLeft, tcTop, tcRight, tcBottom) end
 function DrawImageQuad(imageHandle, x1, y1, x2, y2, x3, y3, x4, y4, s1, t1, s2, t2, s3, t3, s4, t4) end
 function DrawString(left, top, align, height, font, text) end
@@ -3769,7 +3770,11 @@ function pob_getShellState()
     pob_recalculate()
 
     if bm.controls and bm.controls.warnings then bm.controls.warnings.lines = { } end
-    local pointStr, pointTooltip = bm:EstimatePlayerProgress()
+    -- Since upstream c73045559 it returns nothing and stores the strings on
+    -- the point-display control instead.
+    bm:EstimatePlayerProgress()
+    local pointDisplay = bm.controls and bm.controls.pointDisplay or { }
+    local pointStr, pointTooltip = pointDisplay.str, pointDisplay.req
     local pointWarnings = { }
     if bm.controls and bm.controls.warnings then
         for _, line in ipairs(bm.controls.warnings.lines) do
@@ -6558,7 +6563,7 @@ function pob_selftestTreeVersionArt()
         return dimsMemo[p][1], dimsMemo[p][2]
     end
     local allOk = true
-    for _, ver in ipairs({ "3_16", "3_20", "3_25_ruthless", "3_28" }) do
+    for _, ver in ipairs({ "3_16", "3_20", "3_25_ruthless", "3_28", "3_29" }) do
         if treeVersions[ver] then
             pob_convertTree(ver, false, false)
             local spec = bm.spec
