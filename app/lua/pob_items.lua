@@ -50,7 +50,7 @@ end
 -- A real Tooltip filled by `fn`, marshalled as {size,text,center}|{sep,size}
 -- (same shape as pob_skills.lua tipLines).
 local function tipLines(fn)
-    local tip = new("Tooltip")
+    local tip = new("Tooltip"):Tooltip()
     local ok, err = pcall(fn, tip)
     if not ok then return { { size = 16, text = "^1Tooltip error: " .. tostring(err) } } end
     local lines = { }
@@ -395,7 +395,7 @@ end
 --   "rare"   key = item name (main.rareDB.list)
 --   "shared" key = 1-based index into main.sharedItemList
 -- DB and shared items are never mutated: every path that adds one to the
--- build copies it with new("Item", raw) first, as legacy does.
+-- build copies it with new("Item"):Item(raw) first, as legacy does.
 ---------------------------------------------------------------------------
 
 local function resolve(it, kind, key)
@@ -656,7 +656,7 @@ function pob_itemsCtrlClick(kind, key, shift)
         bm.buildFlag = true
         return done({ slotName = slotName }, EMIT_TREE)
     elseif kind == "unique" or kind == "rare" then
-        local newItem = new("Item", item.raw)
+        local newItem = new("Item"):Item(item.raw)
         newItem:NormaliseQuality()
         it:AddItem(newItem, true)
         local slotName = primarySlotFor(it, newItem, shift)
@@ -678,7 +678,7 @@ function pob_itemsOpenForEdit(kind, key)
     local item = it and resolve(it, kind, key)
     if not item then return fail("no such item") end
     if kind == "item" then
-        local newItem = new("Item", item:BuildRaw())
+        local newItem = new("Item"):Item(item:BuildRaw())
         newItem.id = item.id
         it:SetDisplayItem(newItem)
     else
@@ -813,7 +813,7 @@ function pob_itemsDropOnList(kind, key, index)
     local bm, it = ctx()
     local value = it and resolve(it, kind, key)
     if not value or kind == "item" then return fail("not a droppable item") end
-    local newItem = new("Item", value.raw)
+    local newItem = new("Item"):Item(value.raw)
     newItem:NormaliseQuality()
     index = tonumber(index)
     if index and (index < 1 or index > #it.itemOrderList + 1) then index = nil end
@@ -839,7 +839,7 @@ function pob_itemsDropOnSlot(slotName, kind, key)
     if value.id and it.items[value.id] == value then
         slot:SetSelItemId(value.id)
     else
-        local newItem = new("Item", value.raw)
+        local newItem = new("Item"):Item(value.raw)
         newItem:NormaliseQuality()
         it:AddItem(newItem, true)
         slot:SetSelItemId(newItem.id)
@@ -886,7 +886,7 @@ function pob_itemsDropOnShared(kind, key, index)
     local bm, it = ctx()
     local value = it and resolve(it, kind, key)
     if not value or kind == "shared" then return fail("not a droppable item") end
-    local newItem = new("Item", value:BuildRaw())
+    local newItem = new("Item"):Item(value:BuildRaw())
     if not value.id then newItem:NormaliseQuality() end
     local list = main.sharedItemList
     index = tonumber(index)
@@ -949,7 +949,7 @@ function pob_itemsShareSet(setIndex, at)
             if value ~= it.activeItemSet then slot = value[slotName] end
             if slot.selItemId ~= 0 then
                 local item = it.items[slot.selItemId]
-                local newItem = new("Item", item:BuildRaw())
+                local newItem = new("Item"):Item(item:BuildRaw())
                 if not value.id then newItem:NormaliseQuality() end
                 shared.slots[slotName] = newItem
             end
@@ -971,7 +971,7 @@ function pob_itemsImportSharedSet(sharedIndex, at)
     local itemSet = it:NewItemSet()
     itemSet.title = value.title
     for slotName, item in pairs(value.slots) do
-        local newItem = new("Item", item.raw)
+        local newItem = new("Item"):Item(item.raw)
         newItem:NormaliseQuality()
         it:AddItem(newItem, true)
         itemSet[slotName].selItemId = newItem.id
@@ -1311,7 +1311,13 @@ function pob_itemsCraftOpen(kind, slot)
         return captured
     end
     local arg = (kind == "enchant" or kind == "anoint") and slot or (kind == "corrupt" and "Corrupted" or nil)
-    local ok, err = pcall(it[opener], it, arg)
+    local ok, err
+    if kind == "implicit" then
+        -- Upstream 9e9d5a992 moved this popup out of ItemsTab into its own module.
+        ok, err = pcall(require("Modules.AddImplicitPopup").AddImplicitToDisplayItem, it, it.displayItem)
+    else
+        ok, err = pcall(it[opener], it, arg)
+    end
     main.OpenPopup = saved
     if not ok then craft = nil; return craftFail(tostring(err)) end
     if not captured then craft = nil; return craftFail("popup did not open") end
@@ -1435,7 +1441,7 @@ end
 function pob_itemsEditTextCheck(text, rarityIndex)
     local bm, it = ctx()
     if not it then return { valid = false, lines = { } } end
-    local item = new("Item", editTextRaw(text, rarityIndex))
+    local item = new("Item"):Item(editTextRaw(text, rarityIndex))
     if item.base then
         return { valid = true, lines = tipLines(function(tip) it:AddItemTooltip(tip, item, nil, true) end) }
     end
@@ -1456,7 +1462,7 @@ function pob_itemsEditTextSave(text, rarityIndex, alsoAdd)
     local bm, it = ctx()
     if not it then return fail("no build") end
     local raw = editTextRaw(text, rarityIndex)
-    if not new("Item", raw).base then return fail("The item is invalid.") end
+    if not new("Item"):Item(raw).base then return fail("The item is invalid.") end
     local id = it.displayItem and it.displayItem.id
     it:CreateDisplayItemFromRaw(raw, not it.displayItem)
     it.displayItem.id = id
@@ -1522,7 +1528,7 @@ function pob_selftestItemsSlots()
     local ok, err = pcall(function()
         -- Fixtures: a ring, a helmet, a one-hand sword, a flask.
         local function add(raw)
-            local item = new("Item", raw)
+            local item = new("Item"):Item(raw)
             if not item.base then error("fixture base missing: " .. raw:match("\n(.-)\n")) end
             item:NormaliseQuality()
             it:AddItem(item, true)
@@ -1689,7 +1695,7 @@ function pob_selftestItemsLists()
         local copied
         Copy = function(text) copied = text end   -- the real Copy() crashes pob-qt --headless
         local function add(raw)
-            local item = new("Item", raw)
+            local item = new("Item"):Item(raw)
             if not item.base then error("fixture base missing: " .. raw:match("\n(.-)\n")) end
             item:NormaliseQuality()
             it:AddItem(item, true)
@@ -2105,7 +2111,7 @@ function pob_selftestItemsCraft()
         -- Corrupt a rare belt.
         pob_itemsEditTextSave("Rarity: Rare\nCF Belt\nLeather Belt\n", 3, false)
         st = pob_itemsCraftOpen("corrupt", nil)
-        res.corruptOpened = st.open and st.title == "Corrupted Item" and st.controls.implicit1.shown
+        res.corruptOpened = st.open and st.title == "Corrupt Item" and st.controls.implicit1.shown
             and st.controls.implicit2.shown and not st.controls.implicit3.shown and not st.controls.implicits.shown
         pob_itemsCraftSet("implicit1", 2)
         local g = craft.controls.implicit1.list[2].mod.group
@@ -2149,7 +2155,7 @@ function pob_selftestItemsCraft()
         -- Add Implicit: Exarch replaces (Review Focus 4), Custom appends, blank adds nothing.
         pob_itemsEditTextSave("Rarity: Rare\nCF Helm2\nIron Hat\nSearing Exarch Item\n", 3, false)
         st = pob_itemsCraftOpen("implicit", nil)
-        res.implicitSources = table.concat(st.controls.source.list, ",") == "Searing Exarch,Delve,Custom"
+        res.implicitSources = table.concat(st.controls.source.list, ",") == "Searing Exarch,Custom"
         local function exarchCount()
             local n = 0
             for _, l in ipairs(it.displayItem.implicitModLines) do if l.exarch then n = n + 1 end end
@@ -2160,13 +2166,13 @@ function pob_selftestItemsCraft()
         pob_itemsCraftOpen("implicit", nil); pob_itemsCraftClick("save")
         res.eldritchReplaces = n1 > 0 and exarchCount() == n1
         pob_itemsCraftOpen("implicit", nil)
-        pob_itemsCraftSet("source", 3); pob_itemsCraftSet("custom", "+10 to Strength")
+        pob_itemsCraftSet("source", #craft.controls.source.list); pob_itemsCraftSet("custom", "+10 to Strength")
         local before = #it.displayItem.implicitModLines
         pob_itemsCraftClick("save")
         local last = it.displayItem.implicitModLines[#it.displayItem.implicitModLines]
         res.customImplicit = #it.displayItem.implicitModLines == before + 1 and last.line == "+10 to Strength" and last.custom == true
         pob_itemsCraftOpen("implicit", nil)
-        pob_itemsCraftSet("source", 3); pob_itemsCraftSet("custom", "   ")
+        pob_itemsCraftSet("source", #craft.controls.source.list); pob_itemsCraftSet("custom", "   ")
         before = #it.displayItem.implicitModLines
         pob_itemsCraftClick("save")
         res.blankCustomIgnored = #it.displayItem.implicitModLines == before
