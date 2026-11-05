@@ -9,8 +9,8 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 6 — Items Tab — Parts 6.1 + 6.2 DONE, 6.3 items 1-2 DONE, next 6.3 item 3 (affix dropdowns + custom / crucible popups)**
-**Handoff for the next agent: `port-plan/handoff/HANDOFF-phase6.md` (read it, then the phase file). Stopped at: 6.3 item 2 (craft popups: Enchant / Anoint / Corrupt / Add Implicit + influence, quality, catalyst, cluster sections) committed + pushed from the Windows clone (Windows gate green: `items-slots`, `items-lists`, `items-editor`, `items-craft`). Next: 6.3 item 3 — the legacy map for it is ItemsTab.lua:2973-3388 (custom modifier / crucible popups) plus the affix dropdowns at ~:1792-2224; reuse the craft-session capture engine in `pob_items.lua` (`pob_itemsCraftOpen` + name-driven `Set/Click/Tooltip`) for the popups.** (spec: `phases/PHASE-6-items-tab.md`).
+**ACTIVE: Phase 6 — Items Tab — Parts 6.1 + 6.2 DONE, 6.3 items 1-3 DONE, next 6.3 item 4 (craft-item popup)**
+**Handoff for the next agent: `port-plan/handoff/HANDOFF-phase6.md` (read it, then the phase file). Stopped at: 6.3 item 3 (affix dropdowns & roll sliders, custom modifier popup, crucible modifier popup, mod range sliders, interactive tooltip line disabling) committed to `cloud/phase-6` (Windows gate green: `items-slots` 31 flags, `items-lists` 44, `items-editor` 25, `items-craft` 43, `items-affix` 26). Next: Part 6.3 Item 4: Craft-item popup (rarity/title/type/base with live tooltip) + create/edit-text popup.** (spec: `phases/PHASE-6-items-tab.md`).
 Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → **6** → 7 → Phase 3 long tail
 → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.
 

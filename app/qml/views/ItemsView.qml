@@ -79,12 +79,15 @@ Item {
     // Double-click on any list row: open it as the display item and scroll
     // it into view (SetDisplayItem: snapHScroll = "RIGHT").
     function openEdit(kind, key) { call("pob_itemsOpenForEdit", [kind, key]) }
-    // Craft buttons -> popups (Part 6.3 item 2).
+    // Craft buttons -> popups (Part 6.3 items 2-3).
     function openCraft(kind, slot) {
         const p = kind === "enchant" ? craftEnchant : kind === "anoint" ? craftAnoint
-                : kind === "corrupt" ? craftCorrupt : craftImplicit
+                : kind === "corrupt" ? craftCorrupt : kind === "custom" ? craftCustom
+                : kind === "crucible" ? craftCrucible : craftImplicit
         p.openCraft(kind, slot)
     }
+    // Absolute paths from the bridge; Windows ones ("C:/...") need a third slash.
+    function fileUrl(p) { return p ? (p.charAt(0) === "/" ? "file://" : "file:///") + p : "" }
     function snapRight() { Qt.callLater(function () { hflick.contentX = Math.max(0, hflick.contentWidth - hflick.width) }) }
 
     // ItemListControl:OnSelDelete — ask only when the item is in use.
@@ -434,6 +437,32 @@ Item {
                 readonly property var quality: ed.quality ? ed.quality : ({})
                 readonly property var catalyst: ed.catalyst ? ed.catalyst : ({})
                 readonly property var cluster: ed.cluster ? ed.cluster : ({})
+                readonly property var affix: ed.affix ? ed.affix : ({})
+                readonly property var affixRows: affix.rows && affix.rows.length !== undefined ? affix.rows : []
+                readonly property var custom: ed.custom ? ed.custom : ({})
+                readonly property var customRows: custom.rows && custom.rows.length !== undefined ? custom.rows : []
+                readonly property var range: ed.range ? ed.range : ({})
+                readonly property var stackedRows: range.stacked && range.stacked.length !== undefined ? range.stacked : []
+
+                // Sliders send coalesced (Qt.callLater): every value re-crafts the
+                // item and rebuilds its tooltip, so one send per event-loop pass.
+                function sendSlider(slider, name) {
+                    if (slider.pushing) return
+                    const first = slider.pending < 0
+                    slider.pending = slider.value
+                    if (first) Qt.callLater(function () {
+                        const v = slider.pending
+                        slider.pending = -1
+                        if (v >= 0) itemsView.call("pob_itemsDisplaySetControl", [name, v])
+                    })
+                }
+                function pushSlider(slider, val, divCount) {
+                    if (slider.dragging || val === undefined) return
+                    slider.pushing = true
+                    if (divCount !== undefined) slider.divCount = divCount
+                    slider.value = val
+                    slider.pushing = false
+                }
 
                 // Imperative pushes: EditControl.text / Slider.value break an
                 // outside binding on the first user edit, so each refresh writes them.
@@ -466,6 +495,13 @@ Item {
                             clusterSlider.lastSent = cl.val
                             clusterSlider.pushing = false
                         }
+                    }
+                    const af = e.affix || ({}), rg = e.range || ({})
+                    if (af.sortShown === true) { sortDrop.model = af.sortList; sortDrop.currentIndex = af.sortSel - 1 }
+                    if (rg.shown === true) {
+                        rangeDrop.model = rg.list; rangeDrop.currentIndex = rg.sel - 1
+                        mutateBox.state = rg.mutate === true
+                        pushSlider(rangeSlider, rg.val)
                     }
                 }
                 onEdChanged: pushSections()
@@ -688,6 +724,176 @@ Item {
                             size: 14
                         }
                     }
+                    // Modifier sorting (ItemsTab.lua:720-728): re-sorts every affix
+                    // list by the stat picked (one calc per tier series, as legacy).
+                    Item {
+                        width: 400
+                        height: displayPane.affix.sortShown === true ? 28 : 0
+                        visible: height > 0
+                        Widgets.Label { id: sortLbl; y: 2; label: "^7Modifier sorting:"; size: 16 }
+                        Widgets.DropDownControl {
+                            id: sortDrop
+                            x: sortLbl.width + 4
+                            width: 200; height: 20
+                            onSelected: function (i) { itemsView.call("pob_itemsDisplaySetControl", ["craftingSorting", i + 1]) }
+                        }
+                    }
+                    // Crafted affixes (ItemsTab.lua:730-984): one tier-series
+                    // dropdown per prefix / suffix slot, each with its roll slider.
+                    Item {
+                        width: 460
+                        height: affixCol.height > 0 ? affixCol.height + 6 : 0
+                        visible: height > 0
+                        Column {
+                            id: affixCol
+                            Repeater {
+                                // A COUNT model: the rows array is new on every refresh,
+                                // and a model over it would recreate a slider mid-drag.
+                                model: displayPane.affixRows.length
+                                delegate: Widgets.ItemAffixRow { rec: displayPane.affixRows[index] || ({}) }
+                            }
+                        }
+                    }
+                    // Custom modifiers (ItemsTab.lua:986-1010, rows :2430-2477):
+                    // "Add modifier..." / "Add Crucible mod..." and a Remove row for
+                    // each crafted, custom or crucible line.
+                    Item {
+                        id: customSec
+                        readonly property var cu: displayPane.custom
+                        width: 470
+                        height: (cu.addShown === true || cu.crucibleShown === true) ? 28 + displayPane.customRows.length * 22 : 0
+                        visible: height > 0
+                        Widgets.Button {
+                            visible: customSec.cu.addShown === true
+                            width: 120; height: 20
+                            label: "Add modifier..."
+                            onClicked: itemsView.openCraft("custom", 1)
+                        }
+                        Widgets.Button {
+                            visible: customSec.cu.crucibleShown === true
+                            x: customSec.cu.addShown === true ? 128 : 0
+                            width: 150; height: 20
+                            label: "Add Crucible mod..."
+                            onClicked: itemsView.openCraft("crucible", 1)
+                        }
+                        Repeater {
+                            model: displayPane.customRows.length
+                            delegate: Item {
+                                readonly property var row: displayPane.customRows[index] || ({})
+                                y: (index + 1) * 22 + 4
+                                width: 470; height: 20
+                                Widgets.Button {
+                                    width: 70; height: 20
+                                    label: "Remove"
+                                    onClicked: itemsView.call("pob_itemsDisplayRemoveCustom", [index + 1])
+                                }
+                                Widgets.Label { x: 75; y: 2; label: row.kind || ""; size: 16 }
+                                // Legacy cuts the text at 330 px (TextMetrics); Qt paints
+                                // wider, so the box clips too (invariant #8).
+                                Widgets.Label { x: 135; y: 2; width: 330; clip: true; label: row.text || ""; size: 16 }
+                            }
+                        }
+                    }
+                    // Modifier ranges (ItemsTab.lua:1012-1179): a line dropdown, the
+                    // Foulborn swap box and a roll slider; with the Options "Show all
+                    // item affixes sliders" a unique stacks one row per line instead.
+                    Item {
+                        id: rangeSec
+                        readonly property var rg: displayPane.range
+                        readonly property var rows: displayPane.stackedRows
+                        // Row k sits max(22, 14 * lines) below row k-1 (ItemsTab.lua:1118-1122).
+                        readonly property var rowY: {
+                            const out = []
+                            let y = 2
+                            for (let k = 0; k < rows.length; k++) {
+                                out.push(y)
+                                y += Math.max(22, 14 * (rows[k].lines && rows[k].lines.length ? rows[k].lines.length : 1))
+                            }
+                            out.push(y)
+                            return out
+                        }
+                        width: 470
+                        height: rg.shown === true ? 28 : (rows.length > 0 ? rowY[rows.length] + 2 : 0)
+                        visible: height > 0
+
+                        Widgets.DropDownControl {
+                            id: rangeDrop
+                            visible: rangeSec.rg.shown === true
+                            width: 350; height: 18
+                            onSelected: function (i) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemRangeLine", i + 1]) }
+                        }
+                        Image {
+                            visible: rangeSec.rg.shown === true && rangeSec.rg.mutateShown === true
+                            x: 351; y: -1
+                            width: 20; height: 20
+                            source: rangeSec.rg.mutateShown === true ? itemsView.fileUrl(rangeSec.rg.icon) : ""
+                        }
+                        Widgets.CheckBox {
+                            id: mutateBox
+                            visible: rangeSec.rg.shown === true && rangeSec.rg.mutateShown === true
+                            x: 375
+                            width: 18; height: 18
+                            onToggled: function (s) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemMutatedCheckbox", s]) }
+                        }
+                        Widgets.Slider {
+                            id: rangeSlider
+                            property bool pushing: false
+                            property real pending: -1
+                            visible: rangeSec.rg.sliderShown === true
+                            // Left of a hidden Foulborn box the slider takes its place
+                            // (collapsed anchor, ItemsTab.lua:1069-1077).
+                            x: rangeSec.rg.mutateShown === true ? 397 : 358
+                            width: 100; height: 18
+                            onValueChanged: displayPane.sendSlider(rangeSlider, "displayItemRangeSlider")
+                        }
+
+                        Repeater {
+                            model: rangeSec.rows.length
+                            delegate: Item {
+                                id: srow
+                                readonly property var r: rangeSec.rows[index] || ({})
+                                readonly property real lineX: r.sliderShown === true ? sslider.x + 104 : (r.mutateShown === true ? 46 : 0)
+                                y: rangeSec.rowY[index] || 0
+                                width: 470
+                                height: Math.max(22, 14 * (r.lines && r.lines.length ? r.lines.length : 1))
+                                function push() {
+                                    sbox.state = r.mutate === true
+                                    displayPane.pushSlider(sslider, r.val)
+                                }
+                                onRChanged: push()
+                                Component.onCompleted: push()
+                                Image {
+                                    visible: srow.r.mutateShown === true
+                                    width: 20; height: 20
+                                    source: srow.r.mutateShown === true ? itemsView.fileUrl(rangeSec.rg.icon) : ""
+                                }
+                                Widgets.CheckBox {
+                                    id: sbox
+                                    visible: srow.r.mutateShown === true
+                                    x: 24
+                                    width: 18; height: 18
+                                    onToggled: function (s) { itemsView.call("pob_itemsDisplaySetControl", ["displayItemStackedMutatedCheckbox" + srow.r.i, s]) }
+                                }
+                                Widgets.Slider {
+                                    id: sslider
+                                    property bool pushing: false
+                                    property real pending: -1
+                                    visible: srow.r.sliderShown === true
+                                    x: srow.r.mutateShown === true ? 46 : 0
+                                    width: 100; height: 18
+                                    onValueChanged: displayPane.sendSlider(sslider, "displayItemStackedRangeSlider" + srow.r.i)
+                                }
+                                Column {
+                                    x: srow.lineX
+                                    y: 0
+                                    Repeater {
+                                        model: srow.r.lines && srow.r.lines.length !== undefined ? srow.r.lines : []
+                                        delegate: Widgets.Label { label: modelData; size: 14 }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Rectangle {
@@ -715,6 +921,14 @@ Item {
                                     width: tipCol.width; height: 1
                                     color: theme.border
                                 }
+                                // A modifier line: hover highlight, any click disables /
+                                // re-enables it (ItemsTab.lua:1529-1548); disabled lines
+                                // are struck through (Tooltip.lua:302).
+                                Rectangle {
+                                    anchors.fill: parent
+                                    visible: !!ln.toggle && lineMa.containsMouse
+                                    color: Qt.rgba(1, 1, 1, 0.15)
+                                }
                                 Widgets.Label {
                                     id: lineLbl
                                     visible: !ln.sep
@@ -722,6 +936,15 @@ Item {
                                     horizontalAlignment: ln.center ? Text.AlignHCenter : Text.AlignLeft
                                     label: ln.sep ? "" : (ln.text.length > 0 ? ln.text : " ")
                                     size: ln.size || 14
+                                    font.strikeout: !!ln.strike
+                                }
+                                MouseArea {
+                                    id: lineMa
+                                    anchors.fill: parent
+                                    enabled: !!ln.toggle
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                                    onClicked: itemsView.call("pob_itemsDisplayToggleLine", [index + 1])
                                 }
                             }
                         }
@@ -798,6 +1021,8 @@ Item {
     Widgets.CraftAnointPopup { id: craftAnoint; parent: itemsView }
     Widgets.CraftCorruptPopup { id: craftCorrupt; parent: itemsView }
     Widgets.CraftImplicitPopup { id: craftImplicit; parent: itemsView }
+    Widgets.CraftCustomPopup { id: craftCustom; parent: itemsView }
+    Widgets.CraftCruciblePopup { id: craftCrucible; parent: itemsView }
     Widgets.SpecManagePopup {
         id: specManage
         parent: itemsView

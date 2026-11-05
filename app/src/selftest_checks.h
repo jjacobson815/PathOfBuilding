@@ -969,6 +969,8 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     if (!pob_run_lua_check(engine, "pob_selftestItemsEditor", "items-editor")) return false;
     // Phase 6 Part 6.3 item 2: craft controls + the four craft popups.
     if (!pob_run_lua_check(engine, "pob_selftestItemsCraft", "items-craft")) return false;
+    // Phase 6 Part 6.3 item 3: affix dropdowns, custom/crucible popups, range sliders, mod toggling.
+    if (!pob_run_lua_check(engine, "pob_selftestItemsAffix", "items-affix")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

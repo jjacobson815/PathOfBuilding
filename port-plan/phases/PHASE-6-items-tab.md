@@ -1,6 +1,6 @@
 # Phase 6 — Items Tab (the largest tab)
 
-**Status:** IN PROGRESS — Parts 6.1 + 6.2 done, 6.3 items 1-2 done (6.1: 2026-09-29 cloud session; 6.2 + 6.3.1: 2026-09-29 Windows session; 6.3.2: 2026-10-16 Windows session; branch `cloud/phase-6`). Next: 6.3 item 3 (affix dropdowns + custom / crucible popups).
+**Status:** IN PROGRESS — Parts 6.1 + 6.2 done, 6.3 items 1-3 done (6.1: 2026-09-29 cloud session; 6.2 + 6.3.1: 2026-09-29 Windows session; 6.3.2: 2026-10-16 Windows session; 6.3.3: 2026-11-05 Windows session; branch `cloud/phase-6`). Next: 6.3 item 4 (craft-item popup).
 **Goal:** Port the item planner: item sets, the full slot panel, item/DB/shared
 lists with the drag-drop matrix, and the deep display-item editor (variants,
 sockets, enchant/anoint/corrupt/implicit, influences, catalysts, cluster crafting,
@@ -47,7 +47,7 @@ tooltip. This is `ItemsTab.lua` — 4771 lines, the biggest single view.
   (implicit selection incl. temple double-corrupt), **Add Implicit** (searchable
   incl. eldritch/synth), influence dropdowns (2 of 6), quality + catalyst + catalyst
   quality, cluster-jewel skill dropdown + node-count slider. (L)
-- [ ] Crafted-item **prefix/suffix affix dropdowns** (up to 6, tier lists with tag/
+- [x] Crafted-item **prefix/suffix affix dropdowns** (up to 6, tier lists with tag/
   level/cluster-notable tooltips + stat-diff sorting) each with a roll-range slider;
   **Add modifier** custom popup (bench/essence/prefix/suffix/veiled/delve sources,
   sort-by-power option); **Add Crucible mod**; mod-range line dropdown + slider or
@@ -404,3 +404,24 @@ mutation, then restored):
   still reads as 0 (unchanged difference) and shows "0" once it loses focus.
 - The cluster slider sends only on a change of detent (legacy re-crafts on every
   continuous val change; the result is identical).
+
+
+## Session log — Thu Nov 5 2026 (Part 6.3, item 3; Windows session)
+
+Implemented Part 6.3 item 3: crafted affix dropdowns & roll sliders, custom modifier popup, crucible modifier popup, single-line and unique stacked range sliders, and interactive tooltip line strikeout toggling.
+
+- **Bridge (`app/lua/pob_items.lua`):**
+  - Extended `CRAFT_OPENERS` and `craftButtonName` with `"custom"` (`AddCustomModifierToDisplayItem`, 710x105) and `"crucible"` (`AddCrucibleModifierToDisplayItem`, 710x185).
+  - Implemented verbatim port of `verifyRange(range, index, drop, item)` and exported `pob_verifyRange`.
+  - Wired live closures for `displayItemAffix1..9`, `displayItemAffixRange1..9`, `craftingSorting`, `displayItemRangeLine`, `displayItemRangeSlider`, and `displayItemStackedRangeSlider1..20`.
+  - Implemented `pob_itemsDisplayToggleLine(i)` and `linkTooltipModLines(it)` to connect tooltip modifier lines with live `modLine` structures and toggle their `disabled` state with strikethrough styling.
+  - Implemented `pob_itemsDisplayRemoveCustom(i)` and `customRecord(it)`.
+- **QML (`app/qml/`):**
+  - Added `CraftCustomPopup.qml` and `CraftCruciblePopup.qml` wrapping the captured craft engine.
+  - Registered popups in `app/qml/qml.qrc` and instantiated in `app/qml/views/ItemsView.qml`.
+  - Enabled Column 3 display pane with `ItemAffixRow.qml`, custom modifier remove rows, and mod range sliders.
+- **Selftest & Verification Gate:**
+  - Registered `items-affix` in `app/src/selftest_checks.h` and implemented `pob_selftestItemsAffix` in `app/lua/pob_items.lua`.
+  - All 26 flags passed: `affixDropTooltip`, `affixListPopulated`, `affixPickApplied`, `affixRowsCount`, `affixSliderMutates`, `affixSliderTooltip`, `crucibleAddShown`, `crucibleModAdded`, `crucibleModRemoved`, `cruciblePopupOpened`, `crucibleRowListed`, `customAddShown`, `customFieldShown`, `customModAdded`, `customModRemoved`, `customPopupOpened`, `customRowListed`, `rangeShown`, `rangeSliderMutatesRoll`, `restored`, `stackedRowsShown`, `stackedSliderMutatesRoll`, `toggleLineFound`, `toggleLineRestored`, `toggleLineStruck`, `verifyRangeFlipped`, `verifyRangeIdentity`.
+  - Negative test teeth verification confirmed: breaking `verifyRange` caused `verifyRangeFlipped` to fail and `pob-selftest` to exit with code 1; reverting restored clean exit code 0.
+  - Both `pob-selftest.exe` and `pob-qt.exe --headless` exit with code 0.

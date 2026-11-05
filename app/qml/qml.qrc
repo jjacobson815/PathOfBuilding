@@ -56,6 +56,9 @@
         <file>components/CraftAnointPopup.qml</file>
         <file>components/CraftCorruptPopup.qml</file>
         <file>components/CraftImplicitPopup.qml</file>
+        <file>components/CraftCustomPopup.qml</file>
+        <file>components/CraftCruciblePopup.qml</file>
+        <file>components/ItemAffixRow.qml</file>
         <file>components/SocketGroupList.qml</file>
         <file>components/GemSelect.qml</file>
         <file>components/TreeImportPopup.qml</file>

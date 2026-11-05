@@ -449,7 +449,12 @@ local dispStamp = { item = nil, n = 0 }
 local VARIANT_CONTROLS = { "displayItemVariant", "displayItemAltVariant", "displayItemAltVariant2",
     "displayItemAltVariant3", "displayItemAltVariant4", "displayItemAltVariant5" }
 
+-- Crafted affix rows (ItemsTab.lua:731 maxModCount) and stacked range rows
+-- (ItemsTab.lua:1097).
+local AFFIX_MAX, STACKED_MAX = 9, 20
+
 local function shownCtl(ctl)
+    if not ctl then return false end
     local ok, shown = pcall(ctl.IsShown, ctl)
     return ok and shown and true or false
 end
@@ -507,6 +512,110 @@ local function ctlRecord(ctl)
         rec.sub = { }
         for name, sub in pairs(ctl.controls or { }) do
             if type(name) == "string" and type(sub) == "table" and sub._className then rec.sub[name] = ctlRecord(sub) end
+        end
+    end
+    return rec
+end
+
+local function labelOf(ctl)
+    if not ctl then return "" end
+    local ok, label = pcall(ctl.GetProperty, ctl, "label")
+    return ok and tostring(label or "") or ""
+end
+
+-- Crafted affixes (ItemsTab.lua:720-984): the "Modifier sorting:" dropdown and
+-- one row per shown displayItemAffixN, read back from the LIVE controls that
+-- UpdateAffixControls (ItemsTab.lua:2197-2427) fills. Rows are tier series;
+-- the roll slider spans every tier of the picked series.
+local function affixRecord(it)
+    local c = it.controls
+    local rows = { }
+    for i = 1, AFFIX_MAX do
+        local drop, slider = c["displayItemAffix" .. i], c["displayItemAffixRange" .. i]
+        if shownCtl(drop) then
+            local wok, width = pcall(slider.GetProperty, slider, "width")
+            rows[#rows + 1] = {
+                n = i,
+                label = labelOf(c["displayItemAffixLabel" .. i]),
+                list = dropLabels(drop.list),
+                sel = drop.selIndex or 1,
+                sliderShown = shownCtl(slider),
+                val = slider.val or 0,
+                divCount = slider.divCount or 0,
+                -- 300 wide over tiers, 100 for a single tier (ItemsTab.lua:943-945)
+                sliderWidth = wok and tonumber(width) or 100,
+                rollLabel = labelOf(c["displayItemAffixRangeLabel" .. i]),
+            }
+        end
+    end
+    local sortCtl = c.craftingSorting
+    return {
+        sortShown = shownCtl(sortCtl),
+        sortList = dropLabels(sortCtl and sortCtl.list),
+        sortSel = sortCtl and sortCtl.selIndex or 1,
+        rows = rows,
+    }
+end
+
+-- Custom / crafted / crucible modifier rows with their Remove buttons
+-- (ItemsTab.lua:986-1010; UpdateCustomControls :2430-2477 builds the rows and
+-- truncates each label with DrawStringCursorIndex).
+local function customRecord(it)
+    local c, d = it.controls, it.displayItem
+    local rows = { }
+    for i = 1, d.customCount or 0 do
+        rows[i] = {
+            kind = labelOf(c["displayItemCustomModifierLabel" .. i]),
+            text = labelOf(c["displayItemCustomModifier" .. i]),
+        }
+    end
+    return {
+        addShown = shownCtl(c.displayItemAddCustom),
+        crucibleShown = shownCtl(c.displayItemAddCrucible),
+        rows = rows,
+    }
+end
+
+-- Modifier ranges (ItemsTab.lua:1012-1179): a line dropdown + Foulborn box +
+-- slider, or, with the "Show all item affixes sliders" option on a unique, up
+-- to 20 stacked rows. The legacy shown() closures also copy the line's
+-- mutated flag / range into the box / slider, so they run before those reads.
+local function rangeRecord(it)
+    local c = it.controls
+    local box, slider = c.displayItemMutatedCheckbox, c.displayItemRangeSlider
+    local rline = c.displayItemRangeLine
+    local rec = {
+        shown = shownCtl(rline),
+        list = dropLabels(rline and rline.list),
+        sel = rline and rline.selIndex or 1,
+        mutateShown = shownCtl(box),
+        sliderShown = shownCtl(slider),
+        -- drawn left of each Foulborn box (ItemsTab.lua:1029-1030, 1050-1056)
+        icon = _SRC_DIR .. "/Assets/breachicon.png",
+        stacked = { },
+    }
+    rec.mutate = (box and box.state) and true or false
+    rec.val = (slider and slider.val) or 0
+    for i = 1, STACKED_MAX do
+        local sbox, sslider = c["displayItemStackedMutatedCheckbox" .. i], c["displayItemStackedRangeSlider" .. i]
+        local boxShown, sliderShown = shownCtl(sbox), shownCtl(sslider)
+        if boxShown or sliderShown then
+            -- One colour code, then main:WrapString lines joined by "\n"
+            -- (ItemsTab.lua:1165-1175); each display line keeps the colour.
+            local text = labelOf(c["displayItemStackedRangeLine" .. i])
+            local colour, body = text:match("^(%^x%x%x%x%x%x%x)(.*)$")
+            if not colour then colour, body = text:match("^(%^%d)(.*)$") end
+            colour, body = colour or "", body or text
+            local lines = { }
+            for line in (body .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = colour .. line end
+            rec.stacked[#rec.stacked + 1] = {
+                i = i,
+                mutateShown = boxShown,
+                mutate = (sbox and sbox.state) and true or false,
+                sliderShown = sliderShown,
+                val = sslider.val or 0,
+                lines = lines,
+            }
         end
     end
     return rec
@@ -571,10 +680,41 @@ local function editorRecord(it)
             minNodes = d.clusterJewel and d.clusterJewel.minNodes,
             maxNodes = d.clusterJewel and d.clusterJewel.maxNodes,
         },
+        affix = affixRecord(it),
+        custom = customRecord(it),
+        range = rangeRecord(it),
     }
 end
 
 -- The display item (the Part 6.3 editor).
+local function linkTooltipModLines(it)
+    local d = it and it.displayItem
+    local tt = it and it.displayItemTooltip
+    if not (d and tt and tt.lines) then return end
+    local allMods = { }
+    for _, modList in ipairs{ d.enchantModLines, d.scourgeModLines, d.implicitModLines, d.explicitModLines, d.crucibleModLines } do
+        if modList then
+            for _, ml in ipairs(modList) do
+                if not d.CheckModLineVariant or d:CheckModLineVariant(ml) then
+                    local f = itemLib.formatModLine(ml)
+                    allMods[#allMods + 1] = { modLine = ml, formatted = f, plain = StripEscapes(f) }
+                end
+            end
+        end
+    end
+    for _, line in ipairs(tt.lines) do
+        if line.text then
+            local p = StripEscapes(line.text)
+            for _, m in ipairs(allMods) do
+                if not m.matched and (line.text == m.formatted or p == m.plain) then
+                    line.modLine = m.modLine
+                    m.matched = true
+                    break
+                end
+            end
+        end
+    end
+end
 local function displayRecord(it)
     local d = it.displayItem
     if not d then return { shown = false } end
@@ -582,12 +722,16 @@ local function displayRecord(it)
         it:UpdateDisplayItemTooltip()
         markDisplayFresh(it)
     end
+    linkTooltipModLines(it)
     local lines = { }
     for _, l in ipairs(it.displayItemTooltip.lines or { }) do
         if l.text == nil then
             lines[#lines + 1] = { sep = true, size = l.size or 10 }
         else
-            lines[#lines + 1] = { size = l.size or 14, text = l.text, center = (l.center or it.displayItemTooltip.center) and true or false }
+            lines[#lines + 1] = { size = l.size or 14, text = l.text, center = (l.center or it.displayItemTooltip.center) and true or false,
+                -- A modifier line: a click disables / re-enables it (ItemsTab.lua:1529-1548),
+                -- a disabled one is struck through (Tooltip.lua:302).
+                toggle = l.modLine ~= nil, strike = (l.modLine and l.modLine.disabled) and true or false }
         end
     end
     if dispStamp.item ~= d then dispStamp.item, dispStamp.n = d, dispStamp.n + 1 end
@@ -1169,6 +1313,63 @@ function pob_itemsDisplayAddSocket()
     return displayEdited(it)
 end
 
+-- Flips range if it will form discontinuous values across adjacent tier series (ItemsTab.lua:694-733)
+local function verifyRange(range, index, drop, item)
+    index = tonumber(index) or 1
+    range = tonumber(range) or 0.5
+    item = item or (drop and drop.itemsTab and drop.itemsTab.displayItem)
+    if not item then
+        local _, it = ctx()
+        item = it and it.displayItem
+    end
+    local dropList = drop and drop.list and drop.list[drop.selIndex]
+    local modList = dropList and dropList.modList
+    if not (modList and item and item.affixes) then return range end
+
+    local priorMod = index - 1 > 0 and item.affixes[modList[index - 1]] or nil
+    local nextMod = index + 1 < #modList and item.affixes[modList[index + 1]] or nil
+    local function flipRange(modA, modB) -- assumes all pairs are ordered the same
+        local function getMinMax(mod) -- gets first valid range from a mod
+            for _, line in ipairs(mod) do
+                local min, max = line:match("%((%d[%d%.]*)%-(%d[%d%.]*)%)")
+                if min and max then return tonumber(min), tonumber(max) end
+            end
+        end
+
+        local minA, maxA = getMinMax(modA)
+        local minB, maxB = getMinMax(modB)
+
+        if not minA or not minB or not maxA or not maxB then
+            return false
+        end
+
+        local allInts = minA == math.floor(minA) and maxA == math.floor(maxA) and minB == math.floor(minB) and maxB == math.floor(maxB) -- if the mod goes in steps that aren't 1, then the code below this doesn't work
+        if (minA and minB and maxA and maxB and allInts) then
+            if (minA < minB) then -- ascending
+                return minA + 1 == maxB
+            else -- descending
+                return minA - 1 == maxB
+            end
+        end
+        return false
+    end
+
+    if priorMod then
+        if flipRange(priorMod, item.affixes[modList[index]]) then
+            range = 1 - range
+        end
+    elseif nextMod then
+        if flipRange(item.affixes[modList[index]], nextMod) then
+            range = 1 - range
+        end
+    end
+    return range
+end
+
+function pob_verifyRange(range, index, drop, item)
+    return verifyRange(range, index, drop, item)
+end
+
 -- Set a live control's state, then run its own closure (selFunc / changeFunc),
 -- which is what a user click / keystroke does. Returns ok, err.
 local function setCtl(ctl, value)
@@ -1183,8 +1384,14 @@ local function setCtl(ctl, value)
             if ctl.selFunc then ctl.selFunc(i, ctl.list[i]) end
         end
     elseif kind == "check" then
-        ctl.state = value and true or false
-        if ctl.changeFunc then ctl.changeFunc(ctl.state) end
+        -- A click always flips the box (CheckBoxControl:OnKeyUp), so a value
+        -- equal to the current state is a stale request, not a click. Legacy
+        -- Foulborn boxes toggle the line whatever state they are handed.
+        local state = value and true or false
+        if state ~= (ctl.state and true or false) then
+            ctl.state = state
+            if ctl.changeFunc then ctl.changeFunc(ctl.state) end
+        end
     elseif kind == "edit" then
         local buf = tostring(value or "")
         -- EditControl:Insert (EditControl.lua:165-171): characters matching
@@ -1199,7 +1406,9 @@ local function setCtl(ctl, value)
     elseif kind == "slider" then
         local v = tonumber(value)
         if not v then return false, "bad value" end
-        ctl.val = math.max(0, math.min(1, v))
+        -- SliderControl:SetVal (SliderControl.lua): clamp, and changeFunc runs.
+        v = math.max(0, math.min(1, v))
+        ctl.val = v
         if ctl.changeFunc then ctl.changeFunc(ctl.val) end
     elseif kind == "list" then
         local i = tonumber(value)
@@ -1214,10 +1423,23 @@ end
 
 local SECTION_CONTROLS = { "displayItemInfluence", "displayItemInfluence2", "displayItemQualityEdit",
     "displayItemCatalyst", "displayItemCatalystQualityEdit", "displayItemClusterJewelSkill",
-    "displayItemClusterJewelNodeCount" }
+    "displayItemClusterJewelNodeCount",
+    -- Part 6.3 item 3: modifier sorting, affixes + rolls, range lines (incl. Foulborn).
+    "craftingSorting", "displayItemRangeLine", "displayItemMutatedCheckbox", "displayItemRangeSlider" }
+for i = 1, AFFIX_MAX do
+    t_insert(SECTION_CONTROLS, "displayItemAffix" .. i)
+    t_insert(SECTION_CONTROLS, "displayItemAffixRange" .. i)
+end
+for i = 1, STACKED_MAX do
+    t_insert(SECTION_CONTROLS, "displayItemStackedMutatedCheckbox" .. i)
+    t_insert(SECTION_CONTROLS, "displayItemStackedRangeSlider" .. i)
+end
 
--- Influence / quality / catalyst / cluster-jewel controls of the editor panel
--- (ItemsTab.lua:547-673). `value` is a 1-based index, text, or 0..1 slider value.
+-- Editor controls of the display item (ItemsTab.lua:581-1179): influence /
+-- quality / catalyst / cluster jewel, modifier sorting, the affix dropdowns and
+-- their roll sliders, the range line dropdown / Foulborn checkbox / slider and
+-- the stacked range rows. `value` is a 1-based index, a check state, text, or a
+-- 0..1 slider value.
 function pob_itemsDisplaySetControl(name, value)
     local bm, it = ctx()
     if not (it and it.displayItem) then return fail("no display item") end
@@ -1226,7 +1448,79 @@ function pob_itemsDisplaySetControl(name, value)
     if not (ctl and shownCtl(ctl)) then return fail("control hidden") end
     local ok, err = setCtl(ctl, value)
     if not ok then return fail(err) end
+    local affixRangeIdx = name:match("^displayItemAffixRange(%d+)$")
+    if affixRangeIdx then
+        local drop = it.controls["displayItemAffix" .. affixRangeIdx]
+        if drop and drop.outputTable and drop.outputIndex and drop.list and drop.list[drop.selIndex] then
+            local affix = it.displayItem[drop.outputTable][drop.outputIndex]
+            if affix and ctl.GetDivVal then
+                local idx, r = ctl:GetDivVal(ctl.val)
+                affix.range = verifyRange(r, idx, drop, it.displayItem)
+                it.displayItem:Craft()
+                it:UpdateDisplayItemTooltip()
+            end
+        end
+    end
     return displayEdited(it)
+end
+
+-- Hover text of an editor control: an affix dropdown row (`index`; tiers,
+-- level, tags, cluster notable or "Adding this mod will give:") or a roll
+-- slider at `val` (the value under the cursor, or the live value while
+-- dragging, as SliderControl:Draw passes it). The legacy tooltipFuncs clear
+-- themselves while another control holds the selection, so it is lifted for
+-- the call.
+function pob_itemsDisplayTooltip(name, index, val)
+    local bm, it = ctx()
+    if not (it and it.displayItem and isValueInArray(SECTION_CONTROLS, name)) then return { lines = { } } end
+    local ctl = it.controls[name]
+    if not (ctl and ctl.tooltipFunc and shownCtl(ctl)) then return { lines = { } } end
+    local kind = ctlKind(ctl)
+    index = tonumber(index)
+    local savedSel = it.selControl
+    it.selControl = nil
+    local lines = tipLines(function(tip)
+        if kind == "drop" and index and ctl.list[index] then
+            ctl.tooltipFunc(tip, "HOVER", index, ctl.list[index])
+        elseif kind == "slider" then
+            ctl.tooltipFunc(tip, math.max(0, math.min(1, tonumber(val) or ctl.val or 0)))
+        end
+    end)
+    it.selControl = savedSel
+    return { lines = lines }
+end
+
+-- "Remove" on custom modifier row i (UpdateCustomControls' onClick,
+-- ItemsTab.lua:2456-2466): legacy re-creates the display item from its raw
+-- text, keeping the id.
+function pob_itemsDisplayRemoveCustom(i)
+    local bm, it = ctx()
+    local d = it and it.displayItem
+    i = tonumber(i)
+    if not (d and i and i >= 1 and i <= (d.customCount or 0)) then return fail("bad row") end
+    local btn = it.controls["displayItemCustomModifierRemove" .. i]
+    if not (btn and btn.onClick) then return fail("bad row") end
+    btn.onClick()
+    return displayEdited(it)
+end
+
+-- A click on a modifier line of the display tooltip disables / re-enables it
+-- (ItemsTab:Draw "Toggle mods", ItemsTab.lua:1529-1548). `i` indexes the
+-- tooltip lines pob_itemsGetLists returned. ToggleDisplayItemModLine sets
+-- buildFlag, so this recalcs like legacy's next frame would.
+function pob_itemsDisplayToggleLine(i)
+    local bm, it = ctx()
+    local line = it and it.displayItem and it.displayItemTooltip.lines[tonumber(i) or 0]
+    if not (line and line.modLine) then return fail("not a modifier line") end
+    if it.ToggleDisplayItemModLine then
+        it:ToggleDisplayItemModLine(line.modLine)
+    else
+        line.modLine.disabled = not line.modLine.disabled
+        it:UpdateDisplayItemTooltip()
+        it.build.buildFlag = true
+    end
+    markDisplayFresh(it)
+    return done(nil, EMIT)
 end
 
 ---------------------------------------------------------------------------
@@ -1238,7 +1532,8 @@ end
 ---------------------------------------------------------------------------
 
 local CRAFT_OPENERS = { enchant = "EnchantDisplayItem", anoint = "AnointDisplayItem",
-    corrupt = "CorruptDisplayItem", implicit = "AddImplicitToDisplayItem" }
+    corrupt = "CorruptDisplayItem", implicit = "AddImplicitToDisplayItem",
+    custom = "AddCustomModifierToDisplayItem", crucible = "AddCrucibleModifierToDisplayItem" }
 
 -- The session is only valid for the display item it was opened on: cancel,
 -- replace, undo or a new paste all drop it.
@@ -1292,6 +1587,8 @@ local function craftButtonName(kind, slot)
     if kind == "anoint" then return "displayItemAnoint" .. (slot == 1 and "" or tostring(slot)) end
     if kind == "corrupt" then return "displayItemCorrupt" end
     if kind == "implicit" then return "displayItemAddImplicit" end
+    if kind == "custom" then return "displayItemAddCustom" end
+    if kind == "crucible" then return "displayItemAddCrucible" end
 end
 
 function pob_itemsCraftOpen(kind, slot)
@@ -2018,7 +2315,7 @@ function pob_selftestItemsCraft()
         res.clusterNodes = it.displayItem.clusterJewelNodeCount == cj.maxNodes
             and it.displayItem.enchantModLines[1].line == "Adds " .. cj.maxNodes .. " Passive Skills"
         -- Guard rails.
-        res.unknownControlRefused = not pob_itemsDisplaySetControl("displayItemAffix1", 1).ok
+        res.unknownControlRefused = not pob_itemsDisplaySetControl("displayItemBogus", 1).ok
         -- canBeInfluenced follows the BASE (Item.lua:792), not the rarity: a jewel has none.
         pob_itemsEditTextSave("Rarity: Unique\nCF Unique\nCobalt Jewel\n", 4, false)
         res.noInfluenceOnJewel = pob_itemsGetLists().display.editor.influence.shown == false
@@ -2170,6 +2467,123 @@ function pob_selftestItemsCraft()
         before = #it.displayItem.implicitModLines
         pob_itemsCraftClick("save")
         res.blankCustomIgnored = #it.displayItem.implicitModLines == before
+    end)
+    pcall(function() it:SetDisplayItem() end)
+    itRestore(bm, it, snap)
+    return finish(res, ok, err)
+end
+
+-- Phase 6 Part 6.3 item 3: affix dropdowns, custom/crucible popups, range sliders, line toggling.
+function pob_selftestItemsAffix()
+    local bm, it = ctx()
+    if not it then return { ok = false, error = "no itemsTab" } end
+    local snap = itSnapshot(bm, it)
+    local res = { }
+    local ok, err = pcall(function()
+        it:SetDisplayItem()
+
+        -- 1. verifyRange verbatim & boundary test
+        res.verifyRangeIdentity = pob_verifyRange(0.25, 1, nil, nil) == 0.25
+        local fakeItem = { affixes = {
+            mod1 = { "(1-2) to Foo", statOrder = { 1 }, level = 1 },
+            mod2 = { "(3-2) to Foo", statOrder = { 1 }, level = 2 },
+        } }
+        local fakeDrop = { selIndex = 1, list = { { modList = { "mod1", "mod2" } } } }
+        local rFlipped = pob_verifyRange(0.3, 2, fakeDrop, fakeItem)
+        res.verifyRangeFlipped = math.abs(rFlipped - 0.7) < 1e-9
+
+        -- 2. Affix dropdown & roll slider on crafted rare belt
+        pob_itemsEditTextSave("Rarity: Rare\nCF Affix Belt\nLeather Belt\nCrafted: true\n", 3, false)
+        local aff = pob_itemsGetLists().display.editor.affix
+        res.affixRowsCount = #aff.rows == 6
+        local d1 = it.controls.displayItemAffix1
+        res.affixListPopulated = d1 and d1.list and #d1.list > 1
+        pob_itemsDisplaySetControl("displayItemAffix1", 2)
+        res.affixPickApplied = it.displayItem.prefixes[1] ~= nil and it.displayItem.prefixes[1].modId ~= "None"
+            and #it.displayItem.explicitModLines > 0
+        local tip1 = pob_itemsDisplayTooltip("displayItemAffix1", 2)
+        res.affixDropTooltip = tip1 and tip1.lines and #tip1.lines > 0
+        local tipSlider = pob_itemsDisplayTooltip("displayItemAffixRange1", 0, 0.5)
+        res.affixSliderTooltip = tipSlider and tipSlider.lines and #tipSlider.lines > 0
+        pob_itemsDisplaySetControl("displayItemAffixRange1", 1.0)
+        local rollMax = it.displayItem.prefixes[1].range
+        pob_itemsDisplaySetControl("displayItemAffixRange1", 0.0)
+        local rollMin = it.displayItem.prefixes[1].range
+        res.affixSliderMutates = rollMax ~= rollMin
+
+        -- 3. Custom modifier popup
+        pob_itemsEditTextSave("Rarity: Rare\nCF Custom Belt\nLeather Belt\n", 3, false)
+        local e = pob_itemsGetLists().display.editor
+        res.customAddShown = e.custom.addShown == true
+        local stCustom = pob_itemsCraftOpen("custom", 1)
+        res.customPopupOpened = stCustom.open == true and stCustom.title == "Add Modifier to Item"
+        local customSrcIdx = 1
+        for idx, srcLabel in ipairs(stCustom.controls.source.list) do
+            if srcLabel == "Custom" then customSrcIdx = idx break end
+        end
+        pob_itemsCraftSet("source", customSrcIdx)
+        res.customFieldShown = pob_itemsCraftState().controls.custom.shown == true
+        pob_itemsCraftSet("custom", "+55 to Maximum Mana")
+        pob_itemsCraftClick("save")
+        res.customModAdded = it.displayItem.customCount == 1
+            and it.displayItem.explicitModLines[#it.displayItem.explicitModLines].line == "+55 to Maximum Mana"
+        local cRows = pob_itemsGetLists().display.editor.custom.rows
+        res.customRowListed = #cRows == 1 and cRows[1].text:find("+55 to Maximum Mana", 1, true) ~= nil
+        pob_itemsDisplayRemoveCustom(1)
+        res.customModRemoved = it.displayItem.customCount == 0
+            and #pob_itemsGetLists().display.editor.custom.rows == 0
+
+        -- 4. Crucible modifier popup
+        pob_itemsEditTextSave("Rarity: Rare\nCF Sword\nCorsair Sword\n", 3, false)
+        local eSword = pob_itemsGetLists().display.editor
+        res.crucibleAddShown = eSword.custom.crucibleShown == true
+        local stCrucible = pob_itemsCraftOpen("crucible", 1)
+        res.cruciblePopupOpened = stCrucible.open == true and stCrucible.title == "Add Crucible Modifier to Item"
+            and stCrucible.controls.modSelectNode1.shown == true
+        pob_itemsCraftSet("modSelectNode1", 2)
+        local pickedNode = craft.controls.modSelectNode1.list[2]
+        local nodeLine = pickedNode.mod and pickedNode.mod[1]
+        pob_itemsCraftClick("save")
+        res.crucibleModAdded = it.displayItem.crucibleModLines ~= nil and #it.displayItem.crucibleModLines > 0
+            and (not nodeLine or it.displayItem.crucibleModLines[1].line:find(nodeLine, 1, true) ~= nil)
+        local cRowsCrucible = pob_itemsGetLists().display.editor.custom.rows
+        res.crucibleRowListed = #cRowsCrucible > 0 and cRowsCrucible[1].kind:find("Crucible", 1, true) ~= nil
+        pob_itemsDisplayRemoveCustom(1)
+        res.crucibleModRemoved = #it.displayItem.crucibleModLines == 0
+
+        -- 5. Range slider & stacked unique range sliders
+        pob_itemsEditTextSave("Rarity: Rare\nCF Range Belt\nLeather Belt\n{range:0.5}+(25-40) to maximum Life\n", 3, false)
+        local eRange = pob_itemsGetLists().display.editor
+        res.rangeShown = eRange.range.shown == true and eRange.range.sliderShown == true
+        pob_itemsDisplaySetControl("displayItemRangeSlider", 1.0)
+        local r1 = it.displayItem.rangeLineList[1].range
+        pob_itemsDisplaySetControl("displayItemRangeSlider", 0.0)
+        local r0 = it.displayItem.rangeLineList[1].range
+        res.rangeSliderMutatesRoll = r1 == 1.0 and r0 == 0.0
+
+        local oldShowAll = main.showAllItemAffixes
+        main.showAllItemAffixes = true
+        pob_itemsEditTextSave("Rarity: Unique\nCF Stacked Belt\nLeather Belt\nImplicits: 1\n{range:0.5}+(25-40) to maximum Life\n{range:0.5}+(30-50) to Strength\n", 4, false)
+        local eStacked = pob_itemsGetLists().display.editor
+        res.stackedRowsShown = eStacked.range.shown == false and #eStacked.range.stacked >= 2
+        pob_itemsDisplaySetControl("displayItemStackedRangeSlider2", 1.0)
+        res.stackedSliderMutatesRoll = it.displayItem.rangeLineList[2] ~= nil and it.displayItem.rangeLineList[2].range == 1.0
+        main.showAllItemAffixes = oldShowAll
+
+        -- 6. Interactive mod line disabling / toggle
+        pob_itemsEditTextSave("Rarity: Rare\nCF Toggle Belt\nLeather Belt\n+(25-40) to maximum Life\n", 3, false)
+        local dLists = pob_itemsGetLists().display
+        local toggleIdx
+        for i, line in ipairs(dLists.lines) do
+            if line.toggle == true then toggleIdx = i break end
+        end
+        res.toggleLineFound = toggleIdx ~= nil and dLists.lines[toggleIdx].strike == false
+        pob_itemsDisplayToggleLine(toggleIdx)
+        local dListsToggled = pob_itemsGetLists().display
+        res.toggleLineStruck = dListsToggled.lines[toggleIdx].strike == true
+        pob_itemsDisplayToggleLine(toggleIdx)
+        local dListsUntoggled = pob_itemsGetLists().display
+        res.toggleLineRestored = dListsUntoggled.lines[toggleIdx].strike == false
     end)
     pcall(function() it:SetDisplayItem() end)
     itRestore(bm, it, snap)
