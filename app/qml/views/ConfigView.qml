@@ -1,148 +1,402 @@
 import QtQuick
-import QtQuick.Layouts
-import QtQuick.Controls
+import QtQuick.Controls as QC
 import "../components" as Widgets
 
-// CONFIG (ConfigTab) view. Extracted from main.qml (Part 1.1); behaviour
-// unchanged. Renders the build's config options (src/Modules/ConfigOptions.lua)
-// grouped by section, with the appropriate control per option type (boolean ->
-// CheckBox, number -> TextField, list -> ComboBox, string -> TextField). Changing
-// a control writes back via luaEngine.setConfigOption(name, value), which flags a
-// rebuild. Uses a Repeater (no delegate reuse) so each model refresh recreates the
-// controls and their initial state is always correct. Section headers are emitted
-// when the section changes from the previous option. Visibility is parent-controlled.
+// CONFIG view — Phase 7, ports src/Classes/ConfigTab.lua over the live
+// build.configTab via app/lua/pob_config.lua.
+//
+// Features:
+//   - Config sets: dropdown (enabled when > 1 set) + "Manage..." popup
+//     reusing components/SetManagePopup.qml.
+//   - Search box (Ctrl+F, Lua-pattern-tolerant) + "Show All Configurations"
+//     toggle button.
+//   - Multi-column collapsible Section flow populated from ConfigOptions via
+//     components/ConfigOptionRow.qml (check/count/countAllowZero/integer/
+//     float/list/text, placeholders, dynamic tooltips, red invalid non-default
+//     labels + colored borders).
+//   - Custom Modifiers section (add/remove/edit/enable custom modifier groups).
+//   - Ctrl+Z / Ctrl+Y undo/redo on the active config set.
 Item {
-    id: configView
+    id: root
     anchors.fill: parent
     clip: true
 
-    // Control components (defined once; receive the option via the Loader's `cfg`
-    // property). Initial state is set in Component.onCompleted because the Repeater
-    // recreates the delegates on every model refresh.
-    Component {
-        id: cfgBoolComp
-        CheckBox {
-            Component.onCompleted: checked = (cfg.value === true)
-            onClicked: luaEngine.setConfigOption(cfg.name, checked)
+    property var st: ({})
+    property string searchQuery: ""
+    property bool _pending: false
+
+    readonly property var sets: (st && st.sets && st.sets.length !== undefined) ? st.sets : []
+    readonly property var sections: (st && st.sections && st.sections.length !== undefined) ? st.sections : []
+    readonly property var customMods: (st && st.customMods && st.customMods.length !== undefined) ? st.customMods : []
+    readonly property bool toggleConfigs: !!(st && st.toggleConfigs)
+
+    // Compute number of 360px columns that fit in the viewport (legacy: (w - 10) / 370).
+    readonly property int colCount: Math.max(1, Math.min(3, Math.floor((flick.width - 10) / 370)))
+
+    // Bucket sections into columns [0..colCount-1] respecting legacy `sec.col`.
+    readonly property var columns: {
+        var cols = []
+        for (var c = 0; c < colCount; c++) cols.push([])
+        var list = sections
+        var n = (list && list.length !== undefined) ? list.length : 0
+        for (var i = 0; i < n; i++) {
+            var sec = list[i]
+            var desired = (sec && sec.col !== undefined) ? Number(sec.col) : 1
+            var targetCol = Math.max(0, Math.min(colCount - 1, desired - 1))
+            cols[targetCol].push(sec)
         }
+        return cols
     }
-    Component {
-        id: cfgNumComp
-        TextField {
-            Component.onCompleted: text = (cfg.value !== undefined && cfg.value !== null) ? String(cfg.value) : "0"
-            color: theme.text
-            background: Rectangle { color: theme.sideBarBg; border.color: theme.section; radius: theme.radiusControl }
-            implicitWidth: 90
-            onEditingFinished: {
-                var n = Number(text)
-                if (!isNaN(n)) luaEngine.setConfigOption(cfg.name, n)
-            }
-        }
+
+    function call(name, args) {
+        return luaEngine.invoke(name, args || [])
     }
-    Component {
-        id: cfgListComp
-        ComboBox {
-            model: cfg.options || []
-            textRole: "label"
-            Component.onCompleted: {
-                var idx = -1
-                var opts = cfg.options || []
-                for (var i = 0; i < opts.length; i++) {
-                    if (opts[i].val === cfg.value) { idx = i; break }
-                }
-                currentIndex = idx
-            }
-            onActivated: {
-                if (index >= 0 && cfg.options && cfg.options[index])
-                    luaEngine.setConfigOption(cfg.name, cfg.options[index].val)
-            }
-        }
+
+    function refresh() {
+        if (_pending) return
+        _pending = true
+        Qt.callLater(_doRefresh)
     }
-    Component {
-        id: cfgStrComp
-        TextField {
-            Component.onCompleted: text = (cfg.value !== undefined && cfg.value !== null) ? String(cfg.value) : ""
-            color: theme.text
-            background: Rectangle { color: theme.sideBarBg; border.color: theme.section; radius: theme.radiusControl }
-            implicitWidth: 240
-            onEditingFinished: luaEngine.setConfigOption(cfg.name, text)
-        }
+
+    function _doRefresh() {
+        _pending = false
+        if (luaEngine.currentMode !== "BUILD") return
+        var s = luaEngine.invoke("pob_configGetState", [root.searchQuery])
+        st = s ? s : ({})
+        setSelect.model = sets
+        setSelect.currentIndex = (st.activeSetIndex !== undefined ? Number(st.activeSetIndex) : 1) - 1
     }
-    Component {
-        id: sectionHeaderComp
-        Rectangle {
-            width: parent.width
-            height: 28
-            color: theme.section
-            Text {
-                text: secText
-                color: theme.text
-                font.bold: true
-                font.pixelSize: theme.fontSize + 1
-                anchors.left: parent.left
-                anchors.leftMargin: theme.space2
-                anchors.verticalCenter: parent.verticalCenter
-            }
+
+    onVisibleChanged: if (visible) refresh()
+    Component.onCompleted: refresh()
+
+    Connections {
+        target: luaEngine
+        function onConfigChanged() { root.refresh() }
+        function onCalcsChanged() { root.refresh() }
+        function onTreeChanged() { root.refresh() }
+        function onItemsChanged() { root.refresh() }
+        function onSkillsChanged() { root.refresh() }
+        function onModeChanged() { root.refresh() }
+    }
+
+    Timer {
+        id: searchDebounce
+        interval: 120
+        onTriggered: root.refresh()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+F"
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: {
+            searchEdit.forceEditFocus()
+            searchEdit.selectAll()
         }
     }
 
-    ScrollView {
+    Shortcut {
+        sequence: "Ctrl+Z"
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: root.call("pob_configUndo")
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Y"
+        enabled: root.visible && luaEngine.currentMode === "BUILD"
+        onActivated: root.call("pob_configRedo")
+    }
+
+    Rectangle {
         anchors.fill: parent
-        anchors.margins: theme.space3
-        contentWidth: width
-        clip: true
-        background: Rectangle { color: theme.background }
+        color: theme.background
+    }
 
-        ColumnLayout {
-            spacing: theme.space1
-            width: parent.width
+    // Top controls header (Config set row + Search / Show All row)
+    Item {
+        id: headerBar
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 60
+
+        // Row 1: Config set dropdown + Manage...
+        Widgets.Label {
+            id: setLabel
+            x: 10
+            y: 10
+            label: "^7Config set:"
+            size: 14
+        }
+
+        Widgets.DropDownControl {
+            id: setSelect
+            x: 82
+            y: 8
+            width: 210
+            height: 20
+            size: 14
+            controlEnabled: root.sets.length > 1
+            labelFor: function(item) { return item && item.title ? String(item.title) : "Default" }
+            onSelected: function(idx) {
+                root.call("pob_configSetActiveSet", [idx + 1])
+            }
+        }
+
+        Widgets.Button {
+            id: manageBtn
+            x: 296
+            y: 8
+            width: 90
+            height: 20
+            label: "Manage..."
+            onClicked: setManagePopup.openFresh()
+        }
+
+        // Row 2: Search + Show All Configurations toggle
+        Widgets.EditControl {
+            id: searchEdit
+            x: 10
+            y: 34
+            width: 360
+            height: 20
+            placeholder: "Search"
+            size: 14
+            maxChars: 100
+            onEdited: function(txt) {
+                root.searchQuery = txt
+                searchDebounce.restart()
+            }
+            onCommitted: function(txt) {
+                searchDebounce.stop()
+                root.searchQuery = txt
+                root.refresh()
+            }
+            onReverted: {
+                searchDebounce.stop()
+                root.searchQuery = ""
+                root.refresh()
+            }
+        }
+
+        Widgets.Button {
+            id: showAllBtn
+            x: 380
+            y: 34
+            width: 210
+            height: 20
+            label: root.toggleConfigs ? "Hide Ineligible Configurations" : "Show All Configurations"
+            onClicked: root.call("pob_configSetToggleAll", [!root.toggleConfigs])
+        }
+    }
+
+    // Multi-column scrollable sections area
+    Flickable {
+        id: flick
+        anchors.top: headerBar.bottom
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: vScroll.left
+        anchors.topMargin: 4
+        contentWidth: Math.max(width, colRow.implicitWidth + 20)
+        contentHeight: colRow.implicitHeight + 28
+        boundsBehavior: Flickable.StopAtBounds
+        clip: true
+        onContentYChanged: if (Math.abs(vScroll.offset - contentY) > 1) vScroll.setOffset(contentY)
+
+        Row {
+            id: colRow
+            x: 10
+            y: 10
+            spacing: 10
 
             Repeater {
-                model: configModel
-                delegate: ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: theme.space1
+                model: root.colCount
+                delegate: Column {
+                    id: colBox
+                    readonly property int colIdx: index
+                    readonly property var colSections: (root.columns && root.columns[colIdx] && root.columns[colIdx].length !== undefined)
+                        ? root.columns[colIdx] : []
+                    width: 360
+                    spacing: 18
 
-                    // Section header: shown for the first option of each section
-                    // (when the previous option's section differs, or this is index 0).
-                    Loader {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: active ? 28 : 0
-                        active: index === 0 || (configModel.get(index - 1) ? configModel.get(index - 1).section !== model.section : true)
-                        sourceComponent: sectionHeaderComp
-                        property string secText: model.section
-                    }
+                    Repeater {
+                        model: colBox.colSections.length
+                        delegate: Item {
+                            id: secWrapper
+                            readonly property var sec: colBox.colSections[index]
+                            readonly property string secName: sec && sec.name ? String(sec.name) : ""
+                            readonly property bool secCollapsed: !!(sec && sec.collapsed)
+                            readonly property bool isCustom: !!(sec && sec.isCustomMods)
+                            readonly property var secItems: (sec && sec.items && sec.items.length !== undefined) ? sec.items : []
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-                        MouseArea {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: labelText.height
-                            hoverEnabled: true
-                            ToolTip.text: model.tooltip ? model.tooltip : ""
-                            ToolTip.visible: model.tooltip ? containsMouse : false
-                            Widgets.ColorText {
-                                id: labelText
-                                sourceText: model.label || model.name
-                                defaultColor: theme.text
-                                font.pixelSize: theme.fontSize
-                                width: parent.width
-                                wrapMode: Text.WordWrap
+                            width: 360
+                            height: secCollapsed ? 22 : Math.max(36, secContent.implicitHeight + 22)
+
+                            Widgets.Section {
+                                anchors.fill: parent
+                                label: secWrapper.secName
+
+                                Column {
+                                    id: secContent
+                                    visible: !secWrapper.secCollapsed
+                                    x: 0
+                                    y: 10
+                                    width: 352
+                                    spacing: 4
+
+                                    // Standard ConfigOptions rows (COUNT model preserves EditControl focus)
+                                    Repeater {
+                                        model: secWrapper.isCustom ? 0 : secWrapper.secItems.length
+                                        delegate: Widgets.ConfigOptionRow {
+                                            option: secWrapper.secItems[index]
+                                            onValueChanged: function(varName, newValue) {
+                                                root.call("pob_configSetOption", [varName, newValue])
+                                            }
+                                        }
+                                    }
+
+                                    // Custom Modifiers blocks
+                                    Widgets.Button {
+                                        visible: secWrapper.isCustom
+                                        x: 4
+                                        width: 120
+                                        height: 20
+                                        label: "^7Add Mod Group"
+                                        onClicked: root.call("pob_configAddCustomMod")
+                                    }
+
+                                    Repeater {
+                                        model: secWrapper.isCustom ? root.customMods.length : 0
+                                        delegate: Column {
+                                            id: cmBlock
+                                            readonly property int blkIdx: index + 1
+                                            readonly property var blk: root.customMods[index]
+                                            width: 344
+                                            x: 4
+                                            spacing: 4
+
+                                            function syncBlock() {
+                                                if (!blk) return
+                                                if (!cmTitle.editing) cmTitle.text = blk.title !== undefined ? String(blk.title) : "Default"
+                                                cmEnable.state = (blk.enabled !== false)
+                                                if (!cmArea.activeFocus) cmArea.text = blk.text !== undefined ? String(blk.text) : ""
+                                            }
+                                            onBlkChanged: syncBlock()
+                                            Component.onCompleted: syncBlock()
+
+                                            Row {
+                                                spacing: 6
+                                                width: parent.width
+
+                                                Widgets.Button {
+                                                    width: 20
+                                                    height: 18
+                                                    label: "^1X"
+                                                    onClicked: root.call("pob_configRemoveCustomMod", [cmBlock.blkIdx])
+                                                }
+
+                                                Widgets.EditControl {
+                                                    id: cmTitle
+                                                    width: 294
+                                                    height: 18
+                                                    size: 14
+                                                    onCommitted: function(txt) {
+                                                        root.call("pob_configUpdateCustomMod", [cmBlock.blkIdx, txt, null, null])
+                                                    }
+                                                }
+
+                                                Widgets.CheckBox {
+                                                    id: cmEnable
+                                                    width: 18
+                                                    height: 18
+                                                    onToggled: function(newState) {
+                                                        root.call("pob_configUpdateCustomMod", [cmBlock.blkIdx, null, newState, null])
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                width: 344
+                                                height: 84
+                                                color: theme.titleBar
+                                                border.width: 1
+                                                border.color: cmArea.activeFocus ? theme.borderStrong : theme.border
+                                                radius: theme.radiusControl
+                                                clip: true
+
+                                                QC.ScrollView {
+                                                    anchors.fill: parent
+                                                    anchors.margins: 2
+                                                    clip: true
+
+                                                    QC.TextArea {
+                                                        id: cmArea
+                                                        color: theme.text
+                                                        font.pixelSize: 13
+                                                        wrapMode: TextEdit.Wrap
+                                                        selectByMouse: true
+                                                        background: null
+                                                        onActiveFocusChanged: {
+                                                            if (!activeFocus && cmBlock.blk && text !== (cmBlock.blk.text || "")) {
+                                                                root.call("pob_configUpdateCustomMod", [cmBlock.blkIdx, null, null, text])
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                        }
-                        Loader {
-                            property var cfg: model
-                            sourceComponent: {
-                                if (model.type === "boolean") return cfgBoolComp
-                                if (model.type === "number") return cfgNumComp
-                                if (model.type === "list") return cfgListComp
-                                return cfgStrComp
+
+                            // Collapse toggle '-' / '+' on top-right section border (ConfigTab.lua:285)
+                            Widgets.Button {
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.topMargin: -7
+                                anchors.rightMargin: 6
+                                width: 16
+                                height: 16
+                                label: secWrapper.secCollapsed ? "+" : "-"
+                                onClicked: root.call("pob_configToggleSection", [secWrapper.secName])
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    Widgets.ScrollBar {
+        id: vScroll
+        anchors.top: headerBar.bottom
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        anchors.topMargin: 4
+        width: 18
+        dir: "VERTICAL"
+        step: 50
+        contentDim: flick.contentHeight
+        viewDim: flick.height
+        onOffsetChanged: if (Math.abs(flick.contentY - offset) > 1) flick.contentY = offset
+    }
+
+    // Generic SetManagePopup reused for Config Sets (Part 7.1)
+    Widgets.SetManagePopup {
+        id: setManagePopup
+        title: "Manage Config Sets"
+        noun: "config set"
+        deleteTitle: "Delete Config Set"
+        fn: ({
+            list:      "pob_configListSets",
+            setActive: "pob_configSetActiveSet",
+            create:    "pob_configCreateSet",
+            copy:      "pob_configCopySet",
+            rename:    "pob_configRenameSet",
+            remove:    "pob_configDeleteSet",
+            move:      "pob_configMoveSet",
+        })
+        onListEdited: root.refresh()
     }
 }

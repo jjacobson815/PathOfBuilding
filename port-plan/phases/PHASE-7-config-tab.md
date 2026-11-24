@@ -1,6 +1,6 @@
 # Phase 7 — Config Tab
 
-**Status:** NOT STARTED
+**Status:** DONE
 **Goal:** Port the configuration tab: config sets, controls generated from the
 `ConfigOptions` data table, the conditional-visibility engine driven by live calc
 usage sets, search, and the modList plumbing into the calc env.
@@ -21,38 +21,38 @@ existing, which forces a small host shim.
 
 ## Part 7.1 — Config sets & generated controls
 
-- [ ] Config sets: dropdown + Manage popup (generic set-manager); active set's
+- [x] Config sets: dropdown + Manage popup (generic set-manager); active set's
   `input`/`placeholder` maps seeded from defaults. (S)
-- [ ] Generate controls from the `ConfigOptions` varList (cached load already in
+- [x] Generate controls from the `ConfigOptions` varList (cached load already in
   `pob_host.lua`): section headers (multi-column flow) + per-var control by type
   (check / count / countAllowZero / integer / float / list / text), placeholder
   support, tooltips (`tooltip`/`tooltipFunc` — the latter reads `mainOutput`). (M —
   a QML control-factory keyed on var type.)
-- [ ] `varControls` shim — provide the table `apply()` functions expect on
+- [x] `varControls` shim — provide the table `apply()` functions expect on
   `build.configTab.varControls` so placeholder-mutating options (e.g. `enemyIsBoss`
   setting placeholders on enemy stat controls) work. This is a sanctioned host
-  seam; keep it in `pob_host.lua`. (S — but load-bearing; see [[calc-engine-contract]].)
+  seam; keep it in `pob_host.lua` / `pob_config.lua`. (S — but load-bearing; see [[calc-engine-contract]].)
 
 ## Part 7.2 — Conditional visibility engine
 
-- [ ] Evaluate the visibility predicates (ifNode/ifOption/ifCond/ifMinionCond/
+- [x] Evaluate the visibility predicates (ifNode/ifOption/ifCond/ifMinionCond/
   ifEnemyCond/ifCondTrue/ifMult/ifEnemyMult/ifStat/ifEnemyStat/ifTagType/ifFlag/
   ifMod/ifSkill/ifSkillFlag/ifSkillData + implyCondList) against the Phase 2
   exported usage sets (`conditionsUsed`, `multipliersUsed`, etc.). Evaluate in Lua,
   return per-var booleans to QML. Re-query placeholders after `BuildModList` (some
   `apply()` mutate them). (M)
-- [ ] "Show All Configurations" toggle (reveals unmet-condition options minus an
+- [x] "Show All Configurations" toggle (reveals unmet-condition options minus an
   exclusion list). Non-default-but-hidden options stay visible with red label +
   "invalid" tooltip + colored border. (S)
-- [ ] Search box (Ctrl+F, Lua-pattern-tolerant). (S)
+- [x] Search box (Ctrl+F, Lua-pattern-tolerant). (S)
 
 ## Part 7.3 — Plumbing & persistence
 
-- [ ] Route edits → `configTab.input` → `BuildModList` (into `modList`/
+- [x] Route edits → `configTab.input` → `BuildModList` (into `modList`/
   `enemyModList`) → `buildFlag` → recalc. Bandit + Pantheon selections live here
   (mirrored into `<Build>` attribs). `UpdateLevel` clamps enemy level. Undo/redo on
   the active set's input table. (M)
-- [ ] `<Config>` XML: attrib activeConfigSet; `<ConfigSet>` with `<Input>` (non-
+- [x] `<Config>` XML: attrib activeConfigSet; `<ConfigSet>` with `<Input>` (non-
   default only) + `<Placeholder>`; legacy flat Input; `enemyIsBoss`/`presetBossSkills`
   back-compat rewrites. `ImportCalcSettings` migrates pre-Config builds. (M)
 
@@ -72,3 +72,10 @@ existing, which forces a small host shim.
   table so league updates flow through unchanged.
 - The `varControls` shim is the one place the "data depends on UI" coupling leaks;
   get it right or placeholder-driven options (many enemy-stat options) misbehave.
+
+## Session log
+
+- **2026-11-24 — Phase 7 implementation (`app/lua/pob_config.lua`, `app/qml/components/ConfigOptionRow.qml`, `app/qml/views/ConfigView.qml`):**
+  - Implemented `pob_config.lua` over the live `build.configTab` with `varControls` host shim (`pob_ensureConfigVarControls` + live sync before `BuildModList`), Config Set CRUD (`SetManagePopup.qml` contract, PR #9647 `NewConfigSet` split), Lua-side visibility engine against Phase 2 `pob_getConfigUsageSets()` + `ConfigVisibility.isShowAllExcluded`, "Show All Configurations" toggle, invalid non-default red highlight + tooltip, Lua-pattern-tolerant search, Bandit/Pantheon build mirroring, `UpdateLevel` clamping, undo/redo (`ct.undo[2]`/`ct.redo[1]`), custom modifier blocks, dynamic `tooltip`/`tooltipFunc` + stat-compare diff, and selftests `pob_selftestConfigSets`, `pob_selftestConfigVis`, `pob_selftestConfigPersist`.
+  - Built `ConfigOptionRow.qml` (data-driven control factory for `check`/`count`/`countAllowZero`/`integer`/`float`/`list`/`text` with imperative sync, placeholder display, hover tooltips, modified/invalid border highlighting) and rebuilt `ConfigView.qml` (Config set selector + `SetManagePopup`, Ctrl+F search, Show All toggle, multi-column collapsible sections, Custom Modifiers blocks, Ctrl+Z/Ctrl+Y undo/redo).
+  - Verified `qmllint.exe` exit 0 on `ConfigOptionRow.qml` and `ConfigView.qml`, `pob-selftest.exe` probe exit 0 for all three Phase 7 selftests, and negative-test teeth (forcing `isInvalid = false` failed `pob_selftestConfigVis` with exit 1; restored to exit 0).
