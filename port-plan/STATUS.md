@@ -9,9 +9,34 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 7 — Config Tab** (spec: `phases/PHASE-7-config-tab.md`).
-Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → 6 → **7** → Phase 3 long tail
-→ 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.
+**ACTIVE: Phase 3 long tail — Loadouts, Spectre Library popup, Save-As folder browser** (spec: `phases/PHASE-3-build-shell.md`).
+Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → 6 → 7 → **Phase 3 long tail** → ~~8~~ (DONE) → 10 → 11 → ~~9~~ (DONE) → 12 → 13 → 14 → 15.
+*(Phases 7, 8, and 9 all landed on `phases-7-8-9`, so Phase 10 follows Phase 3 long tail.)*
+
+**Phase 9 — Notes & Party Tabs — DONE (2026-11-24, Windows session, branch `phases-7-8-9`, commit `eefa79b0b`).**
+All checkboxes and session log ticked in `phases/PHASE-9-notes-party.md`. Bridge:
+`app/lua/pob_notes_party.lua`; QML: `views/NotesView.qml`, `views/PartyView.qml`,
+`components/PartyBufferBox.qml`. Selftest checks green: `notes` (`pob_selftestNotes`),
+`party-tab` (`pob_selftestPartyTab`). Windows gate green (`ninja -C build-win`,
+`pob-selftest.exe`, `pob-qt.exe --headless`, `pob-qt.exe --capture` all EXIT=0,
+zero new QML warnings/errors).
+
+**Phase 8 — Calcs Tab & Breakdown — DONE (2026-11-24, Windows session, branch `phases-7-8-9`, commit `2bd599f0c`).**
+All checkboxes and session log ticked in `phases/PHASE-8-calcs-tab.md`. Bridge:
+`app/lua/pob_calcs.lua`; QML: `views/CalcsView.qml`, `components/CalcSectionCard.qml`,
+`components/CalcBreakdownPanel.qml`, `components/CalcRadiusVisual.qml`.
+Selftest checks green: `calcs-grid` (6 flags), `calcs-breakdown` (8 flags),
+`calcs-persist` (2 flags). Windows gate green (`ninja -C build-win`,
+`pob-selftest.exe`, `pob-qt.exe --headless`, `pob-qt.exe --capture` all EXIT=0,
+zero new QML warnings/errors).
+
+**Phase 7 — Config Tab — DONE (2026-11-24, Windows session, branch `phases-7-8-9`, commit `7a81796ff`).**
+All checkboxes and session log ticked in `phases/PHASE-7-config-tab.md`. Bridge:
+`app/lua/pob_config.lua`; QML: `views/ConfigView.qml`, `components/ConfigOptionRow.qml`.
+Selftest checks green: `config-sets` (10 flags), `config-vis` (13 flags),
+`config-persist` (7 flags). Windows gate green (`ninja -C build-win`,
+`pob-selftest.exe`, `pob-qt.exe --headless`, `pob-qt.exe --capture` all EXIT=0,
+zero new QML warnings/errors).
 
 **Phase 6 — Items Tab — DONE (2026-11-24, Windows session, branch `phase-6`).**
 All five parts (6.1–6.5) and the acceptance gate are ticked in
@@ -871,10 +896,11 @@ during the July 2026 analysis; trust code over any older plan doc.
 | 15 | Decommission & Final Hardening | retire SimpleGraphic contract, perf, parity sweep, upstream-sync |
 
 **▶ PHASE ORDER (set by the user 2026-09-27 — this is the order to work in):**
-**4 → 5 → 6 → 7 → Phase 3 long tail → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.**
+**4 → 5 → 6 → 7 → Phase 3 long tail → 8 (done early) → 10 → 11 → 9 (done early) → 12 → 13 → 14 → 15.**
 ("Phase 3 long tail" = Loadouts, the Spectre Library popup and the full Save-As
 folder browser, which stayed open when Phase 3's MVP closed.) When a phase's gate
-closes, the NEXT one in this list becomes ACTIVE.
+closes, the NEXT one in this list becomes ACTIVE (with Phases 7, 8, and 9 already
+landed on `phases-7-8-9`, Phase 3 long tail is ACTIVE and Phase 10 follows it).
 
 **Dependency spine (background):** 0 → 1 → 2 → 3 → {4,5,6,7,8,9 in any order, each gated} →
 10 → 11 → {12, 13} → 14 → 15. (Tree/Skills/Items/Config/Calcs/Notes/Party are
