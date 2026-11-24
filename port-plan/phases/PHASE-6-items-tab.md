@@ -1,6 +1,6 @@
 # Phase 6 — Items Tab (the largest tab)
 
-**Status:** IN PROGRESS — Parts 6.1 + 6.2 done, 6.3 items 1-3 done (6.1: 2026-09-29 cloud session; 6.2 + 6.3.1: 2026-09-29 Windows session; 6.3.2: 2026-10-16 Windows session; 6.3.3: 2026-11-05 Windows session; branch `cloud/phase-6`). Next: 6.3 item 4 (craft-item popup).
+**Status:** DONE (2026-11-24, branch `phase-6`; Parts 6.1–6.5 + acceptance gate complete; all 8 `items-*` selftests green).
 **Goal:** Port the item planner: item sets, the full slot panel, item/DB/shared
 lists with the drag-drop matrix, and the deep display-item editor (variants,
 sockets, enchant/anoint/corrupt/implicit, influences, catalysts, cluster crafting,
@@ -52,25 +52,25 @@ tooltip. This is `ItemsTab.lua` — 4771 lines, the biggest single view.
   **Add modifier** custom popup (bench/essence/prefix/suffix/veiled/delve sources,
   sort-by-power option); **Add Crucible mod**; mod-range line dropdown + slider or
   (option) stacked sliders for all unique ranges. (L)
-- [ ] Craft-item popup (rarity/title/type/base with live tooltip) + create/edit-
+- [x] Craft-item popup (rarity/title/type/base with live tooltip) + create/edit-
   text popup (raw text editor with live validity). (M)
-  (Edit-text half DONE with item 1: `ItemTextPopup.qml`; craft-item popup open.)
+  (`ItemTextPopup.qml` landed with item 1; `CraftNewPopup.qml` landed with item 4.)
 
 ## Part 6.4 — Comparison tooltip & rules
 
-- [ ] Full item tooltip anchored below with comparison vs equipped: dps/def diffs
+- [x] Full item tooltip anchored below with comparison vs equipped: dps/def diffs
   per slot (via Phase 2 `repSlotName`+`repItem`), slot-only-tooltip option, **jewel-
   radius comparisons via cloned-spec evaluation** for radius-affecting jewels,
   influence header art, source text. (M-L)
-- [ ] Rules: `IsItemValidForSlot`, `GetComparisonSlotNameForItem`,
+- [x] Rules: `IsItemValidForSlot`, `GetComparisonSlotNameForItem`,
   `CopyAnointsAndEldritchImplicits` on compare/equip. (M)
-- [ ] Keyboard: Ctrl+V paste item from game clipboard, `e` edit hovered slot,
+- [x] Keyboard: Ctrl+V paste item from game clipboard, `e` edit hovered slot,
   Ctrl+Z/Y undo/redo, Ctrl+F focus DB search (toggle unique/rare), Ctrl+D toggle
   diff display. (S)
 
 ## Part 6.5 — Persistence
 
-- [ ] `<Items>` XML round-trip: attribs (activeItemSet, useSecondWeaponSet,
+- [x] `<Items>` XML round-trip: attribs (activeItemSet, useSecondWeaponSet,
   showStatDifferences); `<Item id variant variantAlt..5>` raw text + `<ModRange>`;
   `<ItemSet>` with `<Slot name itemId itemPbURL active>` + `<SocketIdURL>`;
   `<TradeSearchWeights>`; legacy flat `<Slot>`. (M)
@@ -425,3 +425,27 @@ Implemented Part 6.3 item 3: crafted affix dropdowns & roll sliders, custom modi
   - All 26 flags passed: `affixDropTooltip`, `affixListPopulated`, `affixPickApplied`, `affixRowsCount`, `affixSliderMutates`, `affixSliderTooltip`, `crucibleAddShown`, `crucibleModAdded`, `crucibleModRemoved`, `cruciblePopupOpened`, `crucibleRowListed`, `customAddShown`, `customFieldShown`, `customModAdded`, `customModRemoved`, `customPopupOpened`, `customRowListed`, `rangeShown`, `rangeSliderMutatesRoll`, `restored`, `stackedRowsShown`, `stackedSliderMutatesRoll`, `toggleLineFound`, `toggleLineRestored`, `toggleLineStruck`, `verifyRangeFlipped`, `verifyRangeIdentity`.
   - Negative test teeth verification confirmed: breaking `verifyRange` caused `verifyRangeFlipped` to fail and `pob-selftest` to exit with code 1; reverting restored clean exit code 0.
   - Both `pob-selftest.exe` and `pob-qt.exe --headless` exit with code 0.
+
+
+## Session log — Tue Nov 24 2026 (Parts 6.3 item 4, 6.4, 6.5 & closure; Windows session)
+
+Completed all remaining parts of Phase 6 on branch `phase-6` and closed the Phase 6 acceptance gate.
+
+- **Upstream-sync compatibility prerequisites (from merge `11921f75b`):**
+  - `src/Classes/CompareBuySimilar.lua` (commit `9d02c58a3`): converted 3 SimpleGraphic-v2.5.6 LuaJIT syntax-extension lines (`?.:lower()` line 80; `..=` lines 205–206) to stock LuaJIT 2.1 equivalents (non-calc Phase 12 trade URL builder; documented in `app/lua/HOST_CONTRACT.md`).
+  - `app/lua/pob_skills.lua` (commit `c533f2a8f`) & `app/lua/pob_items.lua`: adopted upstream PR `#9647` `New*Set`/`Create*Set` split (`NewSkillSet`/`NewItemSet` now append to `*SetOrderList` themselves).
+- **Part 6.3 item 4 — Craft-item popup (commit `abbd3cfe5`):**
+  - Bridge (`app/lua/pob_items.lua`): lifted `ItemsTab:CraftItem` / `makeItem` into `pob_itemsCraftNewInit`, `pob_itemsCraftNewTooltip`, and `pob_itemsCraftNewCreate` (preserves `lastCraftRaritySel`/`TypeSel`/`BaseSel`, clamps RARE→MAGIC on flasks/charms/tinctures, sets `quality=nil` on Amulet/Belt/Jewel/Quiver/Ring/Graft, runs `NormaliseQuality` + `BuildAndParseRaw` + `SetDisplayItem`, returns `openEditText` when non-crafted and non-NORMAL).
+  - QML: added `app/qml/components/CraftNewPopup.qml` (registered in `qml.qrc`), enabled `"Craft item..."` in `ItemsView.qml`, wired `openEditText` to open `ItemTextPopup`.
+  - Selftest: `items-craft-new` (`pob_selftestItemsCraftNew`, 17 flags) in `selftest_checks.h`. Teeth verified: removing the flask/charm/tincture clamp fails `rareClampMagic` (exit 1).
+- **Part 6.4 — Comparison tooltip, rules & keyboard shortcuts (commit `11a44855a`):**
+  - Bridge (`app/lua/pob_items.lua`): added `marshalTooltip`/`tipData` returning full `AddItemTooltip` output (per-line/tooltip centering, rarity header art paths, influence header names & icon paths, border colour, `foilType`, and Shift-held granted-skill `children`), updated `pob_itemsSlotTooltip`/`pob_itemsTooltip`/`displayRecord`/`pob_itemsCraftNewTooltip`/`pob_itemsEditTextCheck`, added `createDisplayItemSafe` to break `CopyAnointsAndEldritchImplicits` mod-line table aliasing (incl. the `ItemsTab.lua:2056` early-return path on influenced amulets) on editor paths only while keeping hover-compare paths pure, ensured `UpdateSockets()` runs before `IsItemValidForSlot`/`GetComparisonSlotNameForItem`, and added `pob_itemsPaste(text)`, `pob_itemsToggleStatDiff()`, `pob_itemsCompareSlot()`, and `pob_itemsIsValidForSlot()`.
+  - QML: extended `Tooltip.qml` + `StatDiff.js` with rarity header art, left/right influence badges, rarity border colour, per-line centering, and Shift-held granted-skill child tooltips; updated `ItemsView.qml`, `ItemDBPanel.qml`, and `ItemListBox.qml` with closed-slot hover comparison tooltips, anchored display-item header art/influence badges, and shortcuts `Ctrl+V` (paste), `E` (edit hovered slot), `Ctrl+F` (focus DB search / toggle Unique↔Rare DB), and `Ctrl+D` (toggle `showStatDifferences` + refresh tooltips).
+  - Selftest: `items-compare` (`pob_selftestItemsCompare`, 24 flags) covering `slotOnlyTooltips`, equipped diffs, Intuitive Leap disconnected-node cloned-spec jewel-radius comparison, dual/single influence headers, DB source text, Shift granted-skill child tooltips, `IsItemValidForSlot`, `GetComparisonSlotNameForItem`, `CopyAnointsAndEldritchImplicits` non-aliasing + hover safety, `pob_itemsPaste`, and `Ctrl+D`. Teeth verified: removing the alias-break re-parse in `createDisplayItemSafe` fails `anointNonAliasing` (exit 1).
+- **Part 6.5 — `<Items>` XML persistence & Phase 6 closure:**
+  - Selftest: `items-persist` (`pob_selftestItemsPersist`, 19 flags) verifying `<Items>` save/load round-trip through `Build.lua` (`activeItemSet`, `useSecondWeaponSet`, `showStatDifferences`, `<Item id variant variantAlt..5>` + `<ModRange>` incl. tag-stripped legacy `<ModRange>` read, `<ItemSet>` + `<Slot name itemId itemPbURL active>` + `<SocketIdURL>`, `<TradeSearchWeights>`, legacy flat `<Slot>` import, allocated jewel socket preservation, and `OccVortex.xml` load→save→load stability). Teeth verified: stripping `<ModRange>` fails `legacyModRangeOk` (exit 1).
+- **Documented differences (6.3.4 / 6.4):**
+  - `Tooltip.qml` renders rarity header PNGs + influence badges + granted-skill child tooltips in single-column layout; RELIC foil-tint shader and multi-column tooltip overflow remain deferred.
+  - Closed-slot dropdown tooltips pass `shift=false` (Shift granted-skill child tooltips activate on list/DB/shared hovers and via `pob_itemsSlotTooltip(..., true)`).
+  - `Ctrl+V` and `E` are suppressed while a text input (`TextInput`/`TextEdit`) or modal popup is active so typing and in-dialog paste are never hijacked.
+- **Final gate (Windows):** `ninja -C build-win` EXIT=0; `pob-selftest.exe` EXIT=0 (all 8 `items-*` checks green: `items-slots` 31, `items-lists` 44, `items-editor` 25, `items-craft` 43, `items-affix` 26, `items-craft-new` 17, `items-compare` 24, `items-persist` 19); `pob-qt.exe --headless` EXIT=0; `pob-qt.exe --capture` smoke EXIT=0 with zero new QML warnings/errors.

@@ -3300,3 +3300,239 @@ function pob_selftestItemsCompare()
     itRestore(bm, it, snap)
     return finish(res, ok, err)
 end
+
+-- Phase 6 Part 6.5: <Items> XML save/load round-trip through Build.lua
+-- (activeItemSet, useSecondWeaponSet, showStatDifferences, <Item id variant
+-- variantAlt..5> raw text + <ModRange>, <ItemSet> + <Slot name itemId
+-- itemPbURL active> + <SocketIdURL>, <TradeSearchWeights>, legacy flat
+-- <Slot> import, allocated jewel socket preservation, real build stability).
+function pob_selftestItemsPersist()
+    local bm, it = ctx()
+    if not it then return { ok = false, error = "no itemsTab" } end
+    local res = { }
+    local ok, err = pcall(function()
+        pob_itemsDeleteAll()
+        it:SetDisplayItem()
+
+        local function add(raw)
+            local item = new("Item"):Item(raw)
+            if not item.base then error("fixture base missing: " .. tostring(raw:match("\n(.-)\n"))) end
+            item:NormaliseQuality()
+            it:AddItem(item, true)
+            return item
+        end
+
+        -- 1. Build rich fixture: multi-variant item with ModRanges, flask,
+        -- swap sword, socketed jewel, 2 item sets, URLs, trade weights.
+        local variantItem = add("Rarity: Unique\nPS Variant Ring\nGold Ring\n"
+            .. "Variant: V1\nVariant: V2\nSelected Variant: 2\n"
+            .. "Has Alt Variant: true\nSelected Alt Variant: 1\n"
+            .. "Has Alt Variant Two: true\nSelected Alt Variant Two: 2\n"
+            .. "Has Alt Variant Three: true\nSelected Alt Variant Three: 1\n"
+            .. "Has Alt Variant Four: true\nSelected Alt Variant Four: 2\n"
+            .. "Has Alt Variant Five: true\nSelected Alt Variant Five: 1\n"
+            .. "{range:0.75}+(25-40) to maximum Life\n"
+            .. "{range:0.25}+(10-30) to Strength\n")
+        local flask = add("Rarity: Magic\nPS Life Flask\nSmall Life Flask\n")
+        local sword = add("Rarity: Rare\nPS Swap Sword\nRusted Sword\n+20 to Strength\n")
+        local jewel = add("Rarity: Rare\nPS Socket Jewel\nCobalt Jewel\n+15 to maximum Life\n")
+        it:PopulateSlots()
+
+        -- Allocate a jewel socket on the passive spec.
+        local spec = bm.spec
+        local sockNode
+        for _, n in pairs(spec.nodes) do
+            if n.type == "Socket" and not n.expansionJewel and not n.charmSocket and n.path and #n.path > 0 then
+                if not sockNode or #n.path < #sockNode.path then sockNode = n end
+            end
+        end
+        res.socketFound = sockNode ~= nil
+        local sockId = sockNode and sockNode.id or 0
+        if sockNode then
+            spec:AllocNode(sockNode)
+            spec:BuildAllDependsAndPaths()
+            it:UpdateSockets()
+            pob_itemsEquip("Jewel " .. sockId, jewel.id)
+        end
+
+        -- Set 1 (Default): Ring 1 + pbURL, Flask 1 active, SocketIdURL.
+        pob_itemsEquip("Ring 1", variantItem.id)
+        it.activeItemSet["Ring 1"].pbURL = "https://pob.test/ring1"
+        pob_itemsEquip("Flask 1", flask.id)
+        pob_itemsSetFlaskActive("Flask 1", true)
+        if sockId ~= 0 then
+            it.activeItemSet[sockId] = { pbURL = "https://pob.test/jewel1" }
+        end
+
+        -- Set 2 (active): Weapon Set II, Weapon 1 Swap equipped, SocketIdURL.
+        pob_itemsNewSet("PS Boss Set")
+        pob_itemsSetActiveSet(2)
+        pob_itemsSetWeaponSet(2)
+        pob_itemsEquip("Weapon 1 Swap", sword.id)
+        if sockId ~= 0 then
+            it.activeItemSet[sockId] = { pbURL = "https://pob.test/jewel2" }
+        end
+
+        -- Non-default showStatDifferences + TradeSearchWeights (1 positive, 1 zero).
+        it.showStatDifferences = false
+        local pickedStat
+        for _, entry in ipairs(bm.data.powerStatList) do
+            if type(entry) == "table" and entry.stat == "Life" then pickedStat = entry break end
+        end
+        if not pickedStat then
+            for _, entry in ipairs(bm.data.powerStatList) do
+                if type(entry) == "table" and entry.stat then pickedStat = entry break end
+            end
+        end
+        it.tradeQuery.statSortSelectionList = {
+            { label = pickedStat.label, stat = pickedStat.stat, weightMult = 1.75, transform = pickedStat.transform },
+            { label = "Ignored Zero", stat = "Mana", weightMult = 0 },
+        }
+        bm.buildFlag = true
+        pob_recalculate()
+
+        local vId, fId, sId, jId = variantItem.id, flask.id, sword.id, jewel.id
+        local xml = bm:SaveDB(nil)
+        local itemsXml = xml:match("<Items.-</Items>") or ""
+
+        -- 2. Writer assertions on serialised <Items> XML.
+        res.xmlItemsAttribs = itemsXml:find('activeItemSet="2"', 1, true) ~= nil
+            and itemsXml:find('useSecondWeaponSet="true"', 1, true) ~= nil
+            and itemsXml:find('showStatDifferences="false"', 1, true) ~= nil
+        res.xmlVariantAttribs = itemsXml:find('variant="2"', 1, true) ~= nil
+            and itemsXml:find('variantAlt="1"', 1, true) ~= nil
+            and itemsXml:find('variantAlt2="2"', 1, true) ~= nil
+            and itemsXml:find('variantAlt3="1"', 1, true) ~= nil
+            and itemsXml:find('variantAlt4="2"', 1, true) ~= nil
+            and itemsXml:find('variantAlt5="1"', 1, true) ~= nil
+        res.xmlModRanges = itemsXml:find('<ModRange', 1, true) ~= nil
+            and itemsXml:find('range="0.75"', 1, true) ~= nil
+            and itemsXml:find('range="0.25"', 1, true) ~= nil
+        res.xmlItemSets = itemsXml:find('<ItemSet', 1, true) ~= nil
+            and itemsXml:find('title="PS Boss Set"', 1, true) ~= nil
+            and itemsXml:find('useSecondWeaponSet="true"', 1, true) ~= nil
+        res.xmlSlotsAndActive = itemsXml:find('name="Flask 1"', 1, true) ~= nil
+            and itemsXml:find('active="true"', 1, true) ~= nil
+            and itemsXml:find('itemPbURL="https://pob.test/ring1"', 1, true) ~= nil
+        res.xmlSocketIdURL = sockId ~= 0
+            and itemsXml:find('<SocketIdURL', 1, true) ~= nil
+            and itemsXml:find('nodeId="' .. tostring(sockId) .. '"', 1, true) ~= nil
+            and itemsXml:find('itemPbURL="https://pob.test/jewel1"', 1, true) ~= nil
+            and itemsXml:find('itemPbURL="https://pob.test/jewel2"', 1, true) ~= nil
+        res.xmlTradeWeights = itemsXml:find('<TradeSearchWeights>', 1, true) ~= nil
+            and itemsXml:find('stat="' .. pickedStat.stat .. '"', 1, true) ~= nil
+            and itemsXml:find('weightMult="1.75"', 1, true) ~= nil
+            and itemsXml:find('Ignored Zero', 1, true) == nil
+
+        -- 3. Full save -> load round-trip through Build.lua.
+        pob_loadBuildXML(xml, "Items Persist Probe")
+        bm, it = ctx()
+        it:UpdateSockets()
+
+        res.rtItemsAttribs = it.activeItemSetId == 2
+            and it.activeItemSet.useSecondWeaponSet == true
+            and it.showStatDifferences == false
+            and #it.itemSetOrderList == 2 and #it.itemOrderList == 4
+
+        local loadedVar = it.items[vId]
+        res.rtVariants = loadedVar ~= nil and loadedVar.variant == 2
+            and loadedVar.hasAltVariant == true and loadedVar.variantAlt == 1
+            and loadedVar.hasAltVariant2 == true and loadedVar.variantAlt2 == 2
+            and loadedVar.hasAltVariant3 == true and loadedVar.variantAlt3 == 1
+            and loadedVar.hasAltVariant4 == true and loadedVar.variantAlt4 == 2
+            and loadedVar.hasAltVariant5 == true and loadedVar.variantAlt5 == 1
+        res.rtModRanges = loadedVar ~= nil and #loadedVar.explicitModLines >= 2
+            and math.abs((loadedVar.explicitModLines[1].range or -1) - 0.75) < 1e-9
+            and math.abs((loadedVar.explicitModLines[2].range or -1) - 0.25) < 1e-9
+
+        res.rtSet2AndSwap = it.activeItemSet.title == "PS Boss Set"
+            and it.slots["Weapon 1 Swap"].selItemId == sId
+            and it.activeItemSet[sockId] ~= nil and it.activeItemSet[sockId].pbURL == "https://pob.test/jewel2"
+
+        pob_itemsSetActiveSet(1)
+        res.rtSet1AndFlask = it.activeItemSet.useSecondWeaponSet == false
+            and it.slots["Ring 1"].selItemId == vId
+            and it.activeItemSet["Ring 1"].pbURL == "https://pob.test/ring1"
+            and it.slots["Flask 1"].selItemId == fId
+            and it.slots["Flask 1"].active == true
+            and it.activeItemSet[sockId] ~= nil and it.activeItemSet[sockId].pbURL == "https://pob.test/jewel1"
+
+        res.rtJewelSocket = sockId ~= 0
+            and bm.spec.allocNodes[sockId] ~= nil
+            and bm.spec.jewels[sockId] == jId
+            and it.slots["Jewel " .. sockId] ~= nil
+            and it.slots["Jewel " .. sockId].selItemId == jId
+
+        local tw = it.tradeQuery.statSortSelectionList
+        res.rtTradeWeights = #tw == 1 and tw[1].stat == pickedStat.stat
+            and math.abs((tw[1].weightMult or 0) - 1.75) < 1e-6
+            and tw[1].transform == pickedStat.transform
+
+        -- 4. Legacy <ModRange> reader when raw text lacks {range:...} tags.
+        local strippedXml = xml:gsub("{range:[^}]+}", "")
+        pob_loadBuildXML(strippedXml, "Items ModRange Legacy Probe")
+        bm, it = ctx()
+        local mrItem = it.items[vId]
+        res.legacyModRangeOk = mrItem ~= nil and #mrItem.explicitModLines >= 2
+            and math.abs((mrItem.explicitModLines[1].range or -1) - 0.75) < 1e-9
+            and math.abs((mrItem.explicitModLines[2].range or -1) - 0.25) < 1e-9
+
+        -- 5. Legacy flat <Slot> import (pre-ItemSet XML).
+        local legacyItems = '<Items useSecondWeaponSet="true" showStatDifferences="false">'
+            .. '<Item id="1">Rarity: Rare\nPS Flat Ring\nGold Ring\n+30 to maximum Life</Item>'
+            .. '<Item id="2">Rarity: Magic\nPS Flat Flask\nSmall Life Flask</Item>'
+            .. '<Slot name="Ring 1" itemId="1"/>'
+            .. '<Slot name="Flask 1" itemId="2" active="true"/>'
+            .. '</Items>'
+        local flatXml = xml
+            :gsub("<Sockets>.-</Sockets>", "<Sockets/>")
+            :gsub("<Items.-</Items>", function() return legacyItems end, 1)
+        pob_loadBuildXML(flatXml, "Items Flat Slot Probe")
+        bm, it = ctx()
+        res.legacyFlatSlotOk = #it.itemSetOrderList == 1 and it.activeItemSetId == 1
+            and it.activeItemSet.useSecondWeaponSet == true
+            and it.showStatDifferences == false
+            and it.slots["Ring 1"].selItemId == 1
+            and it.items[1] ~= nil and it.items[1].title == "PS Flat Ring"
+            and it.slots["Flask 1"].selItemId == 2
+            and it.slots["Flask 1"].active == true
+
+        -- 6. Real build stability (OccVortex.xml): load -> save -> load preserves
+        -- every item, equipped slot, and allocated jewel socket.
+        local f = io.open(_SRC_DIR .. "/../spec/TestBuilds/3.13/OccVortex.xml", "r")
+        if f then
+            local real = f:read("*a")
+            f:close()
+            pob_loadBuildXML(real, "Items Stable Probe")
+            bm, it = ctx()
+            it:UpdateSockets()
+            local function itemSig(b, t)
+                local parts = { tostring(#t.itemOrderList), tostring(#t.itemSetOrderList), tostring(t.activeItemSetId) }
+                for _, slot in ipairs(t.orderedSlots) do
+                    if slot.selItemId and slot.selItemId ~= 0 then
+                        parts[#parts + 1] = slot.slotName .. "=" .. tostring(slot.selItemId) .. ":" .. tostring(slot.active and true or false)
+                    end
+                end
+                local jewelCount = 0
+                for nodeId, jid in pairs(b.spec.jewels or { }) do
+                    if jid and jid ~= 0 then jewelCount = jewelCount + 1 end
+                end
+                parts[#parts + 1] = "jewels=" .. tostring(jewelCount)
+                return table.concat(parts, "|"), #t.itemOrderList, jewelCount
+            end
+            local sig1, itemCnt1, jewelCnt1 = itemSig(bm, it)
+            local x1 = bm:SaveDB(nil)
+            pob_loadBuildXML(x1, "Items Stable Probe")
+            bm, it = ctx()
+            it:UpdateSockets()
+            local sig2 = itemSig(bm, it)
+            res.realBuildStable = itemCnt1 > 0 and jewelCnt1 > 0 and sig1 == sig2
+        else
+            res.realBuildStable = false
+            res.realBuildMissing = true
+        end
+    end)
+    main:SetMode("BUILD", false, "Unnamed build")
+    runCallback("OnFrame")
+    return finish(res, ok, err)
+end

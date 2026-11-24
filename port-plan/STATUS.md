@@ -9,10 +9,27 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 6 — Items Tab — Parts 6.1 + 6.2 DONE, 6.3 items 1-3 DONE, next 6.3 item 4 (craft-item popup)**
-**Handoff for the next agent: `port-plan/handoff/HANDOFF-phase6.md` (read it, then the phase file). Stopped at: 6.3 item 3 (affix dropdowns & roll sliders, custom modifier popup, crucible modifier popup, mod range sliders, interactive tooltip line disabling) committed to `cloud/phase-6` (Windows gate green: `items-slots` 31 flags, `items-lists` 44, `items-editor` 25, `items-craft` 43, `items-affix` 26). Next: Part 6.3 Item 4: Craft-item popup (rarity/title/type/base with live tooltip) + create/edit-text popup.** (spec: `phases/PHASE-6-items-tab.md`).
-Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → **6** → 7 → Phase 3 long tail
+**ACTIVE: Phase 7 — Config Tab** (spec: `phases/PHASE-7-config-tab.md`).
+Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → 6 → **7** → Phase 3 long tail
 → 8 → 10 → 11 → 9 → 12 → 13 → 14 → 15.
+
+**Phase 6 — Items Tab — DONE (2026-11-24, Windows session, branch `phase-6`).**
+All five parts (6.1–6.5) and the acceptance gate are ticked in
+`phases/PHASE-6-items-tab.md` (full session logs at its bottom). Bridge:
+`app/lua/pob_items.lua`. Windows gate green: `ninja -C build-win` EXIT=0,
+`pob-selftest.exe` EXIT=0, `pob-qt.exe --headless` EXIT=0, `pob-qt.exe --capture`
+smoke EXIT=0 (zero new QML warnings/errors). All 8 Items checks green:
+`items-slots` (31 flags), `items-lists` (44), `items-editor` (25),
+`items-craft` (43), `items-affix` (26), `items-craft-new` (17),
+`items-compare` (24), `items-persist` (19).
+**Open follow-ups carried out of Phase 6 (none block Phase 7):**
+- **Phase 12:** `"Buy similar"` button remains disabled until the trader tab arrives.
+- **Deferred visual polish:** RELIC foil-tint shader, multi-column tooltip overflow,
+  and Windows baseline refresh (`app/tests/capture-baseline/*.png`).
+- **Upstream sync note:** `src/Classes/CompareBuySimilar.lua` carries a 3-line
+  stock-LuaJIT compat edit (`?.:` / `..=`) recorded in `app/lua/HOST_CONTRACT.md`;
+  `pob_skills.lua` and `pob_items.lua` adopt upstream PR `#9647`'s
+  `New*Set`/`Create*Set` split.
 
 **Phase 5 — Skills Tab — DONE (2026-09-28, cloud session, branch `cloud/phase-5`,
 draft PR jjacobson815/PathOfBuilding#6, stacked on `cloud/phase-4`).** All four parts
@@ -345,13 +362,15 @@ Full detail in `reference/00-architecture.md`. The short list:
 - Upstream sync 2026-10-20 (branch `cloud/sync-upstream-dev`): merged v2.67.2 then origin/dev `16de4b82d`; tree 3_29 builds open. runtime/*.dll are PINNED to the pre-sync versions (upstream's refresh deferred; take it explicitly with `git checkout origin/dev -- runtime/<dll>`). Suggest Path dropped in sync; re-port from a60a9d35a if wanted. Main.lua carries one stock-LuaJIT compat line (upstream `+=`), see HOST_CONTRACT.md step 3.
 - << Back / Ctrl+W fixed: pob_closeBuild pumps OnFrame (selftest close-build)
 
-**▶ Phase 6 (in progress).** Windows (Qt 6.11.1, msys2) now builds and gates everything through 6.2; the only Windows fix needed was `SocketGroupList.qml`'s `"file://" + "C:/..."` icon URL (now `file:///` for drive paths). Item drag-drop: `components/DragGhost.qml` (overlay drag payload `{kind,key,shift}`, DropArea key "Item") + `ItemListBox.qml`; the item DB list is pumped by `ItemDBPanel`'s job-scoped timer via `pob_itemsDBStep`. `Label` is ONE line (height = size): split multi-line text into a Repeater. Bridge `app/lua/pob_items.lua`. Traps found: legacy
+**▶ Phase 6 — COMPLETE (2026-11-24).** Windows (Qt 6.11.1, msys2) builds and gates all five parts (6.1–6.5, 8 `items-*` checks, 229 flags total); the only Windows fix needed was `SocketGroupList.qml`'s `"file://" + "C:/..."` icon URL (now `file:///` for drive paths). Item drag-drop: `components/DragGhost.qml` (overlay drag payload `{kind,key,shift}`, DropArea key "Item") + `ItemListBox.qml`; the item DB list is pumped by `ItemDBPanel`'s job-scoped timer via `pob_itemsDBStep`. `Label` is ONE line (height = size): split multi-line text into a Repeater. Bridge `app/lua/pob_items.lua` uses a craft-session capture engine for Enchant/Anoint/Corrupt/Implicit/Custom/Crucible popups, lifted `CraftItem` (`CraftNewPopup.qml`), `marshalTooltip`/`tipData` (rarity header art, influence badges, Shift-held granted-skill child tooltips), and `createDisplayItemSafe` to break `CopyAnointsAndEldritchImplicits` mod-line table aliasing (including the `ItemsTab.lua:2056` early-return path on influenced amulets) on editor paths only. Traps found: legacy
 `IsKeyDown` is a stub, so lifted click/equip code takes explicit shift/ctrl flags
 (`withKeys` temporarily swaps `IsKeyDown`); `ItemsTab:UpdateSockets` only runs
 from Draw/AddItemTooltip, so call it before reading sockets; `ItemSlotControl:
 Populate` uses `pairs` (unstable order), so sort by `itemOrderList`; `AddItem`
 alone pushes no undo state (legacy adds one after), so selftest fixtures must
-call `AddUndoState`; undo REPLACES `items`/`itemSets`, so address by id/index.
+call `AddUndoState`; undo REPLACES `items`/`itemSets`, so address by id/index;
+upstream PR `#9647` split `Create*Set` (no order-list append) from `New*Set`
+(appends itself).
 
 **▶ Phase 5 — COMPLETE (2026-09-28).** What a future session must know:
 - **Skills tab pattern:** almost every legacy control keeps its callback as a

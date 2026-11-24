@@ -975,6 +975,8 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     if (!pob_run_lua_check(engine, "pob_selftestItemsCraftNew", "items-craft-new")) return false;
     // Phase 6 Part 6.4: comparison tooltips, jewel-radius compare, rules, paste & Ctrl+D.
     if (!pob_run_lua_check(engine, "pob_selftestItemsCompare", "items-compare")) return false;
+    // Phase 6 Part 6.5: <Items> XML save/load round-trip (sets, variants, ModRange, sockets, weights, legacy flat <Slot>).
+    if (!pob_run_lua_check(engine, "pob_selftestItemsPersist", "items-persist")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;
