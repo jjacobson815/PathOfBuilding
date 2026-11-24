@@ -194,9 +194,16 @@ function MakeDir(path) return pob.makeDir(path) end
 function RemoveDir(path) return pob.removeDir(path) end
 function SetWorkDir(path) end
 function GetWorkDir() return "." end
-function LaunchSubScript(scriptText, funcList, subList, ...) end
-function AbortSubScript(ssID) end
-function IsSubScriptRunning(ssID) end
+function LaunchSubScript(scriptText, funcList, subList, ...)
+    if pob.launchSubScript then return pob.launchSubScript(scriptText, funcList, subList, ...) end
+end
+function AbortSubScript(ssID)
+    if pob.abortSubScript then pob.abortSubScript(ssID) end
+end
+function IsSubScriptRunning(ssID)
+    if pob.isSubScriptRunning then return pob.isSubScriptRunning(ssID) end
+    return false
+end
 
 -- Module loading (prepends _SRC_DIR)
 function LoadModule(fileName, ...)
@@ -6547,6 +6554,18 @@ require("pob_config")
 require("pob_calcs")
 require("pob_notes_party")
 require("pob_shell")
+do
+    local ok, err = pcall(require, "pob_network")
+    if not ok and not tostring(err):find("module 'pob_network' not found", 1, true) then
+        if pob and pob.log then pob.log("pob_network load error: " .. tostring(err)) end
+    end
+end
+do
+    local ok, err = pcall(require, "pob_import")
+    if not ok and not tostring(err):find("module 'pob_import' not found", 1, true) then
+        if pob and pob.log then pob.log("pob_import load error: " .. tostring(err)) end
+    end
+end
 
 -- Old-tree art (follow-up to Phase 4): every data era must resolve node icons
 -- and frames. <= 3_24 trees carry no sprites.lua and no skillSprites filenames,

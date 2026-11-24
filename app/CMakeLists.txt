@@ -7,7 +7,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick Svg QuickControls2)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick Svg QuickControls2)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LUAJIT REQUIRED luajit)
 
@@ -21,6 +21,7 @@ pkg_check_modules(CURL REQUIRED libcurl)
 add_executable(pob-qt
     src/main.cpp
     src/LuaEngine.cpp
+    src/SubScriptManager.cpp
     src/TextMetrics.cpp
     src/Theme.cpp
     src/ColorText.cpp
@@ -53,7 +54,7 @@ target_include_directories(pob-qt PRIVATE
     ${CURL_INCLUDE_DIRS}
 )
 target_link_libraries(pob-qt PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Svg Qt6::QuickControls2
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::Svg Qt6::QuickControls2
     ${LUAJIT_LIBRARIES}
     ZLIB::ZLIB
     ${CURL_LIBRARIES}
@@ -67,6 +68,7 @@ target_compile_definitions(pob-qt PRIVATE
 add_executable(pob-selftest
     src/selftest.cpp
     src/LuaEngine.cpp
+    src/SubScriptManager.cpp
     src/TextMetrics.cpp
     src/luabridge.cpp
 )
@@ -82,6 +84,7 @@ target_link_libraries(pob-selftest PRIVATE
     # and no QGuiApplication -- QCoreApplication is enough -- but it does
     # need the library, and the imageformats plugins (qwebp) on the path.
     Qt6::Gui
+    Qt6::Network
     ${LUAJIT_LIBRARIES}
     ZLIB::ZLIB
     ${CURL_LIBRARIES}

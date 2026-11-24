@@ -1,4 +1,5 @@
 #include "LuaEngine.h"
+#include "SubScriptManager.h"
 #include "selftest_checks.h"
 #include "luabridge.h"
 #include "TextMetrics.h"
@@ -46,6 +47,7 @@
 LuaEngine::LuaEngine(QObject* parent) : QObject(parent) {}
 
 LuaEngine::~LuaEngine() {
+    if (m_subScripts) m_subScripts->shutdown();
     if (m_L) lua_close(m_L);
 }
 
@@ -80,6 +82,9 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
     // metrics ship under <runtime>/SimpleGraphic/Fonts.
     m_textMetrics = new TextMetrics(this);
     m_textMetrics->setFontDir(m_runtimeDir + "/SimpleGraphic/Fonts");
+
+    m_luaDir = QFileInfo(hostFile).dir().absolutePath();
+    m_subScripts = new SubScriptManager(this);
 
     // One-time libcurl global init (idempotent across engine instances).
     static bool curlReady = false;
@@ -133,6 +138,11 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
         { "toastsChanged",     l_pob_toastsChanged },
         // Phase 4: real image dimensions for NewImageHandle():ImageSize().
         { "imageSize",         l_pob_imageSize },
+        // Phase 10/11: worker-thread subscripts and async signal emission.
+        { "launchSubScript",    l_pob_launchSubScript },
+        { "abortSubScript",     l_pob_abortSubScript },
+        { "isSubScriptRunning", l_pob_isSubScriptRunning },
+        { "emitSignal",         l_pob_emitSignal },
         { nullptr, nullptr }
     };
     lua_newtable(m_L);
@@ -670,9 +680,65 @@ int LuaEngine::l_pob_imageSize(lua_State* L) {
     }
     cache.insert(path, sz);          // negatives cached too: a missing sheet
                                      // must not be re-probed per node.
+    // Phase 4: pob.imageSize(path) -> width, height.
     lua_pushinteger(L, sz.width());
     lua_pushinteger(L, sz.height());
     return 2;
+}
+
+int LuaEngine::l_pob_launchSubScript(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    if (!self || !self->m_subScripts || lua_gettop(L) < 1 || !lua_isstring(L, 1)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    const QString scriptText = QString::fromUtf8(lua_tostring(L, 1));
+    const QString funcList = (lua_gettop(L) >= 2 && lua_isstring(L, 2))
+        ? QString::fromUtf8(lua_tostring(L, 2)) : QString();
+    const QString subList = (lua_gettop(L) >= 3 && lua_isstring(L, 3))
+        ? QString::fromUtf8(lua_tostring(L, 3)) : QString();
+    QVariantList args;
+    const int top = lua_gettop(L);
+    for (int i = 4; i <= top; ++i) {
+        args.append(luaToVariant(L, i));
+    }
+    const int id = self->m_subScripts->launch(scriptText, funcList, subList, args);
+    if (id <= 0) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushinteger(L, id);
+    return 1;
+}
+
+int LuaEngine::l_pob_abortSubScript(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    if (self && self->m_subScripts && lua_gettop(L) >= 1 && lua_isnumber(L, 1)) {
+        self->m_subScripts->abort(static_cast<int>(lua_tointeger(L, 1)));
+    }
+    return 0;
+}
+
+int LuaEngine::l_pob_isSubScriptRunning(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    bool running = false;
+    if (self && self->m_subScripts && lua_gettop(L) >= 1 && lua_isnumber(L, 1)) {
+        running = self->m_subScripts->isRunning(static_cast<int>(lua_tointeger(L, 1)));
+    }
+    lua_pushboolean(L, running ? 1 : 0);
+    return 1;
+}
+
+int LuaEngine::l_pob_emitSignal(lua_State* L) {
+    LuaEngine* self = selfOf(L);
+    if (!self) return 0;
+    const int top = lua_gettop(L);
+    for (int i = 1; i <= top; ++i) {
+        if (lua_isstring(L, i)) {
+            self->emitNamedSignal(QString::fromUtf8(lua_tostring(L, i)));
+        }
+    }
+    return 0;
 }
 
 // --- Read / call helpers ----------------------------------------------------
@@ -1329,6 +1395,28 @@ QVariant LuaEngine::convertBuild() {
     return r;
 }
 
+void LuaEngine::emitNamedSignal(const QString& name) {
+    if (name == "build") emit buildDataChanged();
+    else if (name == "tree") emit treeChanged();
+    else if (name == "items") emit itemsChanged();
+    else if (name == "skills") emit skillsChanged();
+    else if (name == "config") emit configChanged();
+    else if (name == "notes") emit notesChanged();
+    else if (name == "party") emit partyChanged();
+    else if (name == "compare") emit compareChanged();
+    else if (name == "network") emit networkChanged();
+    else if (name == "import") emit importChanged();
+    else if (name == "buildList") emit buildListChanged();
+    else if (name == "mode") {
+        emit modeChanged();
+        emit viewChanged();
+        emit currentModeChanged();
+        emit currentViewChanged();
+    } else if (name == "calcs") {
+        emit calcsChanged();
+    }
+}
+
 QVariant LuaEngine::invoke(const QString& name, const QVariantList& args) {
     if (!name.startsWith("pob_") || name.startsWith("pob_selftest")) {
         qCritical() << "invoke: refused" << name;
@@ -1342,14 +1430,13 @@ QVariant LuaEngine::invoke(const QString& name, const QVariantList& args) {
     for (const QVariant& e : emits) seen.insert(e.toString());
     // Fixed order: build/tree state first, calcs last, so a listener that
     // refreshes on calcsChanged sees every other model already current.
-    if (seen.contains("build")) emit buildDataChanged();
-    if (seen.contains("tree")) emit treeChanged();
-    if (seen.contains("items")) emit itemsChanged();
-    if (seen.contains("skills")) emit skillsChanged();
-    if (seen.contains("config")) emit configChanged();
-    if (seen.contains("notes")) emit notesChanged();
-    if (seen.contains("party")) emit partyChanged();
-    if (seen.contains("calcs")) emit calcsChanged();
+    static const char* kOrder[] = {
+        "build", "tree", "items", "skills", "config", "notes", "party",
+        "compare", "network", "import", "buildList", "mode", "calcs"
+    };
+    for (const char* sig : kOrder) {
+        if (seen.contains(QLatin1String(sig))) emitNamedSignal(QLatin1String(sig));
+    }
     return r;
 }
 

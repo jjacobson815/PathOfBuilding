@@ -15,6 +15,7 @@
 // the C `pob` bridge table registered here. This reuses the exact seam the
 // project's own src/HeadlessWrapper.lua already uses for headless runs.
 class TextMetrics;
+class SubScriptManager;
 
 class LuaEngine : public QObject {
     Q_OBJECT
@@ -350,6 +351,8 @@ signals:
     void notesChanged();       // notes text
     void compareChanged();     // compare entries
     void partyChanged();       // party members
+    void networkChanged();     // async network / subscript activity (Phase 10)
+    void importChanged();      // import/export tab async updates (Phase 11)
     void buildListChanged();   // LIST-mode build library
     void modeChanged();        // mode switch / new build loaded (refresh all)
     void viewChanged();        // active view (sidebar) changed
@@ -416,19 +419,38 @@ private:
     // image header via QImageReader::size() -- never decodes the pixels, which
     // matters because the sheets are up to 4k x 4k -- and memoises per path.
     static int l_pob_imageSize(lua_State* L);
+    static int l_pob_launchSubScript(lua_State* L);
+    static int l_pob_abortSubScript(lua_State* L);
+    static int l_pob_isSubScriptRunning(lua_State* L);
+    static int l_pob_emitSignal(lua_State* L);
     static LuaEngine* selfOf(lua_State* L);
 
     lua_State* m_L = nullptr;
     QString m_srcDir;
     QString m_runtimeDir;
     QString m_userDir;
+    QString m_luaDir;
     QStringList m_launchArgs;   // exposed to Lua as the `arg` table
     QElapsedTimer m_clock;      // monotonic clock backing GetTime (ms since init)
     TextMetrics* m_textMetrics = nullptr;  // .tgf-backed string measurement (Phase 1.2a)
+    SubScriptManager* m_subScripts = nullptr; // Phase 10 worker-thread subscripts
 
 public:
     // Shared TextMetrics instance (created in init() from the runtime Fonts dir).
     // main.cpp exposes this same object to QML as the `textMetrics` context
     // property so QML and the Lua engine measure identically.
     TextMetrics* textMetrics() const { return m_textMetrics; }
+    SubScriptManager* subScripts() const { return m_subScripts; }
+    QString srcDir() const { return m_srcDir; }
+    QString runtimeDir() const { return m_runtimeDir; }
+    QString userDir() const { return m_userDir; }
+    QString luaDir() const { return m_luaDir; }
+
+    // Emit a named Qt signal on the UI thread (used by invoke() and pob.emitSignal).
+    void emitNamedSignal(const QString& name);
+
+    // Stateless C bridge helpers safe to register in worker-thread Lua states.
+    static int pobHttp(lua_State* L) { return l_pob_http(L); }
+    static int pobInflate(lua_State* L) { return l_pob_inflate(L); }
+    static int pobDeflate(lua_State* L) { return l_pob_deflate(L); }
 };
