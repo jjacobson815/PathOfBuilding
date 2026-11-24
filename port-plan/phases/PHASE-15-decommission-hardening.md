@@ -1,6 +1,6 @@
 # Phase 15 — SimpleGraphic Decommission & Final Hardening
 
-**Status:** NOT STARTED
+**Status:** PARTIAL — Parts 15.1 & 15.4 DONE (2026-11-24, Wave 1); Parts 15.2 & 15.3 DEFERRED to Wave 2/3
 **Goal:** Close out the port: formally retire the SimpleGraphic host contract,
 remove any dead legacy-update code, do the final performance and parity passes, and
 establish the ongoing upstream-sync procedure so the fork doesn't rot each league.
@@ -10,15 +10,15 @@ establish the ongoing upstream-sync procedure so the fork doesn't rot each leagu
 
 ## Part 15.1 — Formalize the host contract
 
-- [ ] Declare the SimpleGraphic rendering/input globals **permanently stubbed** and
+- [x] Declare the SimpleGraphic rendering/input globals **permanently stubbed** and
   document it (in `HOST_CONTRACT.md`): `SetDrawLayer/SetViewport/SetDrawColor/
   DrawImage*/DrawString*/NewImageHandle` never become real; QML owns display.
   Record that any future reuse of legacy Draw code would require full text metrics +
   the `^0`–`^9` palette (external sourcing). (S)
-- [ ] Confirm no runtime path can drive the engine into legacy SimpleGraphic-only
+- [x] Confirm no runtime path can drive the engine into legacy SimpleGraphic-only
   code (Update.exe spawn, `ConExecute("set vid_mode...")`, etc.) — those globals
   stay stubbed/no-op. (S)
-- [ ] Remove dead legacy-update code paths if Phase 14 replaced them (or keep them
+- [x] Remove dead legacy-update code paths if Phase 14 replaced them (or keep them
   inert and documented). (S)
 
 ## Part 15.2 — Performance pass
@@ -48,7 +48,7 @@ establish the ongoing upstream-sync procedure so the fork doesn't rot each leagu
 
 ## Part 15.4 — Upstream-sync procedure (ongoing)
 
-- [ ] Document + script the per-league sync: pull upstream `src/` (Modules + Data
+- [x] Document + script the per-league sync: pull upstream `src/` (Modules + Data
   atomically), normalize CRLF, re-apply the four sanctioned host seams (viewList,
   sideBarCollapsed, TotalDotDPS, UITheme), regenerate ModCache, run calc-parity.
   Include the `src/Export/` data-refresh note (run legacy Export + bun_extract_file
@@ -70,3 +70,9 @@ establish the ongoing upstream-sync procedure so the fork doesn't rot each leagu
   features (responsive layouts, obscure keyboard shortcuts, dev-mode paths).
 - The upstream-sync procedure is what keeps the port alive after the port "ends" —
   without it the fork rots ~quarterly.
+
+## Session log — 2026-11-24 (Wave 1, Windows)
+
+- Completed Parts 15.1 & 15.4: formalized `app/lua/HOST_CONTRACT.md` (permanent SimpleGraphic/legacy stubs, 4 sanctioned `src/` seams, stock-LuaJIT compat edits, Wave 1 `SubScriptManager`/`pob.emitSignal`/`pob_network`/`pob_import` seams, `src/Export/` & per-league sync procedure) and added `tools/audit_host_contract.py` + `tools/upstream_sync.py`.
+- Verified: `python tools/audit_host_contract.py` exit 0 (all 3 checks PASS), `python tools/upstream_sync.py --dry-run` exit 0 (CR-normalized classification + 259 Lua files `luajit -bl` clean).
+- Deferred to Wave 2/3: Part 15.2 (performance pass) and Part 15.3 (full parity QA sweep).

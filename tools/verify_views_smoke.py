@@ -11,11 +11,19 @@ Usage:
   python tools/verify_views_smoke.py <capture_dir> [--log PATH] [--views v1,v2,...]
 """
 import argparse
+import math
 import os
 import re
+import struct
 import sys
-import numpy as np
-from PIL import Image
+import zlib
+
+try:
+    import numpy as np
+    from PIL import Image
+    _HAS_PIL_NUMPY = True
+except ImportError:
+    _HAS_PIL_NUMPY = False
 
 EXPECTED_VIEWS = [
     "list",
@@ -42,12 +50,65 @@ QML_ERROR_PATTERNS = [
 ]
 
 
+def _check_png_stdlib(path):
+    """Pure-stdlib PNG header + non-blank pixel check (no numpy/PIL needed)."""
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    if len(raw) < 33 or raw[:8] != b"\x89PNG\r\n\x1a\n":
+        return False, "invalid PNG signature"
+    pos = 8
+    w = h = bit_depth = color_type = 0
+    idat = bytearray()
+    while pos + 8 <= len(raw):
+        length, ctype = struct.unpack(">I4s", raw[pos:pos + 8])
+        pos += 8
+        chunk = raw[pos:pos + length]
+        pos += length + 4  # skip CRC
+        if ctype == b"IHDR" and len(chunk) >= 13:
+            w, h, bit_depth, color_type = struct.unpack(">IIBB", chunk[:10])
+        elif ctype == b"IDAT":
+            idat.extend(chunk)
+        elif ctype == b"IEND":
+            break
+    if w < 100 or h < 100:
+        return False, f"unexpectedly small ({w}x{h})"
+    if not idat:
+        return False, "missing IDAT chunk"
+    try:
+        decompressed = zlib.decompress(bytes(idat))
+    except zlib.error as exc:
+        return False, f"corrupt PNG IDAT ({exc})"
+    # Sample bytes across scanlines to confirm non-flat render.
+    bpp_map = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+    channels = bpp_map.get(color_type, 4)
+    stride = 1 + w * channels * max(1, bit_depth // 8)
+    sample = []
+    step_y = max(1, h // 40)
+    step_x = max(1, w // 40) * channels
+    for y in range(0, h, step_y):
+        row_start = y * stride + 1
+        row_end = min(len(decompressed), row_start + w * channels)
+        if row_start >= row_end:
+            break
+        for x in range(row_start, row_end, step_x):
+            sample.append(decompressed[x])
+    if len(sample) < 16:
+        return False, f"truncated PNG payload ({w}x{h})"
+    mean = sum(sample) / len(sample)
+    var = sum((v - mean) ** 2 for v in sample) / len(sample)
+    if math.sqrt(var) < 2.0:
+        return False, f"blank/flat render ({w}x{h})"
+    return True, f"OK ({w}x{h}, {len(raw)} bytes)"
+
+
 def check_png(path):
     """Return (ok, message) for a captured PNG."""
     if not os.path.isfile(path):
         return False, "missing"
     if os.path.getsize(path) == 0:
         return False, "empty (0 bytes)"
+    if not _HAS_PIL_NUMPY:
+        return _check_png_stdlib(path)
     try:
         im = Image.open(path).convert("RGB")
         arr = np.asarray(im, dtype=np.float64)
@@ -124,12 +185,15 @@ def main():
         views = list(EXPECTED_VIEWS)
 
     ok = True
+    # _status.log reports viewList count = number of BUILD views (9); LIST mode
+    # is appended separately by runCapture(), yielding 10 total PNGs.
+    min_build_views = len([v for v in EXPECTED_VIEWS if v != "list"])
     m = re.search(r"viewList\s+count=(\d+)", status_text)
     if m:
         count = int(m.group(1))
         print(f"[smoke] _status.log reports viewList count={count}")
-        if not args.allow_present and not args.views and count < len(EXPECTED_VIEWS):
-            print(f"FAIL: expected viewList count >= {len(EXPECTED_VIEWS)}, got {count}", file=sys.stderr)
+        if not args.allow_present and not args.views and count < min_build_views:
+            print(f"FAIL: expected viewList count >= {min_build_views}, got {count}", file=sys.stderr)
             ok = False
     else:
         print("[smoke] WARNING: _status.log does not contain 'viewList count=N'")

@@ -105,6 +105,9 @@ target_compile_definitions(pob-selftest PRIVATE
 # dist/lua/pob_host.lua and the engine sources at dist/src, matching the
 # exe-relative resolution in main.cpp (which also chdir's to dist/src so the
 # engine's relative TreeData/ + manifest.xml paths resolve).
+# Phase 14.1: ensure `cmake --install` always overwrites dist/ binaries & scripts
+# even when mtimes match or skew across rebuilds.
+install(CODE "set(CMAKE_INSTALL_ALWAYS ON)")
 install(TARGETS pob-qt RUNTIME DESTINATION dist)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lua DESTINATION dist
         FILES_MATCHING PATTERN "*.lua")

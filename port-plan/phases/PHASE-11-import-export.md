@@ -1,6 +1,6 @@
 # Phase 11 — Import/Export Tab
 
-**Status:** NOT STARTED
+**Status:** DONE (2026-11-24, Wave 1, branch `phases-7-8-9`)
 **Goal:** Port the Import/Export tab: OAuth + account-name character import, the
 full item/tree/skill import pipeline, and build sharing (generate/copy/share/import
 across the 7 build sites). This is where a user's real character comes into the
@@ -39,7 +39,7 @@ layout. Record each layout change as a documented difference.
 
 ## Part 11.1 — OAuth account import
 
-- [ ] "Import From Your Account": Authorize with Path of Exile (30 s timer, rate-
+- [x] "Import From Your Account": Authorize with Path of Exile (30 s timer, rate-
   limit countdown, status/error labels, logout); the OAuth flow uses `PoEAPI.lua` +
   `LaunchServer.lua` (localhost redirect server) — via the Phase 10 strategy (real
   sub-script running LaunchServer, or a `QTcpServer` returning the same `(code,
@@ -49,7 +49,7 @@ layout. Record each layout change as a documented difference.
 
 ## Part 11.2 — Account-name import
 
-- [ ] "Import By Account Name": realm + account-name edit (requires `#1234`
+- [x] "Import By Account Name": realm + account-name edit (requires `#1234`
   discriminator, unicode paste filter), Start, account-history dropdown; staged flow
   GETACCOUNTNAME → SELECTCHAR → IMPORTING; profile-page scrape to fix account-name
   case; league/char dropdowns. Uses get-characters/get-passive-skills/get-items
@@ -57,11 +57,11 @@ layout. Record each layout change as a documented difference.
 
 ## Part 11.3 — Import pipeline (shared logic)
 
-- [ ] `ImportPassiveTreeAndJewels`: masteries, jewel_data, skill_overrides→tattoos,
+- [x] `ImportPassiveTreeAndJewels`: masteries, jewel_data, skill_overrides→tattoos,
   hashes_ex, alt-ascendancy mapping, ruthless/phrecia suffix, cluster jewel graphs,
   sets char level + auto-off, resistance-penalty config estimate, bandit/pantheon
   config; confirm-overwrite if tree non-empty; "Delete jewels" option. (M)
-- [ ] `ImportItemsAndSkills`: full item JSON parser (rarity/slot maps, abyssal
+- [x] `ImportItemsAndSkills`: full item JSON parser (rarity/slot maps, abyssal
   sockets, catalysts, two-toned boots, energy blade, influences, fractured/crafted/
   scourge/crucible/mutated/flavour mods, foils, socketed-gems → socket groups with
   dedupe/merge, imbued supports), **socket-group order + state preservation on re-
@@ -71,13 +71,13 @@ layout. Record each layout change as a documented difference.
 
 ## Part 11.4 — Build sharing
 
-- [ ] Generate code (URL-safe base64 + zlib deflate over the build XML — verify
+- [x] Generate code (URL-safe base64 + zlib deflate over the build XML — verify
   against real codes from all 7 sites), Copy, **Export dropdown** (sites with
   postUrl) + **Share** (upload → short link, via Phase 10). Import: URL/code edit
   (site URLs incl. youtube/google redirect unwrap, raw base64, dev-mode character
   JSON), validity label, **mode dropdown** (this build [confirm overwrite] / new
   build / **as comparison** → CompareTab), Import button. (M)
-- [ ] `<Import>` XML section (lastRealm/League/AccountHash/CharacterHash, exportParty,
+- [x] `<Import>` XML section (lastRealm/League/AccountHash/CharacterHash, exportParty,
   importLink). **Export Support checkbox** feeding PartyTab exports (Phase 9). (S)
 
 ## Acceptance gate
@@ -99,3 +99,9 @@ layout. Record each layout change as a documented difference.
 - The item JSON parser is the crux and is shared with Phase 6 — one implementation.
 - Re-import state preservation (keeping socket-group order/enabled across re-imports)
   is subtle and easy to regress; test a re-import of an edited build.
+
+## Session log — 2026-11-24 (Wave 1, Windows)
+
+- Implemented `app/lua/pob_import.lua` (Parts 11.1–11.4 reusing `ImportTab:ImportPassiveTreeAndJewels` / `ImportItemsAndSkills` and Phase 6 item parser) and rebuilt `app/qml/views/ImportView.qml` following the 2026-10-16 usability spec (single top-to-bottom guided flow, default new build named after character, explicit `ConfirmPopup` when overwriting open build, collapsed Options with 1-sentence descriptions, plain-word status & disabled-button reasons, separate Share/Open area).
+- OAuth token storage kept as legacy `Settings.xml` plaintext (`PoEAPI:UpdateMain()`) for v1 to keep `src/` untouched; OS-keychain migration deferred as follow-up.
+- Integrated gates green: `import-share ok = true`, `import-pipeline ok = true` (`reimportPreservedOk=true`), `import-account ok = true` in both `pob-selftest.exe` and `pob-qt.exe --headless`; `import.png` rendered cleanly (1100x720, 242532 bytes) with zero QML warnings in `pob-qt-main.log`.

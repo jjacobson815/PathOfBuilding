@@ -1042,6 +1042,13 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     if (!pob_run_lua_check(engine, "pob_selftestLoadouts", "loadouts")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestSpectreLibrary", "spectre-library")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestSaveAsFolders", "save-as-folders")) return false;
+    // Phase 10: worker-thread LaunchSubScript protocol & async network foundation.
+    if (!pob_run_lua_check(engine, "pob_selftestSubScript", "subscript")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestNetwork", "network")) return false;
+    // Phase 11: Import/Export tab (build sharing, character import pipeline, account/OAuth flow).
+    if (!pob_run_lua_check(engine, "pob_selftestImportShare", "import-share")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestImportPipeline", "import-pipeline")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestImportAccountFlow", "import-account")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

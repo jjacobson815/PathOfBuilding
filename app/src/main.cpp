@@ -16,6 +16,7 @@
 #include <QDateTime>
 #include <QFontDatabase>
 #include "LuaEngine.h"
+#include "SubScriptManager.h"
 #include "selftest_checks.h"
 #include "Theme.h"
 #include "TextMetrics.h"
@@ -335,6 +336,9 @@ int main(int argc, char** argv) {
     }
 
     checkBinaryFreshness();
+    if (!capture) {
+        SubScriptManager::registerUriScheme();
+    }
 
     LuaEngine engine;
     QObject::connect(&engine, &LuaEngine::logMessage,
@@ -570,6 +574,15 @@ int main(int argc, char** argv) {
         int rc = runCapture(engine, qml, captureDir.isEmpty() ? "captures" : captureDir);
         if (rc != 0) return rc;
         return app.exec();
+    }
+
+    // Phase 10 Part 10.3: if launched with a pob:// URI argument, trigger the
+    // async URI import once the event loop is active so signals reach QML.
+    const QString startupUri = SubScriptManager::parseStartupUri(launchArgs);
+    if (!startupUri.isEmpty()) {
+        QTimer::singleShot(0, &engine, [&engine, startupUri]() {
+            engine.invoke(QStringLiteral("pob_handleStartupUri"), { startupUri });
+        });
     }
 
     return app.exec();

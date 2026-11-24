@@ -9,9 +9,16 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 10 — Network & Async Foundation** (spec: `phases/PHASE-10-network-async.md`).
-Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → 6 → 7 → ~~Phase 3 long tail~~ (DONE) → ~~8~~ (DONE) → **10** → 11 → ~~9~~ (DONE) → 12 → 13 → 14 → 15.
-*(Phase 3 long tail landed on 2026-11-24; Phase 10 is now ACTIVE.)*
+**ACTIVE: Wave 2/3 Scope-Gated Work — Phase 12 (Trade Tooling) / Phase 13 (Compare Tab) / Phase 14.2 (Auto-Update) / Phase 15.2–15.3 (Perf & Parity QA).**
+Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → 6 → 7 → ~~Phase 3 long tail~~ (DONE) → ~~8~~ (DONE) → ~~10~~ (DONE) → ~~11~~ (DONE) → ~~9~~ (DONE) → **12** → 13 → 14 *(14.1 non-signing & 14.3 DONE; 14.2 & code signing deferred)* → 15 *(15.1 & 15.4 DONE; 15.2–15.3 deferred)*.
+*(Wave 1 landed on 2026-11-24: Phases 10, 11, 14.1/14.3, and 15.1/15.4 are complete and gated.)*
+
+**Wave 1 — Phases 10, 11, 14 (14.1 non-signing & 14.3), 15 (15.1 & 15.4) — DONE (2026-11-24, Windows session, branch `phases-7-8-9`).**
+- **Phase 10 — Network & Async Foundation (DONE):** Strategy **(A) Real `LaunchSubScript` worker-thread protocol** implemented in `app/src/SubScriptManager.h`/`.cpp` (isolated worker `lua_State`, `BlockingQueuedConnection` `funcList` sync proxies, `QueuedConnection` `OnSubCall`/`OnSubFinished`/`OnSubError`, `AbortSubScript`/`IsSubScriptRunning`, off-UI-thread `pob.http`, and `QTcpServer`-backed Lua `socket` shim for `src/LaunchServer.lua` with zero `src/` edits). Fixed `app/lua/lcurl/safe.lua` error `:msg()`/`__tostring`. Added `app/lua/pob_network.lua` (`pob://` URI import, async PoEURL resolve/shrink, `pob_selftestSubScript`, `pob_selftestNetwork`), wired `TreeImportPopup.qml`/`TreeExportPopup.qml`, and hooked `pob://` startup URI registration/handling in `app/src/main.cpp`.
+- **Phase 11 — Import/Export Tab (DONE):** Added `app/lua/pob_import.lua` (Parts 11.1–11.4 + `pob_selftestImportShare`, `pob_selftestImportPipeline`, `pob_selftestImportAccountFlow`) and rebuilt `app/qml/views/ImportView.qml` following all 2026-10-16 usability requirements (single top-to-bottom guided flow, default new build named after character, explicit overwrite confirmation, collapsed Options with 1-sentence descriptions, plain-word status & disabled-button reasons, separate Share/Open area). OAuth storage locked to legacy `Settings.xml` plaintext (`PoEAPI:UpdateMain()`) for v1; OS-keychain migration logged as follow-up.
+- **Phase 14 — Packaging & CI Matrix (Parts 14.1 non-signing & 14.3 DONE; Part 14.2 & code signing deferred):** Hardened `app/deploy-win-standalone.sh` & `app/pack-manifest.cmake`, codified `CMAKE_INSTALL_ALWAYS` in `app/CMakeLists.txt`, added NSIS installer (`app/installer/pob-qt.nsi`, `app/installer/build-installer.sh` shipping all 39 TreeData versions + `pob://` registry hooks), updated `.github/workflows/{qt-selftest,installer,release,beta,update-simple-graphic,test}.yml`, fixed `tools/screenshot_diff.py` & `tools/verify_style.py`, and added `tools/verify_views_smoke.py` (with pure-stdlib PNG fallback).
+- **Phase 15 — Host Contract & Upstream Sync (Parts 15.1 & 15.4 DONE; Parts 15.2–15.3 deferred):** Formalized `app/lua/HOST_CONTRACT.md` and added `tools/audit_host_contract.py` + `tools/upstream_sync.py`.
+- **Windows Integrated Gate (all EXIT=0):** `ninja -C build-win`, `pob-selftest.exe` (`subscript`, `network`, `import-share`, `import-pipeline`, `import-account` all `ok = true`), `pob-qt.exe --headless`, `pob-qt.exe --capture` + `tools/verify_views_smoke.py` (10/10 views OK, 0 QML warnings/errors in `_status.log` and `pob-qt-main.log`), `tools/audit_host_contract.py`, `tools/upstream_sync.py --dry-run` (259 Lua files `luajit -bl` clean), and `bash -n` on deploy/installer scripts.
 
 **Phase 9 — Notes & Party Tabs — DONE (2026-11-24, Windows session, branch `phases-7-8-9`, commit `eefa79b0b`).**
 All checkboxes and session log ticked in `phases/PHASE-9-notes-party.md`. Bridge:
@@ -342,8 +349,14 @@ Full detail in `reference/00-architecture.md`. The short list:
   - **Follow-up for Part 2.2:** consider a short debounce (~150-200ms) ONLY on
     continuously-editable inputs that would otherwise recalc per keystroke
     (numeric config fields) — discrete actions (clicks/toggles) don't need one.
-- **Network strategy** (Phase 10) — real sub-script protocol vs targeted async
-  `pob.http` shim of `launch:DownloadPage`.
+- **Network strategy** (Phase 10) — **RESOLVED 2026-11-24: (A) Real `LaunchSubScript`
+  worker-thread protocol.** Each sub-script executes in an isolated worker
+  `lua_State` on a dedicated worker thread (`app/src/SubScriptManager.cpp`),
+  marshalling `funcList` sync proxies to the UI thread via
+  `Qt::BlockingQueuedConnection` and delivering `subList` (`OnSubCall`),
+  `OnSubFinished`, and `OnSubError` via `Qt::QueuedConnection`, with off-UI-thread
+  `pob.http` and a `QTcpServer`-backed Lua `socket` shim for `src/LaunchServer.lua`.
+  Covers all 6 engine sites with zero `src/` edits.
 - **Compare tab** (Phase 13) — in scope? It's fork-specific, session-only, 4986
   lines. Confirm before porting; if dropped, also drop "import as comparison".
 - **Trade tooling** (Phase 12) — port now or defer past first shippable release?
@@ -378,8 +391,9 @@ Full detail in `reference/00-architecture.md`. The short list:
   Import/Export tab is the known worst case, see `phases/PHASE-11-import-export.md`
   "Usability requirements"), a clearer layout is allowed; logic stays legacy's,
   and each layout change is a documented difference.
-- **OAuth token storage** (Phase 11) — keep Settings.xml plaintext (legacy) or move
-  to OS keychain (deviation; changes LoadSettings/SaveSettings).
+- **OAuth token storage** (Phase 11) — **RESOLVED 2026-11-24 (v1): keep legacy
+  `Settings.xml` plaintext** (`PoEAPI:UpdateMain()`) to preserve `src/` immutability;
+  OS-keychain migration logged as a post-v1 security follow-up.
 
 ---
 

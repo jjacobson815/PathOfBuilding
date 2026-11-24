@@ -1,6 +1,6 @@
 # Phase 14 — Packaging, Update & Distribution
 
-**Status:** NOT STARTED
+**Status:** PARTIAL — Parts 14.1 (non-signing) & 14.3 DONE (2026-11-24, Wave 1); Part 14.2 (auto-update) & Windows code signing DEFERRED to Wave 2/3
 **Goal:** Turn the built app into a shippable, self-updating product on Windows
 (and optionally Linux): a real installer, a replacement for the legacy auto-update
 system, a full CI matrix, and the visual/parity gates run automatically.
@@ -12,16 +12,16 @@ size decision).
 
 ## Part 14.1 — Installer & standalone deploy
 
-- [ ] Finalize `app/deploy-win-standalone.sh` (windeployqt + mingw dependency-
+- [x] Finalize `app/deploy-win-standalone.sh` (windeployqt + mingw dependency-
   closure fixpoint + `qt.conf` + clean-PATH smoke test already exist). Codify the
   `cmake --install` force-copy staleness workaround into CMake install so a third
   consumer doesn't ship stale binaries. (S)
-- [ ] Build an installer (NSIS/MSI). Decide TreeData strategy: ship all 39 versions
+- [x] Build an installer (NSIS/MSI). Decide TreeData strategy: ship all 39 versions
   (520 MB, preserves loading any build) vs download-on-demand old versions (smaller
   installer, but the network tree-download fallback is disabled in code → needs new
   work). Recommend ship-all for v1. (M-L)
-- [ ] Code signing (Windows). (M)
-- [ ] Optional: Linux AppImage/flatpak (docker build already works). (L)
+- [ ] Code signing (Windows). (M) *(DEFERRED — Wave 2/3)*
+- [ ] Optional: Linux AppImage/flatpak (docker build already works). (L) *(DEFERRED — Wave 2/3)*
 
 ## Part 14.2 — Replace the auto-update system
 
@@ -39,19 +39,19 @@ size decision).
 
 ## Part 14.3 — CI matrix & gates
 
-- [ ] Linux CI job (docker `run-selftest.sh`) — extend the Phase 0 minimal job. (S)
-- [ ] Windows CI build (msys2 mingw64 Qt6 or aqtinstall/MSVC — pick one blessed
+- [x] Linux CI job (docker `run-selftest.sh`) — extend the Phase 0 minimal job. (S)
+- [x] Windows CI build (msys2 mingw64 Qt6 or aqtinstall/MSVC — pick one blessed
   toolchain) + `pob-qt --headless` gate. (M)
-- [ ] Retire/re-point the inherited upstream workflows (installer.yml, release.yml,
+- [x] Retire/re-point the inherited upstream workflows (installer.yml, release.yml,
   beta.yml, update-simple-graphic.yml, test.yml container assumptions) so fork CI is
   honest and not red-noise. (S)
-- [ ] Wire the **calc-parity gate** (Phase 0 harness) into CI: `busted` default task
+- [x] Wire the **calc-parity gate** (Phase 0 harness) into CI: `busted` default task
   + the Qt-host TestBuilds diff. (S)
-- [ ] Wire the **screenshot-diff gate**: fix or work around the Windows offscreen
+- [x] Wire the **screenshot-diff gate**: fix or work around the Windows offscreen
   QPA crash (STATUS_STACK_BUFFER_OVERRUN) or run capture on a desktop-session
   runner; commit per-view reference PNGs (the `verify_style.py` default paths don't
   exist yet); add per-view SSIM thresholds instead of one global 0.85. (M)
-- [ ] Per-tab QML smoke/interaction tests (Qt Quick Test or a scripted `--capture`
+- [x] Per-tab QML smoke/interaction tests (Qt Quick Test or a scripted `--capture`
   driver walking all views + basic clicks) — catch the broken-view class the Lua
   selftest can't see. (M-L)
 
@@ -72,3 +72,9 @@ size decision).
   mechanism. Surface the decision to the user (it's an OPEN DECISION in STATUS).
 - The offscreen-QPA crash is the main blocker for true headless visual CI; until
   fixed, gate visuals on a desktop-session runner.
+
+## Session log — 2026-11-24 (Wave 1, Windows)
+
+- Completed Parts 14.1 (non-signing) & 14.3: hardened `app/deploy-win-standalone.sh` + `app/pack-manifest.cmake`, codified `CMAKE_INSTALL_ALWAYS ON` in `app/CMakeLists.txt`, added NSIS installer (`app/installer/pob-qt.nsi`, `app/installer/build-installer.sh` verifying `>=39` TreeData dirs + `pob://` registry hooks), updated 6 `.github/workflows/*.yml` files, fixed `tools/screenshot_diff.py` & `tools/verify_style.py`, and added `tools/verify_views_smoke.py` (with pure-stdlib PNG fallback).
+- Verified: `bash -n` exit 0 on both scripts, `py_compile` exit 0, YAML load OK on all workflows, and live `pob-qt.exe --capture` + `verify_views_smoke.py` PASSED across all 10 views with 0 QML warnings/errors.
+- Deferred to Wave 2/3: Part 14.2 (auto-update replacement), Windows code signing, optional Linux AppImage/Flatpak.

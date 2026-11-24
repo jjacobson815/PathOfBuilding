@@ -1,6 +1,6 @@
 # Phase 10 — Network & Async Foundation
 
-**Status:** NOT STARTED
+**Status:** DONE (2026-11-24, Wave 1, branch `phases-7-8-9`)
 **Goal:** Bring the engine's networking back to life. Legacy runs all network work
 through `LaunchSubScript` worker Lua states doing `lcurl.safe` — currently a no-op
 stub, so every network feature is silently dead. Decide the strategy, implement it
@@ -13,23 +13,19 @@ sites), [[core-lifecycle]] (`launch:DownloadPage`, the sub-script inventory).
 
 ## The decision (make it explicitly, record in STATUS)
 
-- [ ] Choose ONE:
-  - **(A) Real sub-script protocol** — implement `LaunchSubScript(scriptText,
+- [x] Choose ONE:
+  - **(A) Real sub-script protocol** *(CHOSEN & LOCKED 2026-11-24)* — implement `LaunchSubScript(scriptText,
     funcList, subList, ...)`: isolated `lua_State` on a worker thread, `funcList` =
     synchronous blocking proxies back to the main state, `subList` = async calls
     delivered to `OnSubCall` on the main thread, completion → `OnSubFinished`, error
     → `OnSubError`; plus `AbortSubScript`/`IsSubScriptRunning`. Covers all 6 sites
     unchanged (engine untouched). Highest fidelity, highest effort (L).
-  - **(B) Targeted shim** — monkey-patch `launch:DownloadPage` in `pob_host.lua`
-    onto an **async `pob.http`** (move the existing sync libcurl off the GUI thread
-    into a worker + Lua callback), and reimplement the other sites (OAuth server,
-    poeurl, upload, PoB Archives) as per-site native shims. Less code up front but
-    leaves raw-`LaunchSubScript` call sites needing individual attention (M-L).
+  - ~~(B) Targeted shim~~ *(rejected; would require per-site native rewrites for `LaunchServer.lua`, `UpdateCheck.lua`, PoEURL, and PoB Archives).*
   Record the choice + rationale in `STATUS.md`.
 
 ## Part 10.1 — Async HTTP off the GUI thread
 
-- [ ] Move `pob.http` (currently synchronous `curl_easy_perform` on the calling/GUI
+- [x] Move `pob.http` (currently synchronous `curl_easy_perform` on the calling/GUI
   thread — freezes the app) to a worker thread with a Lua-side callback. Preserve
   the full option surface the engine uses: method, postfields, headers, **proxy**
   (http/socks5/socks5h), **connectionProtocol** (force IPv4/IPv6), **noSSL**, User-
@@ -37,17 +33,17 @@ sites), [[core-lifecycle]] (`launch:DownloadPage`, the sub-script inventory).
 
 ## Part 10.2 — Wire the engine's network primitive
 
-- [ ] Make `launch:DownloadPage(url, callback, params)` actually deliver
+- [x] Make `launch:DownloadPage(url, callback, params)` actually deliver
   `{header, body}, errMsg` to its callback (via the chosen strategy). This single
   primitive unblocks import-from-URL, update check, poeurl resolve, PoB Archives,
   and build upload. (M — most effort is in the strategy from the decision.)
-- [ ] Verify the previously-dead paths now work end-to-end: import a build from a
+- [x] Verify the previously-dead paths now work end-to-end: import a build from a
   pobb.in/pastebin URL (Import tab uses this in Phase 11); resolve a poeurl tree
   link (Tree tab Phase 4). (S)
 
 ## Part 10.3 — CLI + protocol entry
 
-- [ ] `pob://` protocol handler: register the URL scheme with the OS, forward the
+- [x] `pob://` protocol handler: register the URL scheme with the OS, forward the
   URI as `arg[1]`, and drive the `Main.lua:67-81` startup-import path +
   `BuildSiteTools.ParseImportLinkFromURI`. (M)
 
@@ -73,3 +69,9 @@ sites), [[core-lifecycle]] (`launch:DownloadPage`, the sub-script inventory).
   11/12 assume DownloadPage works.
 - `lzip` (update zip bundles) can stay stubbed until Phase 14 (updates); it's not
   needed for import/trade.
+
+## Session log — 2026-11-24 (Wave 1, Windows)
+
+- Strategy (A) implemented in `app/src/SubScriptManager.h`/`.cpp` with `LuaEngine` signals (`networkChanged`) and `pob.launchSubScript`/`abortSubScript`/`isSubScriptRunning`/`emitSignal` hooks.
+- Fixed `app/lua/lcurl/safe.lua` error object (`:msg()` + `__tostring`), added `app/lua/pob_network.lua`, wired `TreeImportPopup.qml`/`TreeExportPopup.qml`, and hooked `SubScriptManager::registerUriScheme()` + `parseStartupUri()`/`pob_handleStartupUri` in `app/src/main.cpp`.
+- Integrated selftests green (`pob-selftest.exe` + `pob-qt.exe --headless`): `subscript ok = true` (8 flags, `uiTicks=10..12`), `network ok = true` (10 flags incl. `delayedNonBlockingOk=true`, `proxyIpv4Ok=true`, `launchServerOk=true`, `pobUriOk=true`, `poeurlResolveOk=true`, `poeurlShrinkOk=true`).
