@@ -77,7 +77,8 @@ local function buildURL(item, slotName, controls, modEntries, defenceEntries, is
 		-- only strip a trailing numeric identifier to avoid e.g. including
 		-- timeless jewel ids or other numbers appended to the item name.
 		tradeName = tradeName:gsub("%s+$", "")
-		tradeName = (tradeName:match("^(.-)%s+%d+$") or tradeName)?.:lower()
+		tradeName = tradeName:match("^(.-)%s+%d+$") or tradeName
+		tradeName = tradeName and tradeName:lower()
 		-- verify the name since the trade site will error on an invalid name
 		for _, dbUnique in pairs(main.uniqueDB.list) do
 			if tradeName:find(dbUnique.title:lower(), 1, true) then
@@ -202,8 +203,8 @@ local function buildURL(item, slotName, controls, modEntries, defenceEntries, is
 	local encodedLeague = league:gsub("[^%w%-%.%_%~]", function(c)
 		return string.format("%%%02X", string.byte(c))
 	end):gsub(" ", "+")
-	url ..= "/" .. encodedLeague
-	url ..= "/" .. tradeHelpers.B64GzipEncode(queryJson)
+	url = url .. "/" .. encodedLeague
+	url = url .. "/" .. tradeHelpers.B64GzipEncode(queryJson)
 
 	return url
 end
