@@ -251,7 +251,7 @@ function CalcBreakdownClass:AddBreakdownSection(sectionData)
 
 			rowList = {}
 			for _, row in pairs(breakdown.slots) do
-				if (row.item and row.item.armourData) then
+				if row.item and row.item.armourData and row.base > 0 then
 					table.insert(rowList, row)
 				end
 			end
@@ -268,24 +268,26 @@ function CalcBreakdownClass:AddBreakdownSection(sectionData)
 			rowList = breakdown.slots
 		end
 
-		table.sort(rowList, function(a, b)
-			return a['base'] > b['base']
-		end)
-		
-		local section = { 
-			type = "TABLE",
-			rowList = rowList,
-			colList = colList,
-		}
-		t_insert(self.sectionList, section)
-		for _, row in pairs(section.rowList) do
-			if row.item then
-				row.sourceLabel = colorCodes[row.item.rarity]..row.item.name
-				row.sourceLabelTooltip = function(tooltip)
-					self.calcsTab.build.itemsTab:AddItemTooltip(tooltip, row.item, row.source)
+		if #rowList > 0 then
+			table.sort(rowList, function(a, b)
+				return a['base'] > b['base']
+			end)
+
+			local section = {
+				type = "TABLE",
+				rowList = rowList,
+				colList = colList,
+			}
+			t_insert(self.sectionList, section)
+			for _, row in pairs(section.rowList) do
+				if row.item then
+					row.sourceLabel = colorCodes[row.item.rarity]..row.item.name
+					row.sourceLabelTooltip = function(tooltip)
+						self.calcsTab.build.itemsTab:AddItemTooltip(tooltip, row.item, row.source)
+					end
+				else
+					row.sourceLabel = row.sourceName
 				end
-			else
-				row.sourceLabel = row.sourceName
 			end
 		end
 	end
@@ -410,7 +412,7 @@ function CalcBreakdownClass:AddModSection(sectionData, modList)
 			-- Multiple stat names specified, add this modifier's stat to the table
 			row.name = self:FormatModName(row.mod.name)
 		end
-		local sourceType = row.mod.source:match("[^:]+") or ""
+		local sourceType = row.mod.source and row.mod.source:match("[^:]+") or ""
 		row.source = sourceType
 		if not modList and not sectionData.modSource then
 			-- No modifier source specified, add the source type to the table
@@ -434,14 +436,22 @@ function CalcBreakdownClass:AddModSection(sectionData, modList)
 		elseif sourceType == "Tree" then
 			-- Modifier is from a passive node, add node name, and add node ID (used to show node location)
 			local nodeId = row.mod.source:match("Tree:(%d+)")
-			local tattooNodeId = row.mod.source:match("Tree:(%w+)")
+			local textNodeId = row.mod.source:match("Tree:([%w_]+)")
 			if nodeId then
 				local nodeIdNumber = tonumber(nodeId)
 				local node = build.spec.nodes[nodeIdNumber] or build.spec.tree.nodes[nodeIdNumber] or build.latestTree.nodes[nodeIdNumber]
 				row.sourceName = node.dn
 				row.sourceNameNode = node
-			elseif tattooNodeId then
-				row.sourceName = build.spec.tree.tattoo.idMap[tattooNodeId]
+			elseif textNodeId then
+				row.sourceName = build.spec.tree.tattoo.idMap[textNodeId]
+				if not row.sourceName then
+					for _, node in pairs(build.spec.tree.legion.nodes) do
+						if node.id == textNodeId then
+							row.sourceName = node.dn
+							break
+						end
+					end
+				end
 			end
 		elseif sourceType == "Skill" then
 			-- Extract skill name

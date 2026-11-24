@@ -10,13 +10,13 @@ local t_insert = table.insert
 local t_remove = table.remove
 local t_sort = table.sort
 local t_concat = table.concat
+local t_maxn = table.maxn
 local m_max = math.max
 local m_min = math.min
 local m_floor = math.floor
 local m_abs = math.abs
 local s_format = string.format
-local s_gsub = string.gsub
-local s_byte = string.byte
+local tradeHelpers = require("Classes.TradeHelpers")
 local dkjson = require "dkjson"
 
 ---@class TreeTab: ControlHost
@@ -546,7 +546,7 @@ function TreeTabClass:Save(xml)
 	end
 end
 
-function TreeTabClass:SetActiveSpec(specId)
+function TreeTabClass:SetActiveSpec(specId, deferSync)
 	local prevSpec = self.build.spec
 	self.activeSpec = m_min(specId, #self.specList)
 	local curSpec = self.specList[self.activeSpec]
@@ -581,7 +581,9 @@ function TreeTabClass:SetActiveSpec(specId)
 	if self.controls.versionSelect then
 		self.controls.versionSelect:SelByValue(curSpec.treeVersion, 'value')
 	end
-	self.build:SyncLoadouts()
+	if not deferSync then
+		self.build:SyncLoadouts()
+	end
 end
 
 function TreeTabClass:SetCompareSpec(specId)
@@ -650,6 +652,18 @@ function TreeTabClass:OpenSpecManagePopup()
 			main:ClosePopup()
 		end),
 	})
+end
+
+function TreeTabClass:CopyTree(sourceSpecId, newSpecName)
+	local newSpec = new("PassiveSpec"):PassiveSpec(self.build, self.specList[sourceSpecId].treeVersion)
+	local defaultTitle = (self.specList[sourceSpecId].title or "Default") .. " (Copy)"
+	newSpec.title = newSpecName or defaultTitle
+	newSpec.jewels = copyTable(self.specList[sourceSpecId].jewels)
+	newSpec:RestoreUndoState(self.specList[sourceSpecId]:CreateUndoState())
+	newSpec:BuildClusterJewelGraphs()
+	newSpec.id = #self.specList + 1
+	t_insert(self.specList, newSpec)
+	return newSpec
 end
 
 function TreeTabClass:OpenVersionConvertPopup(version, ignoreTreeSubType)
@@ -1222,7 +1236,7 @@ function TreeTabClass:FindTimelessJewel()
 			{ label = "Any", id = 1 },
 			{ label = "Doryani (Corrupted Soul)", id = 2 },
 			{ label = "Xibaqua (Divine Flesh)", id = 3 },
-			{ label = "Ahuana (Immortal Ambition)", id = 4 }
+			{ label = "Mazcotl (Immortal Ambition)", id = 4 }
 		},
 		[2] = {
 			{ label = "Any", id = 1 },
@@ -2282,22 +2296,17 @@ function TreeTabClass:FindTimelessJewel()
 			"any"
 		}
 		local search = {
-			query = {
-				status = {
-					option = tradeTypes[self.tradeTypeIndex]
-				},
-				stats = {
-					{
-						filters = seedTrades,
-						type = "count",
-						value = {
-							min = 1
-						}
+			status = {
+				option = tradeTypes[self.tradeTypeIndex]
+			},
+			stats = {
+				{
+					filters = seedTrades,
+					type = "count",
+					value = {
+						min = 1
 					}
 				}
-			},
-			sort = {
-				price = "asc"
 			}
 		}
 
@@ -2310,22 +2319,16 @@ function TreeTabClass:FindTimelessJewel()
 				t_insert(devotionFilters, { id = data.timelessJewelTradeIDs[timelessData.jewelType.id].devotion[timelessData.sharedResults.devotionVariant2.id - 1] })
 			end
 			if next(devotionFilters) then
-				t_insert(search.query.stats, {
+				t_insert(search.stats, {
 					filters = devotionFilters,
 					type = "and"
 				})
 			end
 		end
 
-		-- if the league was not selected via dropdown, then default to the first league in the dropdown or "" if the leagues could not be read
-		local selectedRealm = controls.realmSelection:GetSelValue():lower()
-
-		local realmPath = selectedRealm == "pc" and "" or (selectedRealm .. "/")
-		local url = "https://www.pathofexile.com/trade/search/" .. realmPath ..
-			(controls.searchTradeLeagueSelect:GetSelValue()) ..
-			"/?q=" .. (s_gsub(dkjson.encode(search), "[^a-zA-Z0-9]", function(a)
-				return s_format("%%%02X", s_byte(a))
-			end))
+		local url = self.tradeQueryRequests:buildUrl("https://www.pathofexile.com/trade/search",
+			controls.realmSelection:GetSelValue():lower(), controls.searchTradeLeagueSelect:GetSelValue(),
+			tradeHelpers.B64GzipEncode(dkjson.encode(search)))
 		OpenURL(url)
 		Copy(url)
 
