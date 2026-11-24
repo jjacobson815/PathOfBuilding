@@ -1,26 +1,35 @@
 import QtQuick
 import QtQuick.Layouts
 
-// TreeImportPopup — Phase 4 Part 4.2, ports TreeTab:OpenImportPopup
-// (TreeTab.lua:709-837): name + link fields, an error line, Import/Cancel.
-// Import is enabled only while both fields hold a non-space character, and
-// editing either clears the message (legacy's EditControl changeFuncs).
-// All link parsing lives in the bridge (pob_importTree); a failed import keeps
-// the popup open with the engine's message, a successful one closes it and
-// raises `imported(index)`.
+// TreeImportPopup — Phase 4 Part 4.2 + Phase 10 Part 10.2, ports
+// TreeTab:OpenImportPopup (TreeTab.lua:709-837): name + link fields, status/
+// error line, Import/Cancel, plus async PoEURL redirect resolution off the UI
+// thread via pob_resolvePoeUrl / pob_getPoeUrlStatus.
 PopupBase {
     id: root
 
     signal imported(int index)
 
     property string msg: ""
-    readonly property bool canImport: nameInput.text.match(/\S/) !== null
+    property bool resolving: false
+    property int pendingReqId: 0
+    readonly property bool canImport: !resolving
+                                      && nameInput.text.match(/\S/) !== null
                                       && linkInput.text.match(/\S/) !== null
 
     title: "Import Tree"
     padding: 16
 
+    function cancelPending() {
+        if (pendingReqId > 0) {
+            luaEngine.invoke("pob_cancelPoeUrl", [pendingReqId])
+            pendingReqId = 0
+        }
+        resolving = false
+    }
+
     function openFresh() {
+        cancelPending()
         nameInput.text = ""
         linkInput.text = ""
         msg = ""
@@ -34,8 +43,40 @@ PopupBase {
         if (r && r.ok) {
             close()
             imported(r.index)
-        } else {
-            msg = (r && r.msg) ? r.msg : "^1Import failed"
+            return
+        }
+        if (r && r.needsNetwork) {
+            msg = "Resolving PoEURL link..."
+            resolving = true
+            var nr = luaEngine.invoke("pob_resolvePoeUrl", [nameInput.text, linkInput.text])
+            if (nr && nr.ok && nr.reqId) {
+                pendingReqId = nr.reqId
+            } else {
+                resolving = false
+                msg = (nr && nr.msg) ? nr.msg : "^1Failed to resolve PoEURL link^7"
+            }
+            return
+        }
+        msg = (r && r.msg) ? r.msg : "^1Import failed"
+    }
+
+    onClosed: cancelPending()
+
+    Connections {
+        target: luaEngine
+        enabled: root.visible && root.resolving && root.pendingReqId > 0
+        function onNetworkChanged() {
+            if (!root.resolving || root.pendingReqId <= 0) return
+            var st = luaEngine.invoke("pob_getPoeUrlStatus", [root.pendingReqId])
+            if (!st || !st.done) return
+            root.resolving = false
+            root.pendingReqId = 0
+            if (st.ok) {
+                root.close()
+                root.imported(st.index)
+            } else {
+                root.msg = st.msg ? st.msg : "^1Failed to resolve PoEURL link^7"
+            }
         }
     }
 
@@ -59,7 +100,7 @@ PopupBase {
             Chrome {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 22
-                controlEnabled: true
+                controlEnabled: !root.resolving
                 TextInput {
                     id: nameInput
                     anchors.fill: parent
@@ -69,9 +110,10 @@ PopupBase {
                     color: theme.text
                     font.pixelSize: theme.fontSize
                     selectByMouse: true
+                    readOnly: root.resolving
                     clip: true
                     KeyNavigation.tab: linkInput
-                    onTextChanged: root.msg = ""
+                    onTextChanged: if (!root.resolving) root.msg = ""
                 }
             }
 
@@ -82,7 +124,7 @@ PopupBase {
             Chrome {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 22
-                controlEnabled: true
+                controlEnabled: !root.resolving
                 TextInput {
                     id: linkInput
                     anchors.fill: parent
@@ -92,9 +134,10 @@ PopupBase {
                     color: theme.text
                     font.pixelSize: theme.fontSize
                     selectByMouse: true
+                    readOnly: root.resolving
                     clip: true
                     KeyNavigation.tab: nameInput
-                    onTextChanged: root.msg = ""
+                    onTextChanged: if (!root.resolving) root.msg = ""
                 }
             }
         }
@@ -112,14 +155,17 @@ PopupBase {
             spacing: 10
             Button {
                 implicitWidth: 80; implicitHeight: 20
-                label: "Import"
+                label: root.resolving ? "Resolving..." : "Import"
                 controlEnabled: root.canImport
                 onClicked: root.doImport()
             }
             Button {
                 implicitWidth: 80; implicitHeight: 20
                 label: "Cancel"
-                onClicked: root.reject()
+                onClicked: {
+                    root.cancelPending()
+                    root.reject()
+                }
             }
         }
     }
