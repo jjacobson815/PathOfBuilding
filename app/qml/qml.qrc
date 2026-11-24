@@ -69,6 +69,9 @@
         <file>components/TattooPopup.qml</file>
         <file>components/TimelessJewelPopup.qml</file>
         <file>components/ConfigOptionRow.qml</file>
+        <file>components/CalcRadiusVisual.qml</file>
+        <file>components/CalcBreakdownPanel.qml</file>
+        <file>components/CalcSectionCard.qml</file>
         <file>components/PartyBufferBox.qml</file>
         <file>views/TreeView.qml</file>
         <file>views/SkillsView.qml</file>

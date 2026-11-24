@@ -981,6 +981,10 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     if (!pob_run_lua_check(engine, "pob_selftestConfigSets", "config-sets")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestConfigVis", "config-vis")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestConfigPersist", "config-persist")) return false;
+    // Phase 8: Calcs tab & Breakdown (CalcSections grid, SkillSelect/buffMode, lazy actor.breakdown, TreeViewer/AoE, <Calcs> round-trip).
+    if (!pob_run_lua_check(engine, "pob_selftestCalcsGrid", "calcs-grid")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestCalcsBreakdown", "calcs-breakdown")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestCalcsPersist", "calcs-persist")) return false;
     // Phase 9: Notes tab & Party tab (rich EditControl, color codes, zoom, ParseBuffs, <Notes>/<Party> round-trip).
     if (!pob_run_lua_check(engine, "pob_selftestNotes", "notes")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestPartyTab", "party-tab")) return false;
