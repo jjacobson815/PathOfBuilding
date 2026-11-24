@@ -315,13 +315,11 @@ local function syncLoadouts(bm)
 end
 
 -- SkillSetListControl.lua:48-79 (New -> RenameSet(..., true) -> Save).
+-- Upstream PR #9647: NewSkillSet now appends to skillSetOrderList and sets modFlag.
 function pob_skillsNewSet(title)
     local bm, st = ctx()
     if not st then return fail("no build") end
-    local set = st:NewSkillSet()
-    set.title = title
-    st.modFlag = true
-    t_insert(st.skillSetOrderList, set.id)
+    local set = st:NewSkillSet(nil, title)
     st:AddUndoState()
     syncLoadouts(bm)
     return done({ index = #st.skillSetOrderList })
@@ -1323,7 +1321,7 @@ function pob_selftestSkillsPersist()
         res.xmlHasSets = xml:find('<SkillSet', 1, true) ~= nil and xml:find('title="ST Second"', 1, true) ~= nil
 
         -- Reader: the live LoadSkill reads every one of them back.
-        local probeSet = st:NewSkillSet()
+        local probeSet = st:CreateSkillSet()
         local attrib = { nameSpec = "Fireball", gemId = fb.gemData.gameId, variantId = fb.gemData.variantId,
             level = "20", quality = "0", enabled = "true" }
         for k, v in pairs(calcFields) do attrib[k] = tostring(v) end
