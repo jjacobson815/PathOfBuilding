@@ -48,10 +48,15 @@ Rectangle {
     signal saveAsRequested()
     signal saveFailed(string error)
     signal savePromptRequested(string mode)
+    signal manageLoadoutsRequested()
+    signal loadoutHelpRequested()
 
     // --- cached engine state (never bound; see header) ---------------------
     property var shell: ({})
     property var classList: ({ classes: [], secondaryAscendancies: [] })
+    property var loadoutState: ({ dropdown: [] })
+    readonly property var loadoutEntries:
+        Array.isArray(loadoutState.dropdown) ? loadoutState.dropdown : []
 
     // Every read below goes through these guards: getShellState()/getClassList()
     // both return null in LIST mode (no build), and a null payload must degrade
@@ -105,6 +110,7 @@ Rectangle {
         var s = luaEngine.getShellState()
         root.shell = s ? s : ({})
         root.refreshClasses()
+        root.refreshLoadouts()
         root._refreshing = false
     }
 
@@ -112,6 +118,19 @@ Rectangle {
         var cl = luaEngine.getClassList()
         root.classList = cl ? cl : ({ classes: [], secondaryAscendancies: [] })
         root._syncControls()
+    }
+
+    function refreshLoadouts() {
+        if (!root.inBuildMode) {
+            root.loadoutState = ({ dropdown: [] })
+            loadoutDrop.currentIndex = -1
+            return
+        }
+        var ls = luaEngine.invoke("pob_loadoutsGetState", [])
+        root.loadoutState = (ls && ls.ok) ? ls : ({ dropdown: [] })
+        loadoutDrop.currentIndex =
+            (root.hasBuild && root.loadoutState.activeDropdownIndex0 !== undefined)
+            ? root.loadoutState.activeDropdownIndex0 : -1
     }
 
     function _syncControls() {
@@ -122,6 +141,9 @@ Rectangle {
         secondaryDrop.currentIndex =
             root._indexOfKey(root.secondaries, "ascendClassId",
                              root.classList.curSecondaryAscendClassId)
+        loadoutDrop.currentIndex =
+            (root.hasBuild && root.loadoutState.activeDropdownIndex0 !== undefined)
+            ? root.loadoutState.activeDropdownIndex0 : -1
         // Never overwrite a half-typed value under the user's caret.
         if (!levelEdit.editing)
             levelEdit.text = root.hasBuild ? String(root.shell.level) : ""
@@ -465,6 +487,48 @@ Rectangle {
             }
         }
 
+        DropDownControl {
+            visible: root.hasBuild
+            id: loadoutDrop
+
+            Layout.preferredWidth: 145
+            Layout.preferredHeight: theme.controlSize
+            controlEnabled: root.hasBuild
+            placeholder: "Loadouts"
+            tooltipText: "Select or manage build loadouts"
+            model: root.loadoutEntries
+            labelFor: function (item) { return item ? item.label : "" }
+            itemEnabled: function (item) {
+                return item && item.kind !== "header" && item.kind !== "separator"
+            }
+
+            onSelected: (index) => {
+                var item = root.loadoutEntries[index]
+                if (!item) return
+                if (item.kind === "header" || item.kind === "separator") {
+                    root._syncControls()
+                    return
+                }
+                if (item.kind === "manage") {
+                    root._syncControls()
+                    root.manageLoadoutsRequested()
+                    return
+                }
+                if (item.kind === "help") {
+                    root._syncControls()
+                    root.loadoutHelpRequested()
+                    return
+                }
+                if (item.kind === "sync") {
+                    luaEngine.invoke("pob_loadoutsSync", [])
+                    root.refresh()
+                    return
+                }
+                luaEngine.invoke("pob_loadoutsSelect", [item.value])
+                root.refresh()
+            }
+        }
+
         Text {
             text: "Mode: " + luaEngine.currentMode
             color: theme.accent
@@ -507,5 +571,8 @@ Rectangle {
         // the whole content of pointDisplay — the _refreshing latch keeps the
         // recalc that getShellState() runs from looping back through here.
         function onTreeChanged() { root.refresh() }
+        function onItemsChanged() { root.refreshLoadouts() }
+        function onSkillsChanged() { root.refreshLoadouts() }
+        function onConfigChanged() { root.refreshLoadouts() }
     }
 }

@@ -80,6 +80,8 @@ Window {
             onCollapseToggled: (collapsed) => root.sideBarCollapsed = collapsed
             onSaveAsRequested: saveAsPopup.openForCurrentBuild()
             onSavePromptRequested: (mode) => savePrompt.openFor(mode)
+            onManageLoadoutsRequested: loadoutManagePopup.openFresh()
+            onLoadoutHelpRequested: aboutPopup.openAtSection("loadouts")
             onSaveFailed: (error) => {
                 saveErrorPopup.message = "^7Could not save the build. ^1" + error
                 saveErrorPopup.open()
@@ -190,7 +192,7 @@ Window {
                             id: mainSkillPanel
                             Layout.fillWidth: true
                             suffix: ""
-                            onManageSpectresRequested: spectreNotice.open()
+                            onManageSpectresRequested: spectreLibraryPopup.openFresh()
                         }
 
                         Item { Layout.preferredHeight: theme.space1 }
@@ -316,44 +318,26 @@ Window {
 
     // ===== Phase 3: shell popups ==========================================
 
-    // Save As. A minimal but real implementation: prompt for a name, run it
-    // through the engine's own filename filter, refuse to overwrite, then save
-    // through the recalc-gated path. The full legacy folder-browser (Build.lua:
-    // 1343-1412, with New Folder and a sort mode) is deliberately NOT built
-    // here — it is long-tail per the phase plan, and this covers the actual
-    // "save a new build somewhere" need.
-    Widgets.TextInputPopup {
+    Widgets.SaveAsPopup {
         id: saveAsPopup
-        title: " Save As "
-        prompt: "^7Enter build name:"
-        confirmLabel: "Save"
-
-        property var _check: ({ valid: false, exists: false, fullPath: "" })
-        property string _subPath: ""
-
-        // Legacy's filter is the Lua class [\/:%*%?"<>|%c] (Build.lua:1362) and
-        // it enables Save only when io.open(name,"r") returns nil, i.e. it
-        // refuses to clobber (Build.lua:1352-1358). Both live in the engine, so
-        // ask it rather than re-implementing the rule in QML.
-        confirmEnabled: _check.valid && !_check.exists
-
-        function openForCurrentBuild() {
-            var shell = luaEngine.getShellState() || {}
-            _subPath = shell.dbFileSubPath || ""
-            text = shell.buildName || ""
-            recheck()
-            open()
+        onBuildSaved: topBar.refresh()
+        onSaveFailed: (error) => {
+            saveErrorPopup.message = "^7Could not save the build. ^1" + error
+            saveErrorPopup.open()
         }
-        function recheck() {
-            _check = luaEngine.sanitizeBuildName(text, _subPath) || { valid: false }
-        }
-        onTextChanged: recheck()
-        onAccepted: {
-            var r = luaEngine.saveDBFile(_check.fullPath)
-            if (!r || !r.ok) {
-                saveErrorPopup.message = "^7Could not save the build. ^1" + (r ? r.error : "unknown error")
-                saveErrorPopup.open()
-            }
+    }
+
+    Widgets.LoadoutManagePopup {
+        id: loadoutManagePopup
+        onLoadoutsChanged: topBar.refresh()
+    }
+
+    Widgets.SpectreLibraryPopup {
+        id: spectreLibraryPopup
+        onSpectresSaved: {
+            topBar.refresh()
+            statPanel.refresh()
+            warningsBar.refresh()
         }
     }
 
@@ -365,16 +349,6 @@ Window {
     Widgets.MessagePopup {
         id: saveErrorPopup
         title: " Save Failed "
-    }
-
-    // The Spectre Library (Build.lua:1415) is explicit Phase 3 long tail — it
-    // needs dual-pane drag-between-lists, which --capture cannot verify anyway.
-    // The button is wired now so the seam exists; this says so rather than
-    // silently doing nothing when it is clicked.
-    Widgets.MessagePopup {
-        id: spectreNotice
-        title: " Manage Spectres "
-        message: "^7The Spectre Library is not built yet.^8 It is tracked as Phase 3 long-tail work; spectres already round-trip through the build XML."
     }
 
     // Save / Don't Save / Cancel (Build.lua:1314-1341). `mode` decides what

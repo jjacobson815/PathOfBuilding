@@ -1038,6 +1038,10 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         }
         qDebug() << "SELFTEST OK: invoke-notes-party-emit";
     }
+    // Phase 3 long-tail Step A: Loadouts, Spectre Library, and Save-As Folder Browser.
+    if (!pob_run_lua_check(engine, "pob_selftestLoadouts", "loadouts")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestSpectreLibrary", "spectre-library")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestSaveAsFolders", "save-as-folders")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

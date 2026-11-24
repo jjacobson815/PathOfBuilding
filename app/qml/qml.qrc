@@ -29,6 +29,9 @@
         <file>components/DropDownControl.qml</file>
         <file>components/ConversionPopup.qml</file>
         <file>components/TopBar.qml</file>
+        <file>components/LoadoutManagePopup.qml</file>
+        <file>components/SpectreLibraryPopup.qml</file>
+        <file>components/SaveAsPopup.qml</file>
         <file>components/MainSkillPanel.qml</file>
         <file>components/StatPanel.qml</file>
         <file>components/WarningsBar.qml</file>

@@ -9,9 +9,9 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Phase 3 long tail — Loadouts, Spectre Library popup, Save-As folder browser** (spec: `phases/PHASE-3-build-shell.md`).
-Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → 6 → 7 → **Phase 3 long tail** → ~~8~~ (DONE) → 10 → 11 → ~~9~~ (DONE) → 12 → 13 → 14 → 15.
-*(Phases 7, 8, and 9 all landed on `phases-7-8-9`, so Phase 10 follows Phase 3 long tail.)*
+**ACTIVE: Phase 10 — Network & Async Foundation** (spec: `phases/PHASE-10-network-async.md`).
+Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → 6 → 7 → ~~Phase 3 long tail~~ (DONE) → ~~8~~ (DONE) → **10** → 11 → ~~9~~ (DONE) → 12 → 13 → 14 → 15.
+*(Phase 3 long tail landed on 2026-11-24; Phase 10 is now ACTIVE.)*
 
 **Phase 9 — Notes & Party Tabs — DONE (2026-11-24, Windows session, branch `phases-7-8-9`, commit `eefa79b0b`).**
 All checkboxes and session log ticked in `phases/PHASE-9-notes-party.md`. Bridge:
@@ -93,9 +93,10 @@ bottom have per-item evidence). Gate on Linux: `tools/linux-selftest.sh` →
   mastery hover art, socket preview follows selection not hover, trade league
   is a text field, poeurl import/shrink wait for Phase 10.
 
-**Phase 3 — Build Shell — MVP DONE, gate awaiting scope decision (started 2026-08-18).** Spec:
-`phases/PHASE-3-build-shell.md`; that file's "Session log — 2026-08-18" and
-"Session log — 2026-08-19" sections have full per-item evidence. The MVP core
+**Phase 3 — Build Shell — DONE (started 2026-08-18, closed 2026-11-24).** Spec:
+`phases/PHASE-3-build-shell.md`; that file's "Session log — 2026-08-18",
+"Session log — 2026-08-19", and "Session log — 2026-11-24 (Phase 3 long tail Step B)"
+sections have full per-item evidence. The MVP core
 is landed and gated: top bar (Back / Save / Save As / build name / points /
 Auto-Manual / level / class / ascendancy / secondary ascendancy), the live
 stat panel and warnings row over Phase 2's output marshalling, the
@@ -105,15 +106,15 @@ denormalized `<PlayerStat>` rows, a truthful unsaved flag, and the Ctrl+1..9 /
 Ctrl+S / Ctrl+W hotkeys, and the **main-skill selector stack**
 (`pob_getMainSkillControls` + 7 setters + `MainSkillPanel.qml`, parameterised on
 legacy's `suffix` so Phase 8 reuses it for the Calcs tab's independent
-selection). **Part 3.3 is now fully DONE too:** the savers registry +
+selection). **Part 3.3 is DONE:** the savers registry +
 Tree-deferred load order + PostLoad, and the `<Build>` attribs / denormalized
 `<PlayerStat>/<FullDPSSkill>`/`<TimelessData>`, are all genuinely
-round-trip-verified (not just save-side) by new `pob_selftestSaveLoadRoundTrip`
-— see invariant #7's caveat below for a real bug this uncovered (auto-level
-drift via the still-live legacy Control tree). **Still open in Phase 3:**
-Loadouts (needs the Phase 5/6/7 set UIs), the Spectre Library popup, and the
-full Save-As folder browser — all explicit long tail; Phase 3's acceptance
-gate is otherwise clear to close whenever those are judged in/out of scope.
+round-trip-verified by `pob_selftestSaveLoadRoundTrip`. **Phase 3 long tail is
+DONE (2026-11-24):** Loadouts dropdown + `LoadoutManagePopup.qml`,
+`SpectreLibraryPopup.qml`, and `SaveAsPopup.qml` folder browser are wired over
+`app/lua/pob_shell.lua` (`pob_loadouts*`, `pob_spectres*`, `pob_saveAs*`) and
+verified by `pob-selftest` (`loadouts`, `spectre-library`, `save-as-folders`),
+`pob-qt --headless`, and `pob-qt --capture`.
 
 **Phase 4 history (superseded by the DONE entry above).** Recon findings are at the bottom of
 `phases/PHASE-4-tree-tab.md`. **Part 4.1 — ALL 5 items DONE (2026-09-24).**
@@ -899,8 +900,8 @@ during the July 2026 analysis; trust code over any older plan doc.
 **4 → 5 → 6 → 7 → Phase 3 long tail → 8 (done early) → 10 → 11 → 9 (done early) → 12 → 13 → 14 → 15.**
 ("Phase 3 long tail" = Loadouts, the Spectre Library popup and the full Save-As
 folder browser, which stayed open when Phase 3's MVP closed.) When a phase's gate
-closes, the NEXT one in this list becomes ACTIVE (with Phases 7, 8, and 9 already
-landed on `phases-7-8-9`, Phase 3 long tail is ACTIVE and Phase 10 follows it).
+closes, the NEXT one in this list becomes ACTIVE (with Phase 3 long tail and Phases
+7, 8, and 9 now DONE, Phase 10 is ACTIVE).
 
 **Dependency spine (background):** 0 → 1 → 2 → 3 → {4,5,6,7,8,9 in any order, each gated} →
 10 → 11 → {12, 13} → 14 → 15. (Tree/Skills/Items/Config/Calcs/Notes/Party are

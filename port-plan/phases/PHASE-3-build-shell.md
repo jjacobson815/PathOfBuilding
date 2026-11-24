@@ -1,6 +1,6 @@
 # Phase 3 — Build Shell (top bar, side bar, stat panel, warnings)
 
-**Status:** IN PROGRESS (2026-08-18) — MVP core landed; see per-item ticks below.
+**Status:** DONE (2026-11-24) — MVP core + Phase 3 long-tail (Loadouts, Spectre Library, Save-As folder browser) complete.
 **Goal:** Build the frame that every tab lives inside: the top bar (save/save-as/
 back, class & ascendancy dropdowns, loadouts, points/level), the side bar (tab
 strip + hotkeys, main-skill selector stack, spectre library, live stat panel,
@@ -27,7 +27,7 @@ individual tabs so they have a home and the save format is correct.
   toggle + level edit (1-100) with XP-mult tooltip. (M)
 - [x] **Class / Ascendancy / Secondary-ascendancy dropdowns** with tree-reset
   confirm popup (incl. "Connect Path" third option); legacy alt-ascendancy filtering. (M)
-- [ ] **Loadouts dropdown** — `SyncLoadouts`: build entries by matching Tree/Item/
+- [x] **Loadouts dropdown** — `SyncLoadouts`: build entries by matching Tree/Item/
   Skill/Config set titles exactly or by `{tag}`; selecting swaps all four active
   sets at once; "New Loadout" (creates identically-named spec+itemSet+skillSet+
   configSet), "Sync", "Help". (M — depends on all four set systems existing; the
@@ -43,7 +43,7 @@ individual tabs so they have a home and the save format is correct.
   (full socket-group tooltip), active-skill dropdown, skill-part dropdown, stage-
   count edit, mine-count edit, minion dropdown (also lists item sets for Animate
   Guardian; drag-equip target), minion-skill dropdown, "Manage Spectres" button. (M)
-- [ ] **Spectre Library popup** — dual-pane searchable source/destination minion
+- [x] **Spectre Library popup** — dual-pane searchable source/destination minion
   lists with drag between panes; saves `spectreList`. (M)
 - [x] **Stat panel** — `TextListControl`-style, built from `BuildDisplayStats.lua`
   (playerDisplayStats, minionDisplayStats, extraSaveStats) over the Phase 2
@@ -247,3 +247,40 @@ shared helper's behavior for its other caller.
 Verified: `pob-selftest` exit 0, `pob-qt --headless` exit 0, both including
 the new `save-load-roundtrip` check
 (`sectionsOk=true hasPlayerStat=true hasFullDPSSkill=true hasTimelessData=true`).
+
+---
+
+## Session log — 2026-11-24 (Phase 3 long tail Step B)
+
+**Loadouts dropdown + Manage/Custom Loadouts, Spectre Library popup, and Save-As
+folder browser — DONE.** Wired all three QML surfaces over the locked
+`app/lua/pob_shell.lua` bridge (`pob_loadouts*`, `pob_spectres*`, `pob_saveAs*`):
+
+- **Loadouts (`TopBar.qml`, `LoadoutManagePopup.qml`):** Added `buildLoadouts`
+  `DropDownControl` beside `secondaryDrop` (handling header/separator no-ops,
+  `Sync`, `Help >>`, `Manage`, and loadout selection, refreshing on
+  `itemsChanged`/`skillsChanged`/`configChanged` as well as existing signals).
+  Built `LoadoutManagePopup.qml` with `(Current)` marker, double-click activate,
+  `F2` rename, `New`/`Rename`/`Copy` with duplicate-name guard, `Delete`
+  (disabled when `<= 1` loadout), `Up`/`Down` reorder, and `New/Copy Custom`
+  sub-popup with 4 set dropdowns (`Tree`, `Skill Set`, `Item Set`, `Config Set`).
+- **Spectre Library (`SpectreLibraryPopup.qml`):** Built dual-pane `Spectres in
+  Build` / `Available Spectres` with `Add`/`Remove`, `Delete` key, `DragGhost`
+  drag-to-add, search + `Names`/`Skills`/`Both` + 12-mode sort, 6
+  monster-category icon toggles (`file:///` URLs), `Corpse Only` / `Show All`,
+  and right-hand `Minion Stats` panel (`Gem Level` `1-40`, stat cards, `Spawns`
+  list, and hover tooltips).
+- **Save-As Folder Browser (`SaveAsPopup.qml`):** Replaced the minimal
+  `TextInputPopup` in `main.qml` while keeping `openForCurrentBuild()`
+  compatible with `TopBar`, `savePrompt`, and `Ctrl+S`. Includes `PathControl`
+  breadcrumb, `New Folder...` (`NewFolderPopup`), `Sort By Name` / `Sort By Last
+  Edited`, subfolder list (double-click to enter, `Delete` key with error
+  `MessagePopup`), and `sanitizeBuildName` validation/overwrite guard.
+- **Shell wiring:** Registered all 3 new QML files in `app/qml/qml.qrc`, wired
+  popups/signals in `app/qml/main.qml`, and removed `spectreNotice`.
+
+**Verification gates (Windows MinGW64, 2026-11-24):**
+- `ninja -C build-win`: exit 0
+- `pob-selftest.exe`: exit 0 (`loadouts ok = true`, `spectre-library ok = true`, `save-as-folders ok = true`)
+- `pob-qt.exe --headless`: exit 0
+- `pob-qt.exe --capture ../captures/verify`: exit 0, zero new QML warnings/errors in `$TEMP/pob-qt-main.log`
