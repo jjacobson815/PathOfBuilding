@@ -73,6 +73,7 @@ function SetClearColor(r, g, b, a) end
 function SetDrawLayer(layer, subLayer) end
 function SetViewport(x, y, width, height) end
 function SetDrawColor(r, g, b, a) end
+function GetDrawColor() return 1, 1, 1, 1 end
 function DrawImage(imgHandle, left, top, width, height, tcLeft, tcTop, tcRight, tcBottom) end
 function DrawImageQuad(imageHandle, x1, y1, x2, y2, x3, y3, x4, y4, s1, t1, s2, t2, s3, t3, s4, t4) end
 function DrawString(left, top, align, height, font, text) end
@@ -864,7 +865,7 @@ function pob_addItemFromRaw(raw)
     -- used to leave the PREVIOUS displayItem in place and re-add it as a
     -- false success (Phase 6.3 fix). Validate first, and give the editor its
     -- previous display item back afterwards.
-    if not new("Item", raw).base then return nil end
+    if not new("Item"):Item(raw).base then return nil end
     local prev = it.displayItem
     it:CreateDisplayItemFromRaw(raw)
     local item = it.displayItem
@@ -1439,7 +1440,7 @@ function pob_compareOverride(override)
         --   2. It ends in SetDisplayItem (ItemsTab.lua:1666), clobbering
         --      itemsTab.displayItem -- i.e. a mere hover-compare would destroy
         --      whatever the user is editing once Phase 6's display-item editor exists.
-        local item = new("Item", override.repItemRaw)
+        local item = new("Item"):Item(override.repItemRaw)
         if item and item.base then
             luaOverride.repSlotName = override.repSlotName
             luaOverride.repItem = item
@@ -1483,19 +1484,22 @@ function pob_compareNodes(nodeIds)
     local ct = bm and bm.calcsTab
     if not bm or not ct or not nodeIds or #nodeIds == 0 then return nil end
     pob_recalculate()
-    if not ct.nodeCalculator or not ct.nodeCalculator[1] then
-        return { ok = false, error = "no node calculator" }
+    -- Upstream 1afbc4cdc removed calcsTab.nodeCalculator; node compares go
+    -- through miscCalculator with an addNodes override, as the tree hover does
+    -- (PassiveTreeView:AddNodeTooltip).
+    if not ct.miscCalculator or not ct.miscCalculator[1] then
+        return { ok = false, error = "no misc calculator" }
     end
-    local calcFunc, baseOutput = ct.nodeCalculator[1], ct.nodeCalculator[2]
+    local calcFunc, baseOutput = ct.miscCalculator[1], ct.miscCalculator[2]
 
-    local nodeList = { }
+    local nodeSet, nodeCount = { }, 0
     for _, id in ipairs(nodeIds) do
         local node = bm.spec.nodes[tonumber(id) or id]
-        if node then nodeList[#nodeList + 1] = node end
+        if node then nodeSet[node] = true; nodeCount = nodeCount + 1 end
     end
-    if #nodeList == 0 then return { ok = false, error = "no valid nodes" } end
+    if nodeCount == 0 then return { ok = false, error = "no valid nodes" } end
 
-    local ok, compareOutput = pcall(calcFunc, nodeList)
+    local ok, compareOutput = pcall(calcFunc, { addNodes = nodeSet })
     if not ok or not compareOutput then
         return { ok = false, error = tostring(compareOutput) }
     end
@@ -1646,7 +1650,7 @@ end
 
 -- ============================================================================
 -- Part 2.6: Party/buffExports seam audit. PartyTabClass (Classes/PartyTab.lua,
--- unmodified src/) already constructs a real self.enemyModList = new("ModList")
+-- unmodified src/) already constructs a real self.enemyModList = new("ModList"):ModList()
 -- and self.enableExportBuffs = false at init (same construction pattern as
 -- skillsTab/configTab/itemsTab), consumed unconditionally every calc pass at
 -- CalcSetup.lua:565 (env.enemyDB:AddList(build.partyTab.enemyModList)) and
@@ -1683,7 +1687,7 @@ function pob_selftestParty()
     -- wipe, since ModList carries internal lookup-cache state alongside the
     -- mod array.
     wipeTable(pt.enemyModList)
-    pt.enemyModList = new("ModList")
+    pt.enemyModList = new("ModList"):ModList()
     pt.enableExportBuffs = savedEnable
     bm.buildFlag = true
     pob_recalculate()
@@ -3769,7 +3773,11 @@ function pob_getShellState()
     pob_recalculate()
 
     if bm.controls and bm.controls.warnings then bm.controls.warnings.lines = { } end
-    local pointStr, pointTooltip = bm:EstimatePlayerProgress()
+    -- Since upstream c73045559 it returns nothing and stores the strings on
+    -- the point-display control instead.
+    bm:EstimatePlayerProgress()
+    local pointDisplay = bm.controls and bm.controls.pointDisplay or { }
+    local pointStr, pointTooltip = pointDisplay.str, pointDisplay.req
     local pointWarnings = { }
     if bm.controls and bm.controls.warnings then
         for _, line in ipairs(bm.controls.warnings.lines) do
@@ -5024,7 +5032,7 @@ function pob_newSpec(title)
     local bm, tt = pob_treeTab()
     if not tt then return { ok = false } end
     if not title or not tostring(title):match("%S") then return { ok = false, error = "empty title" } end
-    local newSpec = new("PassiveSpec", bm, latestTreeVersion)
+    local newSpec = new("PassiveSpec"):PassiveSpec(bm, latestTreeVersion)
     newSpec:SelectClass(bm.spec.curClassId)
     newSpec:SelectAscendClass(bm.spec.curAscendClassId)
     newSpec:SelectSecondaryAscendClass(bm.spec.curSecondaryAscendClassId)
@@ -5047,7 +5055,7 @@ function pob_copySpec(index, title)
     local sel = tt and index and tt.specList[index]
     if not sel then return { ok = false, error = "no such spec" } end
     if not title or not tostring(title):match("%S") then return { ok = false, error = "empty title" } end
-    local newSpec = new("PassiveSpec", bm, sel.treeVersion)
+    local newSpec = new("PassiveSpec"):PassiveSpec(bm, sel.treeVersion)
     newSpec.title = sel.title
     newSpec.jewels = copyTable(sel.jewels)
     newSpec:RestoreUndoState(sel:CreateUndoState())
@@ -5158,7 +5166,7 @@ function pob_importTree(name, treeLink)
         if not treeVersions[newTreeVersion] then
             return { ok = false, msg = "^1Unknown tree version '" .. tostring(newTreeVersion) .. "'^7" }
         end
-        local newSpec = new("PassiveSpec", bm, newTreeVersion)
+        local newSpec = new("PassiveSpec"):PassiveSpec(bm, newTreeVersion)
         newSpec.title = name
         local errMsg = newSpec:DecodeURL(link)
         if errMsg then
@@ -5171,12 +5179,12 @@ function pob_importTree(name, treeLink)
                  msg = "^1PoEURL links need network support (not available yet). Paste the full pathofexile.com link instead.^7" }
     elseif treeLink:match("poeplanner.com/") then
         local link = treeLink:gsub("/%?v=.+#", "/")
-        local tmpSpec = new("PassiveSpec", bm, latestTreeVersion)
+        local tmpSpec = new("PassiveSpec"):PassiveSpec(bm, latestTreeVersion)
         local verOrErr = tmpSpec:DecodePoePlannerURL(link, true)
         if type(verOrErr) ~= "string" or string.find(verOrErr, "Invalid") then
             return { ok = false, msg = "^1" .. tostring(verOrErr) }
         end
-        local newSpec = new("PassiveSpec", bm, verOrErr)
+        local newSpec = new("PassiveSpec"):PassiveSpec(bm, verOrErr)
         newSpec.title = name
         newSpec:DecodePoePlannerURL(link, false)
         return pob_commitImportedSpec(bm, tt, newSpec)
@@ -5408,7 +5416,7 @@ function pob_getNodeTooltipLines(id, traceIds)
     local trace = pob_nodesFromIds(spec, traceIds)
     viewer.tracePath = #trace > 0 and trace or nil
     pob_recalculate()
-    local tip = new("Tooltip")
+    local tip = new("Tooltip"):Tooltip()
     local ok, err = pcall(viewer.AddNodeTooltip, viewer, tip, node, bm)
     viewer.tracePath = nil
     if not ok then return { show = true, lines = { { size = 16, text = "^1Tooltip error: " .. tostring(err) } } } end
@@ -6558,7 +6566,7 @@ function pob_selftestTreeVersionArt()
         return dimsMemo[p][1], dimsMemo[p][2]
     end
     local allOk = true
-    for _, ver in ipairs({ "3_16", "3_20", "3_25_ruthless", "3_28" }) do
+    for _, ver in ipairs({ "3_16", "3_20", "3_25_ruthless", "3_28", "3_29" }) do
         if treeVersions[ver] then
             pob_convertTree(ver, false, false)
             local spec = bm.spec

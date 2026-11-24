@@ -57,7 +57,7 @@ end
 
 -- A real Tooltip filled by `fn`, marshalled as {size,text,center}|{sep,size}.
 local function tipLines(fn)
-    local tip = new("Tooltip")
+    local tip = new("Tooltip"):Tooltip()
     local ok, err = pcall(fn, tip)
     if not ok then return { { size = 16, text = "^1Tooltip error: " .. tostring(err) } } end
     local lines = { }

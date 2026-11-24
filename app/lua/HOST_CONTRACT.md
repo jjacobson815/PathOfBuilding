@@ -51,8 +51,12 @@ Phase 15 owns the recurring cadence):
    files; **remove** qt-only files superseded upstream (e.g. `Data/ModImplicit.lua`
    was merged into `Data/ModItemExclusive.lua`).
 3. **3-way merge every Qt-edited file** so upstream drift and the local change
-   combine: the four Modules seams (Build/Main/Data/UITheme) **and** the Suggest
-   Path `Classes/` trio (TreeTab/PassiveSpec/PassiveTreeView). Find them with
+   combine: the four Modules seams (Build/Main/Data/UITheme). Main.lua also
+   carries a stock-LuaJIT compat edit (`count = count + 1` in `SaveModCache`,
+   upstream wrote `+=`); re-check that every `src/` file still parses with
+   `luajit -bl` after a sync. Suggest Path (TreeTab/PassiveSpec/PassiveTreeView)
+   was dropped in the 2026-10-20 sync, so those files take upstream; re-port
+   from `a60a9d35a` if wanted. Find the Qt-edited files with
    `git diff --name-only <port-commit> HEAD -- src/`. Merge:
    `git merge-file -p <qt-current> <pristine-base> <legacy>` **in LF space**
    (git blobs are LF; the worktree is CRLF — merging mismatched EOLs conflicts the
