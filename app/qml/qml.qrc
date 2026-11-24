@@ -47,6 +47,7 @@
         <file>components/ItemListBox.qml</file>
         <file>components/ItemDBPanel.qml</file>
         <file>components/ItemTextPopup.qml</file>
+        <file>components/CraftNewPopup.qml</file>
         <file>components/CraftPopupBase.qml</file>
         <file>components/CraftDrop.qml</file>
         <file>components/CraftButton.qml</file>

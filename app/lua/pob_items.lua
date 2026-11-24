@@ -198,13 +198,11 @@ function pob_itemsSetActiveSet(index)
 end
 
 -- ItemSetListControl.lua:37-41 + RenameSet(addOnName) Save 53-68.
+-- Upstream PR #9647: NewItemSet now appends to itemSetOrderList and sets modFlag.
 function pob_itemsNewSet(title)
     local bm, it = ctx()
     if not it then return fail("no build") end
-    local set = it:NewItemSet()
-    set.title = title
-    it.modFlag = true
-    t_insert(it.itemSetOrderList, set.id)
+    local set = it:NewItemSet(nil, title)
     it:AddUndoState()
     syncLoadouts(bm)
     return done({ index = #it.itemSetOrderList })
@@ -1112,8 +1110,7 @@ function pob_itemsImportSharedSet(sharedIndex, at)
     local bm, it = ctx()
     local value = it and main.sharedItemSetList[tonumber(sharedIndex) or -1]
     if not value then return fail("no such shared set") end
-    local itemSet = it:NewItemSet()
-    itemSet.title = value.title
+    local itemSet = it:CreateItemSet(nil, value.title)
     for slotName, item in pairs(value.slots) do
         local newItem = new("Item"):Item(item.raw)
         newItem:NormaliseQuality()
@@ -1716,11 +1713,15 @@ local function editTextRaw(text, rarityIndex)
     return "Rarity: " .. (RARITIES[tonumber(rarityIndex) or 3] or "RARE") .. "\n" .. text
 end
 
+local function rarityLabels()
+    local labels = { }
+    for i, r in ipairs(RARITIES) do labels[i] = (colorCodes[r] or "^7") .. r:sub(1, 1) .. r:sub(2):lower() end
+    return labels
+end
+
 function pob_itemsEditTextInit()
     local bm, it = ctx()
     if not it then return nil end
-    local labels = { }
-    for i, r in ipairs(RARITIES) do labels[i] = (colorCodes[r] or "^7") .. r:sub(1, 1) .. r:sub(2):lower() end
     local d = it.displayItem
     local sel = 3
     if d then sel = isValueInArray(RARITIES, d.rarity) or 3 end
@@ -1729,7 +1730,7 @@ function pob_itemsEditTextInit()
         title = d and "Edit Item Text" or "Create Custom Item from Text",
         saveLabel = d and "Save" or "Create",
         text = d and (d:BuildRaw():gsub("Rarity: %w+\n", "")) or "",
-        rarities = labels,
+        rarities = rarityLabels(),
         raritySel = sel,
     }
 end
@@ -1768,6 +1769,133 @@ function pob_itemsEditTextSave(text, rarityIndex, alsoAdd)
         return done(nil, EMIT_TREE)
     end
     return displayEdited(it)
+end
+
+-- Craft-item popup (ItemsTab:CraftItem, ItemsTab.lua:2774-2858).
+-- Lifted from legacy because CraftItem creates a modal popup with local
+-- `makeItem` and `controls`; remembers `lastCraftRaritySel`/`TypeSel`/`BaseSel`
+-- on `itemsTab` identically to legacy.
+local function craftBaseList(it, typeIdx)
+    local typeList = it.build.data.itemBaseTypeList
+    local typeName = typeList and typeList[typeIdx]
+    if not typeName then return nil end
+    return it.build.data.itemBaseLists[typeName], typeName
+end
+
+local function makeCraftItem(it, rarityIdx, title, typeIdx, baseIdx)
+    rarityIdx = tonumber(rarityIdx)
+    typeIdx = tonumber(typeIdx)
+    baseIdx = tonumber(baseIdx)
+    if not (rarityIdx and rarityIdx >= 1 and rarityIdx <= #RARITIES and rarityIdx % 1 == 0) then
+        return nil, "bad rarity"
+    end
+    local baseList = typeIdx and craftBaseList(it, typeIdx)
+    local base = baseList and baseIdx and baseList[baseIdx]
+    if not base then return nil, "bad base" end
+    local item = new("Item"):Item()
+    item.name = base.name
+    item.base = base.base
+    item.baseName = base.name
+    item.buffModLines = { }
+    item.enchantModLines = { }
+    item.classRequirementModLines = { }
+    item.scourgeModLines = { }
+    item.implicitModLines = { }
+    item.explicitModLines = { }
+    item.crucibleModLines = { }
+    if base.base.type == "Amulet" or base.base.type == "Belt" or base.base.type == "Jewel"
+            or base.base.type == "Quiver" or base.base.type == "Ring" or base.base.type == "Graft" then
+        item.quality = nil
+    else
+        item.quality = 0
+    end
+    local raritySel = rarityIdx
+    if base.base.flask
+            or (base.base.type == "Jewel" and base.base.subType == "Charm")
+            or base.base.type == "Tincture" then
+        if raritySel == 3 then
+            raritySel = 2
+        end
+    end
+    if raritySel == 2 or raritySel == 3 then
+        item.crafted = true
+    end
+    item.rarity = RARITIES[raritySel]
+    if raritySel >= 3 then
+        local t = tostring(title or "")
+        item.title = t:match("%S") and t or "New Item"
+    end
+    if base.base.implicit then
+        local implicitIndex = 1
+        for line in base.base.implicit:gmatch("[^\n]+") do
+            local modList, extra = modLib.parseMod(line)
+            t_insert(item.implicitModLines, {
+                line = line,
+                extra = extra,
+                modList = modList or { },
+                modTags = base.base.implicitModTypes and base.base.implicitModTypes[implicitIndex] or { },
+            })
+            implicitIndex = implicitIndex + 1
+        end
+    end
+    item:NormaliseQuality()
+    item:BuildAndParseRaw()
+    return item
+end
+
+function pob_itemsCraftNewInit(typeIdx)
+    local bm, it = ctx()
+    if not it then return nil end
+    local typeList = bm.data.itemBaseTypeList or { }
+    local types = { }
+    for i, t in ipairs(typeList) do types[i] = t end
+    local raritySel = it.lastCraftRaritySel or 3
+    if raritySel < 1 or raritySel > #RARITIES then raritySel = 3 end
+    local typeSel, baseList, baseSel
+    if typeIdx ~= nil then
+        typeSel = tonumber(typeIdx)
+        baseList = typeSel and craftBaseList(it, typeSel)
+        if not baseList then return fail("bad type") end
+        baseSel = 1
+    else
+        typeSel = it.lastCraftTypeSel or 1
+        if typeSel < 1 or typeSel > #typeList then typeSel = 1 end
+        baseList = craftBaseList(it, typeSel) or { }
+        baseSel = it.lastCraftBaseSel or 1
+        if baseSel < 1 or baseSel > #baseList then baseSel = 1 end
+    end
+    return {
+        ok = true,
+        rarities = rarityLabels(),
+        raritySel = raritySel,
+        types = types,
+        typeSel = typeSel,
+        bases = dropLabels(baseList),
+        baseSel = baseSel,
+    }
+end
+
+function pob_itemsCraftNewTooltip(rarityIdx, title, typeIdx, baseIdx)
+    local bm, it = ctx()
+    if not it then return { lines = { } } end
+    local item = makeCraftItem(it, rarityIdx, title, typeIdx, baseIdx)
+    if not item then return { lines = { } } end
+    return { lines = tipLines(function(tip) it:AddItemTooltip(tip, item, nil, true) end) }
+end
+
+function pob_itemsCraftNewCreate(rarityIdx, title, typeIdx, baseIdx)
+    local bm, it = ctx()
+    if not it then return fail("no build") end
+    local item, err = makeCraftItem(it, rarityIdx, title, typeIdx, baseIdx)
+    if not item then return fail(err) end
+    craft = nil
+    it:SetDisplayItem(item)
+    markDisplayFresh(it)
+    it.lastCraftRaritySel = tonumber(rarityIdx)
+    it.lastCraftTypeSel = tonumber(typeIdx)
+    it.lastCraftBaseSel = tonumber(baseIdx)
+    local openEditText = (not item.crafted and item.rarity ~= "NORMAL") and true or false
+    return { ok = true, openEditText = openEditText, _emit = { "items" } }
 end
 
 ---------------------------------------------------------------------------
@@ -2591,6 +2719,143 @@ function pob_selftestItemsAffix()
         local dListsUntoggled = pob_itemsGetLists().display
         res.toggleLineRestored = dListsUntoggled.lines[toggleIdx].strike == false
     end)
+    pcall(function() it:SetDisplayItem() end)
+    itRestore(bm, it, snap)
+    return finish(res, ok, err)
+end
+
+-- Phase 6 Part 6.3 item 4: Craft-item popup (rarity/title/type/base, live base
+-- tooltip, flask/charm/tincture RARE->MAGIC clamp, quality=nil rules,
+-- NormaliseQuality, BuildAndParseRaw, SetDisplayItem, edit-text trigger,
+-- lastCraft*Sel preservation).
+function pob_selftestItemsCraftNew()
+    local bm, it = ctx()
+    if not it then return { ok = false, error = "no itemsTab" } end
+    local snap = itSnapshot(bm, it)
+    local savedRarity, savedType, savedBase = it.lastCraftRaritySel, it.lastCraftTypeSel, it.lastCraftBaseSel
+    local res = { }
+    local ok, err = pcall(function()
+        it:SetDisplayItem()
+        it.lastCraftRaritySel, it.lastCraftTypeSel, it.lastCraftBaseSel = nil, nil, nil
+
+        local init = pob_itemsCraftNewInit()
+        res.initDefaults = init ~= nil and init.ok == true
+            and init.raritySel == 3 and init.typeSel == 1 and init.baseSel == 1
+            and #init.rarities == 5 and #init.types > 10 and #init.bases > 0
+
+        local function findType(name)
+            for i, t in ipairs(init.types) do
+                if t == name then return i end
+            end
+        end
+        local function findBase(typeIdx, wantedName)
+            local list = craftBaseList(it, typeIdx)
+            if not list then return nil end
+            for i, b in ipairs(list) do
+                if b.name == wantedName then return i, b end
+            end
+            return 1, list[1]
+        end
+
+        -- Type switch updates base list and resets baseSel to 1; bad type refused.
+        local beltType = findType("Belt")
+        local swordType = findType("One Handed Sword")
+        local flaskType = findType("Flask: Life")
+        local charmType = findType("Jewel: Charm")
+        local tinctureType = findType("Tincture")
+        local amuletType = findType("Amulet")
+        local ringType = findType("Ring")
+        local jewelType = findType("Jewel")
+        local quiverType = findType("Quiver")
+        local graftType = findType("Graft")
+        res.fixtureTypesFound = beltType ~= nil and swordType ~= nil and flaskType ~= nil
+            and charmType ~= nil and tinctureType ~= nil and amuletType ~= nil
+            and ringType ~= nil and jewelType ~= nil and quiverType ~= nil
+
+        local beltInit = pob_itemsCraftNewInit(beltType)
+        res.typeSwitchOk = beltInit.ok == true and beltInit.typeSel == beltType and beltInit.baseSel == 1
+            and #beltInit.bases == #craftBaseList(it, beltType)
+        res.badTypeRefused = not pob_itemsCraftNewInit(99999).ok
+
+        -- Live base tooltip for Leather Belt renders name + implicit life mod.
+        local leatherIdx = findBase(beltType, "Leather Belt")
+        local tip = pob_itemsCraftNewTooltip(3, "Preview Belt", beltType, leatherIdx)
+        local tipTxt = linesText(tip.lines)
+        res.baseTooltipOk = tipTxt:find("Preview Belt", 1, true) ~= nil
+            and tipTxt:find("Leather Belt", 1, true) ~= nil
+            and tipTxt:find("maximum Life", 1, true) ~= nil
+
+        -- Rare weapon: crafted=true, quality normalised to 20, title applied, no edit-text trigger.
+        local swordIdx = findBase(swordType, "Corsair Sword")
+        local crSword = pob_itemsCraftNewCreate(3, "ST Crafted Blade", swordType, swordIdx)
+        res.rareWeaponOk = crSword.ok == true and crSword.openEditText == false
+            and it.displayItem ~= nil and it.displayItem.rarity == "RARE"
+            and it.displayItem.crafted == true and it.displayItem.title == "ST Crafted Blade"
+            and it.displayItem.quality == 20 and #it.displayItem.implicitModLines > 0
+            and it.displayItem.implicitModLines[1].modList ~= nil and #it.displayItem.implicitModLines[1].modList > 0
+
+        -- Blank title falls back to "New Item" for rarity >= 3.
+        local crBlank = pob_itemsCraftNewCreate(3, "   ", beltType, leatherIdx)
+        res.blankTitleDefault = crBlank.ok == true and it.displayItem.title == "New Item"
+
+        -- quality = nil for Amulet / Belt / Jewel / Quiver / Ring / Graft.
+        local qualNil = true
+        for _, tIdx in ipairs({ amuletType, beltType, jewelType, quiverType, ringType, graftType }) do
+            if tIdx then
+                local cr = pob_itemsCraftNewCreate(3, "", tIdx, 1)
+                if not (cr.ok and it.displayItem and it.displayItem.quality == nil) then
+                    qualNil = false
+                end
+            end
+        end
+        res.qualityNilTypes = qualNil
+
+        -- Flask / Charm / Tincture: RARE (3) clamps to MAGIC (2) with crafted=true,
+        -- while lastCraftRaritySel preserves the user's chosen rarity (3).
+        local crFlask = pob_itemsCraftNewCreate(3, "Ignored", flaskType, 1)
+        local flaskClamped = crFlask.ok and crFlask.openEditText == false
+            and it.displayItem.rarity == "MAGIC" and it.displayItem.crafted == true
+            and it.displayItem.quality == 20 and it.lastCraftRaritySel == 3
+        local crCharm = pob_itemsCraftNewCreate(3, "Ignored", charmType, 1)
+        local charmClamped = crCharm.ok and crCharm.openEditText == false
+            and it.displayItem.rarity == "MAGIC" and it.displayItem.crafted == true
+            and it.displayItem.quality == nil
+        local crTinc = pob_itemsCraftNewCreate(3, "Ignored", tinctureType, 1)
+        local tincClamped = crTinc.ok and crTinc.openEditText == false
+            and it.displayItem.rarity == "MAGIC" and it.displayItem.crafted == true
+            and it.displayItem.quality == 20
+        res.rareClampMagic = flaskClamped and charmClamped and tincClamped
+
+        -- NORMAL: not crafted, does NOT open edit-text popup.
+        local crNorm = pob_itemsCraftNewCreate(1, "Ignored", beltType, leatherIdx)
+        res.normalNoEditText = crNorm.ok and crNorm.openEditText == false
+            and it.displayItem.rarity == "NORMAL" and not it.displayItem.crafted
+
+        -- MAGIC: crafted, does NOT open edit-text popup.
+        local crMagic = pob_itemsCraftNewCreate(2, "Ignored", beltType, leatherIdx)
+        res.magicCrafted = crMagic.ok and crMagic.openEditText == false
+            and it.displayItem.rarity == "MAGIC" and it.displayItem.crafted == true
+
+        -- UNIQUE & RELIC: non-crafted and non-NORMAL -> triggers edit-text popup.
+        local crUniq = pob_itemsCraftNewCreate(4, "ST Unique Belt", beltType, leatherIdx)
+        res.uniqueOpensEditText = crUniq.ok and crUniq.openEditText == true
+            and it.displayItem.rarity == "UNIQUE" and not it.displayItem.crafted
+            and it.displayItem.title == "ST Unique Belt"
+        local crRelic = pob_itemsCraftNewCreate(5, "", beltType, leatherIdx)
+        res.relicOpensEditText = crRelic.ok and crRelic.openEditText == true
+            and it.displayItem.rarity == "RELIC" and not it.displayItem.crafted
+            and it.displayItem.title == "New Item"
+
+        -- lastCraftRaritySel / TypeSel / BaseSel preserved across re-init.
+        local reinit = pob_itemsCraftNewInit()
+        res.lastSelPreserved = reinit.raritySel == 5 and reinit.typeSel == beltType and reinit.baseSel == leatherIdx
+
+        -- Invalid arguments refused.
+        res.invalidRefused = not pob_itemsCraftNewCreate(99, "", beltType, 1).ok
+            and not pob_itemsCraftNewCreate(3, "", 99999, 1).ok
+            and not pob_itemsCraftNewCreate(3, "", beltType, 99999).ok
+    end)
+    it.lastCraftRaritySel, it.lastCraftTypeSel, it.lastCraftBaseSel = savedRarity, savedType, savedBase
     pcall(function() it:SetDisplayItem() end)
     itRestore(bm, it, snap)
     return finish(res, ok, err)

@@ -409,8 +409,7 @@ Item {
                 x: 0; y: 8
                 width: 120; height: 20
                 label: "Craft item..."
-                controlEnabled: false
-                tooltipText: "The craft-item popup arrives with the rest of Phase 6 Part 6.3."
+                onClicked: craftNewPopup.openFresh()
             }
             Widgets.Button {
                 visible: !itemsView.display.shown
@@ -1015,6 +1014,13 @@ Item {
     Widgets.ItemTextPopup {
         id: textPopup
         parent: itemsView
+    }
+    Widgets.CraftNewPopup {
+        id: craftNewPopup
+        parent: itemsView
+        onCreated: function (openEditText) {
+            if (openEditText) Qt.callLater(function () { textPopup.openFor(false) })
+        }
     }
     // Craft popups over the captured legacy controls (Part 6.3 item 2).
     Widgets.CraftEnchantPopup { id: craftEnchant; parent: itemsView }

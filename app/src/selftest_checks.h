@@ -971,6 +971,8 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     if (!pob_run_lua_check(engine, "pob_selftestItemsCraft", "items-craft")) return false;
     // Phase 6 Part 6.3 item 3: affix dropdowns, custom/crucible popups, range sliders, mod toggling.
     if (!pob_run_lua_check(engine, "pob_selftestItemsAffix", "items-affix")) return false;
+    // Phase 6 Part 6.3 item 4: craft-item popup (rarity/title/type/base, clamp, quality, edit-text trigger).
+    if (!pob_run_lua_check(engine, "pob_selftestItemsCraftNew", "items-craft-new")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;
