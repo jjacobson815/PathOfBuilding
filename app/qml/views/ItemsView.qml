@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Window
 import "../components" as Widgets
 import "../components/StatDiff.js" as StatDiff
 
@@ -43,7 +44,16 @@ Item {
     readonly property var sharedRows: lists.shared && lists.shared.length !== undefined ? lists.shared : []
     readonly property var display: lists.display ? lists.display : ({ shown: false })
     readonly property var displayLines: display.lines && display.lines.length !== undefined ? display.lines : []
+    property string hoveredSlotName: ""
+    property int hoveredSlotItemId: 0
     property bool _pending: false
+    readonly property bool _typing: !!Window.activeFocusItem && (Window.activeFocusItem instanceof TextInput || Window.activeFocusItem instanceof TextEdit)
+    readonly property bool _popupOpen: setManage.opened || textPopup.opened || craftNewPopup.opened
+        || craftEnchant.opened || craftAnoint.opened || craftCorrupt.opened
+        || craftImplicit.opened || craftCustom.opened || craftCrucible.opened
+        || specManage.opened || deleteConfirm.opened || deleteAllConfirm.opened
+        || sharedConfirm.opened
+    readonly property bool _shortcutsActive: itemsView.visible && luaEngine.currentMode === "BUILD" && !_popupOpen
 
     function call(name, args) { return luaEngine.invoke(name, args || []) }
 
@@ -113,13 +123,41 @@ Item {
 
     Shortcut {
         sequence: "Ctrl+Z"
-        enabled: itemsView.visible && luaEngine.currentMode === "BUILD"
+        enabled: itemsView._shortcutsActive && !itemsView._typing
         onActivated: itemsView.call("pob_itemsUndo")
     }
     Shortcut {
         sequences: ["Ctrl+Y", "Ctrl+Shift+Z"]
-        enabled: itemsView.visible && luaEngine.currentMode === "BUILD"
+        enabled: itemsView._shortcutsActive && !itemsView._typing
         onActivated: itemsView.call("pob_itemsRedo")
+    }
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: itemsView._shortcutsActive && !itemsView._typing
+        onActivated: itemsView.call("pob_itemsPaste")
+    }
+    Shortcut {
+        sequence: "E"
+        enabled: itemsView._shortcutsActive && !itemsView._typing
+        onActivated: {
+            if (itemsView.hoveredSlotItemId > 0)
+                itemsView.openEdit("item", itemsView.hoveredSlotItemId)
+        }
+    }
+    Shortcut {
+        sequence: "Ctrl+F"
+        enabled: itemsView._shortcutsActive
+        onActivated: dbPanel.focusSearch()
+    }
+    Shortcut {
+        sequence: "Ctrl+D"
+        enabled: itemsView._shortcutsActive
+        onActivated: {
+            itemsView.call("pob_itemsToggleStatDiff")
+            itemList.refreshTip()
+            sharedList.refreshTip()
+            dbPanel.refreshTip()
+        }
     }
 
     Flickable {
@@ -239,6 +277,10 @@ Item {
                                 dd.model = rec.options
                                 dd.currentIndex = selIdx()
                                 if (rec.isFlask) activeBox.state = rec.flaskActive
+                                if (dd.hovered) {
+                                    itemsView.hoveredSlotName = rec.slotName
+                                    itemsView.hoveredSlotItemId = rec.selItemId
+                                }
                             }
                             onRecChanged: if (rec) push()
                             Component.onCompleted: if (rec) push()
@@ -266,9 +308,22 @@ Item {
                                 id: dd
                                 x: 96; width: 310; height: 20
                                 controlEnabled: !!(rec && rec.options.length > 1)
+                                tooltipFunc: function (tt) {
+                                    if (!rec || rec.selItemId === 0) return
+                                    StatDiff.fillFromLines(tt, itemsView.call("pob_itemsSlotTooltip", [rec.slotName, rec.selItemId, false]))
+                                }
                                 tooltipForItem: function (item, tt) {
                                     if (item.id === 0) return
-                                    StatDiff.fillFromLines(tt, itemsView.call("pob_itemsSlotTooltip", [rec.slotName, item.id]))
+                                    StatDiff.fillFromLines(tt, itemsView.call("pob_itemsSlotTooltip", [rec.slotName, item.id, false]))
+                                }
+                                onHoveredChanged: {
+                                    if (hovered && rec) {
+                                        itemsView.hoveredSlotName = rec.slotName
+                                        itemsView.hoveredSlotItemId = rec.selItemId
+                                    } else if (rec && itemsView.hoveredSlotName === rec.slotName) {
+                                        itemsView.hoveredSlotName = ""
+                                        itemsView.hoveredSlotItemId = 0
+                                    }
                                 }
                                 onSelected: function (i) { itemsView.call("pob_itemsEquip", [rec.slotName, rec.options[i].id]) }
                             }
@@ -896,13 +951,51 @@ Item {
                 }
 
                 Rectangle {
+                    id: tipBox
                     y: 28 + editCol.height
                     width: tipCol.width + 16
                     height: Math.min(parent.height - y, tipCol.height + 12)
                     color: theme.background
                     border.width: 1
-                    border.color: theme.border
+                    border.color: (itemsView.display.color && itemsView.display.color !== "") ? itemsView.display.color : theme.border
                     clip: true
+                    // Rarity header art + influence icons (Tooltip.lua:486-561).
+                    Item {
+                        visible: itemsView.display.showHeaderArt === true && !!itemsView.display.headerLeft && itemsView.displayLines.length > 0
+                        x: 1; y: 1
+                        width: Math.max(0, tipBox.width - 2)
+                        height: itemsView.display.headerHeight || 0
+                        clip: true
+                        Image {
+                            x: 0; y: 0
+                            width: itemsView.display.headerSideWidth || 0; height: parent.height
+                            source: parent.visible ? itemsView.fileUrl(itemsView.display.headerLeft) : ""
+                        }
+                        Image {
+                            x: itemsView.display.headerSideWidth || 0; y: 0
+                            width: Math.max(0, parent.width - 2 * (itemsView.display.headerSideWidth || 0))
+                            height: parent.height
+                            fillMode: Image.TileHorizontally
+                            source: parent.visible ? itemsView.fileUrl(itemsView.display.headerMiddle) : ""
+                        }
+                        Image {
+                            x: Math.max(0, parent.width - (itemsView.display.headerSideWidth || 0)); y: 0
+                            width: itemsView.display.headerSideWidth || 0; height: parent.height
+                            source: parent.visible ? itemsView.fileUrl(itemsView.display.headerRight) : ""
+                        }
+                        Image {
+                            visible: !!(itemsView.display.influenceIcon1 && itemsView.display.influenceIcon1 !== "")
+                            x: 4; anchors.verticalCenter: parent.verticalCenter
+                            width: parent.height / 2; height: parent.height / 2
+                            source: visible ? itemsView.fileUrl(itemsView.display.influenceIcon1) : ""
+                        }
+                        Image {
+                            visible: !!(itemsView.display.influenceIcon2 && itemsView.display.influenceIcon2 !== "")
+                            x: Math.max(0, parent.width - width - 4); anchors.verticalCenter: parent.verticalCenter
+                            width: parent.height / 2; height: parent.height / 2
+                            source: visible ? itemsView.fileUrl(itemsView.display.influenceIcon2) : ""
+                        }
+                    }
                     Column {
                         id: tipCol
                         x: 8; y: 6
@@ -912,7 +1005,7 @@ Item {
                                 readonly property var ln: itemsView.displayLines[index]
                                 // Painted width (implicitWidth), not the TextMetrics
                                 // one: Qt's font is wider (invariant #8).
-                                width: Math.max(lineLbl.implicitWidth, 300)
+                                width: Math.max(lineLbl.implicitWidth, itemsView.display.showHeaderArt === true ? 340 : 300)
                                 height: ln.sep ? ln.size : ln.size + 2
                                 Rectangle {
                                     visible: !!ln.sep

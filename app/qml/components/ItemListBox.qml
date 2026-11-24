@@ -50,6 +50,10 @@ FocusScope {
         list.positionViewAtIndex(i, ListView.Contain)
     }
 
+    function refreshTip() {
+        if (ma.hoverIndex >= 0) _showTip()
+    }
+
     onRowsChanged: {
         if (selIndex >= count) selIndex = -1
         if (ma.hoverIndex >= 0) Qt.callLater(_showTip)

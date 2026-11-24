@@ -31,13 +31,15 @@ function addToTooltip(tooltip, header, stats, minionStats) {
     return n + m
 }
 
-// Fill `tooltip` from a bridge result { lines: [{size,text,center}|{sep,size}] }
-// (the pob_skills* / pob_get*TooltipLines shape).
+// Fill `tooltip` from a bridge result { lines: [{size,text,center}|{sep,size}],
+// header?, showHeaderArt?, headerLeft/Middle/Right/Height/SideWidth?,
+// influenceIcon1/2?, color?, children? } (pob_skills* / pob_items* shape).
 function fillFromLines(tooltip, t) {
     if (!t || !t.lines || t.lines.length === undefined) return
+    if (tooltip.setItemMeta) tooltip.setItemMeta(t)
     for (var i = 0; i < t.lines.length; i++) {
         var l = t.lines[i]
         if (l.sep) tooltip.addSeparator(l.size)
-        else tooltip.addLine(l.size, l.text.length > 0 ? l.text : " ")
+        else tooltip.addLine(l.size, l.text.length > 0 ? l.text : " ", undefined, l.center)
     }
 }

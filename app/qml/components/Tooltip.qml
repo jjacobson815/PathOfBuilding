@@ -38,6 +38,40 @@ Rectangle {
     property int maxWidth: 0        // 0 = no wrapping; else wrap AddLine text to this width
     property var _updateParams: null
 
+    // Optional item tooltip chrome (Phase 6 Part 6.4): rarity header art,
+    // left/right influence badges, rarity border colour, and Shift-held
+    // granted-skill child tooltips. Reset on clear() so plain tooltips stay plain.
+    property string headerRarity: ""
+    property bool showHeaderArt: false
+    property string headerLeft: ""
+    property string headerMiddle: ""
+    property string headerRight: ""
+    property int headerHeight: 0
+    property int headerSideWidth: 0
+    property string influenceIcon1: ""
+    property string influenceIcon2: ""
+    property string borderColorOverride: ""
+    property var childTooltips: []
+
+    function _fileUrl(p) {
+        return p ? (p.charAt(0) === "/" ? "file://" : "file:///") + p : ""
+    }
+
+    function setItemMeta(t) {
+        if (!t) return
+        headerRarity = t.header || ""
+        showHeaderArt = t.showHeaderArt === true
+        headerLeft = t.headerLeft || ""
+        headerMiddle = t.headerMiddle || ""
+        headerRight = t.headerRight || ""
+        headerHeight = t.headerHeight || 0
+        headerSideWidth = t.headerSideWidth || 0
+        influenceIcon1 = t.influenceIcon1 || ""
+        influenceIcon2 = t.influenceIcon2 || ""
+        borderColorOverride = t.color || ""
+        childTooltips = (t.children && t.children.length !== undefined) ? t.children : []
+    }
+
     // Legacy draws tooltips on the top layer, never clipped. showAt() moves
     // this item into the window's popup overlay (above views AND popups) and
     // maps the caller's local coordinates from the item it was declared in
@@ -58,7 +92,7 @@ Rectangle {
     z: 100
     color: Qt.rgba(0, 0, 0, 0.85)
     border.width: 1
-    border.color: theme.borderStrong
+    border.color: borderColorOverride !== "" ? borderColorOverride : theme.borderStrong
     radius: theme.radiusControl
 
     // --- Programmatic content API (mirrors Tooltip.lua) --------------------
@@ -70,6 +104,17 @@ Rectangle {
         lines = [];
         maxWidth = 0;
         center = false;
+        headerRarity = "";
+        showHeaderArt = false;
+        headerLeft = "";
+        headerMiddle = "";
+        headerRight = "";
+        headerHeight = 0;
+        headerSideWidth = 0;
+        influenceIcon1 = "";
+        influenceIcon2 = "";
+        borderColorOverride = "";
+        childTooltips = [];
     }
 
     // Word-wraps `text` to `width` px at `height` px font size (VAR), mirroring
@@ -102,17 +147,18 @@ Rectangle {
         return out;
     }
 
-    function addLine(size, text, font) {
+    function addLine(size, text, font, lineCenter) {
         if (!text) return;
         const f = font || "VAR";
+        const ctr = (lineCenter !== undefined && lineCenter !== null) ? !!lineCenter : center;
         const raw = String(text).split("\n");
         const next = lines.slice();
         for (const line of raw) {
             if (maxWidth > 0) {
                 for (const wrapped of _wrapString(line, size, maxWidth - hPad))
-                    next.push({ size: size, text: wrapped, font: f, center: center });
+                    next.push({ size: size, text: wrapped, font: f, center: ctr });
             } else {
-                next.push({ size: size, text: line, font: f, center: center });
+                next.push({ size: size, text: line, font: f, center: ctr });
             }
         }
         lines = next;
@@ -171,6 +217,13 @@ Rectangle {
             laid += it.height + lineColumn.spacing;
         }
         h = Math.max(h, laid);
+        // Reserve width for rarity header side caps + influence badges (Tooltip.lua:427-433).
+        if (showHeaderArt && headerLeft !== "" && lines.length > 0 && lines[0].text) {
+            const titleW = textMetrics.width(lines[0].size || theme.fontSize, lines[0].font || "VAR", lines[0].text);
+            const pad = influenceIcon1 !== "" ? 64 : 50;
+            if (titleW + pad > w) w = titleW + pad;
+            if (headerHeight > h) h = headerHeight;
+        }
         return { width: w + hPad, height: h + vPad };
     }
 
@@ -216,6 +269,44 @@ Rectangle {
 
     // --- Rendering --------------------------------------------------------
 
+    // Rarity header art + influence icons behind title lines (Tooltip.lua:486-561).
+    Item {
+        visible: root.showHeaderArt && root.headerLeft !== "" && root.headerHeight > 0 && root.lines.length > 0
+        x: 1; y: 1
+        width: Math.max(0, root.width - 2)
+        height: root.headerHeight
+        clip: true
+        Image {
+            x: 0; y: 0
+            width: root.headerSideWidth; height: parent.height
+            source: parent.visible ? root._fileUrl(root.headerLeft) : ""
+        }
+        Image {
+            x: root.headerSideWidth; y: 0
+            width: Math.max(0, parent.width - 2 * root.headerSideWidth)
+            height: parent.height
+            fillMode: Image.TileHorizontally
+            source: parent.visible ? root._fileUrl(root.headerMiddle) : ""
+        }
+        Image {
+            x: Math.max(0, parent.width - root.headerSideWidth); y: 0
+            width: root.headerSideWidth; height: parent.height
+            source: parent.visible ? root._fileUrl(root.headerRight) : ""
+        }
+        Image {
+            visible: root.influenceIcon1 !== ""
+            x: 4; anchors.verticalCenter: parent.verticalCenter
+            width: parent.height / 2; height: parent.height / 2
+            source: visible ? root._fileUrl(root.influenceIcon1) : ""
+        }
+        Image {
+            visible: root.influenceIcon2 !== ""
+            x: Math.max(0, parent.width - width - 4); anchors.verticalCenter: parent.verticalCenter
+            width: parent.height / 2; height: parent.height / 2
+            source: visible ? root._fileUrl(root.influenceIcon2) : ""
+        }
+    }
+
     Column {
         id: lineColumn
         x: root.hPad / 2
@@ -246,6 +337,58 @@ Rectangle {
                     font.pixelSize: modelData.size || theme.fontSize
                     width: parent.width
                     horizontalAlignment: modelData.center ? Text.AlignHCenter : Text.AlignLeft
+                }
+            }
+        }
+    }
+
+    // Granted-skill child tooltips when Shift is held (Tooltip.lua:662-685).
+    Column {
+        id: childCol
+        visible: root.visible && root.childTooltips && root.childTooltips.length > 0
+        x: (root.parent && root.x + root.width + 4 + width > root.parent.width)
+            ? -width - 4 : root.width + 4
+        y: 0
+        spacing: 6
+        Repeater {
+            model: (root.childTooltips && root.childTooltips.length !== undefined) ? root.childTooltips.length : 0
+            delegate: Rectangle {
+                readonly property var childRec: root.childTooltips[index] || ({})
+                readonly property var childLines: (childRec.lines && childRec.lines.length !== undefined) ? childRec.lines : []
+                width: childLineCol.width + root.hPad
+                height: childLineCol.height + root.vPad
+                color: Qt.rgba(0, 0, 0, 0.90)
+                border.width: 1
+                border.color: (childRec.color && childRec.color !== "") ? childRec.color : theme.borderStrong
+                radius: theme.radiusControl
+                Column {
+                    id: childLineCol
+                    x: root.hPad / 2
+                    y: root.vPad / 2
+                    spacing: 2
+                    Repeater {
+                        model: childLines.length
+                        delegate: Item {
+                            readonly property var ln: childLines[index] || ({})
+                            width: Math.max(childTxt.implicitWidth, 240)
+                            height: ln.sep ? (ln.size || 10) : childTxt.implicitHeight
+                            Rectangle {
+                                visible: !!ln.sep
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: childLineCol.width; height: 1
+                                color: theme.border
+                            }
+                            ColorText {
+                                id: childTxt
+                                visible: !ln.sep
+                                width: childLineCol.width
+                                sourceText: ln.sep ? "" : (ln.text && ln.text.length > 0 ? ln.text : " ")
+                                defaultColor: theme.text
+                                font.pixelSize: ln.size || theme.fontSize
+                                horizontalAlignment: ln.center ? Text.AlignHCenter : Text.AlignLeft
+                            }
+                        }
+                    }
                 }
             }
         }

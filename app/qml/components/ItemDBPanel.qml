@@ -59,6 +59,18 @@ Item {
         refresh()
     }
 
+    // Ctrl+F (ItemsTab.lua:1565-1574): focus DB search; if already focused,
+    // toggle between Uniques and Rare Templates DBs.
+    function focusSearch() {
+        if (search.editing) {
+            setFilter("selectDB", isUnique ? 2 : 1)
+        }
+        search.forceEditFocus()
+        search.selectAll()
+    }
+
+    function refreshTip() { dbList.refreshTip() }
+
     onVisibleChanged: if (visible) refresh()
     Component.onCompleted: refresh()
     Connections {

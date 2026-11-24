@@ -47,21 +47,114 @@ local function syncLoadouts(bm)
     pcall(function() bm:SyncLoadouts() end)
 end
 
--- A real Tooltip filled by `fn`, marshalled as {size,text,center}|{sep,size}
--- (same shape as pob_skills.lua tipLines).
-local function tipLines(fn)
-    local tip = new("Tooltip"):Tooltip()
-    local ok, err = pcall(fn, tip)
-    if not ok then return { { size = 16, text = "^1Tooltip error: " .. tostring(err) } } end
+-- Tooltip header art & influence badge paths (Tooltip.lua:45-76).
+local HEADER_INFLUENCE = {
+    Fractured = "Assets/fracturedicon.png",
+    Veiled = "Assets/veiledicon.png",
+    Shaper = "Assets/shapericon.png",
+    Elder = "Assets/eldericon.png",
+    Redeemer = "Assets/redeemericon.png",
+    Hunter = "Assets/huntericon.png",
+    Crusader = "Assets/crusadericon.png",
+    Warlord = "Assets/warlordicon.png",
+    Eater = "Assets/eatericon.png",
+    Exarch = "Assets/exarchicon.png",
+    Synthesis = "Assets/synthesisicon.png",
+    Experimented = "Assets/experimentedicon.png",
+    Foulborn = "Assets/breachicon.png",
+    Memory = "Assets/memoryicon.png",
+    Vestigial = "Assets/vestigialicon.png",
+}
+
+local HEADER_ART = {
+    RELIC  = { left = "Assets/itemsheaderfoilleft.png",   middle = "Assets/itemsheaderfoilmiddle.png",   right = "Assets/itemsheaderfoilright.png",   height = 54, sideWidth = 47, allowInfluence = true },
+    UNIQUE = { left = "Assets/itemsheaderuniqueleft.png", middle = "Assets/itemsheaderuniquemiddle.png", right = "Assets/itemsheaderuniqueright.png", height = 54, sideWidth = 47, allowInfluence = true },
+    RARE   = { left = "Assets/itemsheaderrareleft.png",   middle = "Assets/itemsheaderraremiddle.png",   right = "Assets/itemsheaderrareright.png",   height = 54, sideWidth = 47, allowInfluence = true },
+    MAGIC  = { left = "Assets/itemsheadermagicleft.png",  middle = "Assets/itemsheadermagicmiddle.png",  right = "Assets/itemsheadermagicright.png",  height = 38, sideWidth = 32, allowInfluence = true },
+    NORMAL = { left = "Assets/itemsheaderwhiteleft.png",  middle = "Assets/itemsheaderwhitemiddle.png",  right = "Assets/itemsheaderwhiteright.png",  height = 38, sideWidth = 32, allowInfluence = true },
+    GEM    = { left = "Assets/itemsheadergemleft.png",    middle = "Assets/itemsheadergemmiddle.png",    right = "Assets/itemsheadergemright.png",    height = 38, sideWidth = 33, allowInfluence = false },
+}
+
+local POB_DIGIT_CSS = {
+    ["0"] = "#000000", ["1"] = "#FF0000", ["2"] = "#00FF00", ["3"] = "#0000FF", ["4"] = "#FFFF00",
+    ["5"] = "#FF00FF", ["6"] = "#00FFFF", ["7"] = "#FFFFFF", ["8"] = "#888888", ["9"] = "#CCCCCC",
+}
+
+local function pobColorToCss(c)
+    if type(c) == "string" then
+        local hex = c:match("^%^x(%x%x%x%x%x%x)")
+        if hex then return "#" .. hex end
+        local d = c:match("^%^(%d)")
+        if d then return POB_DIGIT_CSS[d] or "" end
+    elseif type(c) == "table" and #c >= 3 then
+        local function ch(v) return math.max(0, math.min(255, math.floor((tonumber(v) or 0) * 255 + 0.5))) end
+        return string.format("#%02X%02X%02X", ch(c[1]), ch(c[2]), ch(c[3]))
+    end
+    return ""
+end
+
+-- Marshal a real Tooltip into a plain table: lines (preserving per-line /
+-- tooltip-level centering), rarity header art + influence badge paths, border
+-- colour, foilType, and any non-empty granted-skill childTooltips.
+local function marshalTooltip(tip)
     local lines = { }
     for _, l in ipairs(tip.lines or { }) do
         if l.text == nil then
             lines[#lines + 1] = { sep = true, size = l.size or 10 }
         else
-            lines[#lines + 1] = { size = l.size or 14, text = l.text, center = l.center and true or false }
+            local centered
+            if l.center ~= nil then
+                centered = l.center and true or false
+            else
+                centered = tip.center and true or false
+            end
+            lines[#lines + 1] = { size = l.size or 14, text = l.text, center = centered }
         end
     end
-    return lines
+    local header = type(tip.tooltipHeader) == "string" and tip.tooltipHeader:upper() or ""
+    local art = HEADER_ART[header]
+    local inf1 = (art and art.allowInfluence and tip.influenceHeader1) or ""
+    local inf2 = (art and art.allowInfluence and tip.influenceHeader2) or ""
+    local icon1 = (inf1 ~= "" and HEADER_INFLUENCE[inf1]) and (_SRC_DIR .. "/" .. HEADER_INFLUENCE[inf1]) or ""
+    local icon2 = (inf2 ~= "" and HEADER_INFLUENCE[inf2]) and (_SRC_DIR .. "/" .. HEADER_INFLUENCE[inf2]) or ""
+    local children = { }
+    for _, ct in ipairs(tip.childTooltips or { }) do
+        if ct and ct.lines and #ct.lines > 0 then
+            children[#children + 1] = marshalTooltip(ct)
+        end
+    end
+    return {
+        lines = lines,
+        header = header,
+        showHeaderArt = (art ~= nil and (main.showFlavourText ~= false) and #lines > 0) and true or false,
+        headerLeft = art and (_SRC_DIR .. "/" .. art.left) or "",
+        headerMiddle = art and (_SRC_DIR .. "/" .. art.middle) or "",
+        headerRight = art and (_SRC_DIR .. "/" .. art.right) or "",
+        headerHeight = art and art.height or 0,
+        headerSideWidth = art and art.sideWidth or 0,
+        foilType = tip.foilType or "",
+        color = pobColorToCss(tip.color),
+        influenceHeader1 = inf1,
+        influenceHeader2 = inf2,
+        influenceIcon1 = icon1,
+        influenceIcon2 = icon2,
+        children = children,
+    }
+end
+
+local function tipData(fn)
+    local tip = new("Tooltip"):Tooltip()
+    local ok, err = pcall(fn, tip)
+    if not ok then
+        return { lines = { { size = 16, text = "^1Tooltip error: " .. tostring(err) } }, children = { } }
+    end
+    return marshalTooltip(tip)
+end
+
+-- A real Tooltip filled by `fn`, marshalled as {size,text,center}|{sep,size}
+-- (same shape as pob_skills.lua tipLines).
+local function tipLines(fn)
+    return tipData(fn).lines
 end
 
 -- Run `fn` with IsKeyDown reporting `held[key]` (legacy click / equip code
@@ -169,6 +262,7 @@ function pob_itemsGetState()
         sets = setList(it),
         activeSet = activeIdx,
         useSecondWeaponSet = it.activeItemSet and it.activeItemSet.useSecondWeaponSet and true or false,
+        showStatDifferences = it.showStatDifferences and true or false,
         slots = slots,
         specs = specs,
         activeSpec = tt.activeSpec,
@@ -309,6 +403,7 @@ end
 -- The item must be in the slot's own valid list (IsItemValidForSlot).
 function pob_itemsEquip(slotName, itemId)
     local bm, it = ctx()
+    if it then it:UpdateSockets() end
     local slot = it and it.slots[slotName]
     itemId = tonumber(itemId) or 0
     if not slot then return fail("no such slot") end
@@ -341,14 +436,20 @@ end
 
 -- ItemSlotControl tooltipFunc (ItemSlotControl.lua:47-56): the item tooltip
 -- with its comparison against what the slot holds now. `itemId` is the row
--- hovered in the dropdown, or the slot's own item when 0/nil is passed with
--- `useSelected`.
-function pob_itemsSlotTooltip(slotName, itemId)
+-- hovered in the dropdown, or the slot's own item when 0/nil is passed.
+-- Honours main.slotOnlyTooltips (via `slot`) and SHIFT (granted skills).
+function pob_itemsSlotTooltip(slotName, itemId, shift)
     local bm, it = ctx()
-    local slot = it and it.slots[slotName]
-    local item = slot and it.items[tonumber(itemId) or 0]
-    if not item then return { lines = { } } end
-    return { lines = tipLines(function(tip) it:AddItemTooltip(tip, item, slot) end) }
+    if not it then return { lines = { }, children = { } } end
+    it:UpdateSockets()
+    local slot = it.slots[slotName]
+    local resolvedId = tonumber(itemId)
+    if (not resolvedId or resolvedId == 0) and slot then resolvedId = slot.selItemId or 0 end
+    local item = slot and it.items[resolvedId or 0]
+    if not item then return { lines = { }, children = { } } end
+    return withKeys({ SHIFT = shift and true or false }, tipData, function(tip)
+        it:AddItemTooltip(tip, item, slot)
+    end)
 end
 
 -- EquipItemInSet (ItemsTab.lua:1412): used by the Build loadout dropdown.
@@ -397,6 +498,7 @@ end
 ---------------------------------------------------------------------------
 
 local function resolve(it, kind, key)
+    if kind == "display" then return it.displayItem end
     if kind == "item" then return it.items[tonumber(key) or -1] end
     if kind == "unique" then return main.uniqueDB.list[key] end
     if kind == "rare" then return main.rareDB.list[key] end
@@ -437,7 +539,27 @@ local dispKey = { }
 local craft
 
 local function markDisplayFresh(it)
-    dispKey.item, dispKey.rev = it.displayItem, it.build.outputRevision
+    dispKey.item = it.displayItem
+    dispKey.rev = it.build.outputRevision
+    dispKey.showDiff = it.showStatDifferences and true or false
+    dispKey.showFlavour = main.showFlavourText ~= false
+end
+
+-- Run CreateDisplayItemFromRaw and break the enchantModLines/implicitModLines
+-- aliasing that CopyAnointsAndEldritchImplicits can leave (ItemsTab.lua:2047,
+-- 2063, 2070; notably the early return at :2056 on influenced amulets skips
+-- BuildAndParseRaw). Re-parsing via BuildRaw guarantees fresh tables while
+-- preserving migrated anoints/implicits/enchants and optional item id.
+local function createDisplayItemSafe(it, raw, normalise, preserveId)
+    local prev = it.displayItem
+    it:CreateDisplayItemFromRaw(raw, normalise)
+    local d = it.displayItem
+    if not (d and d ~= prev) then return false end
+    local id = preserveId ~= nil and preserveId or d.id
+    local fresh = new("Item"):Item(d:BuildRaw())
+    fresh.id = id
+    it:SetDisplayItem(fresh)
+    return true
 end
 
 -- Bumps whenever the display item is a different object, so the QML side can
@@ -716,32 +838,33 @@ end
 local function displayRecord(it)
     local d = it.displayItem
     if not d then return { shown = false } end
-    if dispKey.item ~= d or dispKey.rev ~= it.build.outputRevision then
+    local curDiff = it.showStatDifferences and true or false
+    local curFlavour = main.showFlavourText ~= false
+    if dispKey.item ~= d or dispKey.rev ~= it.build.outputRevision
+            or dispKey.showDiff ~= curDiff or dispKey.showFlavour ~= curFlavour then
         it:UpdateDisplayItemTooltip()
         markDisplayFresh(it)
     end
     linkTooltipModLines(it)
-    local lines = { }
-    for _, l in ipairs(it.displayItemTooltip.lines or { }) do
-        if l.text == nil then
-            lines[#lines + 1] = { sep = true, size = l.size or 10 }
-        else
-            lines[#lines + 1] = { size = l.size or 14, text = l.text, center = (l.center or it.displayItemTooltip.center) and true or false,
-                -- A modifier line: a click disables / re-enables it (ItemsTab.lua:1529-1548),
-                -- a disabled one is struck through (Tooltip.lua:302).
-                toggle = l.modLine ~= nil, strike = (l.modLine and l.modLine.disabled) and true or false }
+    local tt = it.displayItemTooltip
+    local meta = marshalTooltip(tt)
+    for i, l in ipairs(tt.lines or { }) do
+        if l.text ~= nil and meta.lines[i] then
+            -- A modifier line: a click disables / re-enables it (ItemsTab.lua:1529-1548),
+            -- a disabled one is struck through (Tooltip.lua:302).
+            meta.lines[i].toggle = l.modLine ~= nil
+            meta.lines[i].strike = (l.modLine and l.modLine.disabled) and true or false
         end
     end
     if dispStamp.item ~= d then dispStamp.item, dispStamp.n = d, dispStamp.n + 1 end
-    return {
-        shown = true,
-        key = dispStamp.n,
-        name = d.name or "",
-        -- ItemsTab.lua:327-329 addDisplayItem label
-        addLabel = (d.id and it.items[d.id]) and "Save" or "Add to build",
-        lines = lines,
-        editor = editorRecord(it),
-    }
+    meta.shown = true
+    meta.key = dispStamp.n
+    meta.name = d.name or ""
+    -- ItemsTab.lua:327-329 addDisplayItem label
+    meta.addLabel = (d.id and it.items[d.id]) and "Save" or "Add to build"
+    meta.showStatDifferences = curDiff
+    meta.editor = editorRecord(it)
+    return meta
 end
 
 -- Shift = second slot: the redirect ItemListControl / ItemDBControl OnSelClick
@@ -770,15 +893,16 @@ function pob_itemsGetLists()
 end
 
 -- Item tooltip for any list row. AddItemTooltip reads SHIFT (slot number of
--- the compare), so the caller passes it explicitly.
+-- the compare + granted-skill child tooltips), so the caller passes it explicitly.
+-- Never calls CreateDisplayItemFromRaw / CopyAnointsAndEldritchImplicits.
 function pob_itemsTooltip(kind, key, shift)
     local bm, it = ctx()
     local item = it and resolve(it, kind, key)
-    if not item then return { lines = { } } end
+    if not item then return { lines = { }, children = { } } end
     local dbMode = (kind == "unique" or kind == "rare") or nil
-    return { lines = withKeys({ SHIFT = shift and true or false }, tipLines, function(tip)
+    return withKeys({ SHIFT = shift and true or false }, tipData, function(tip)
         it:AddItemTooltip(tip, item, nil, dbMode)
-    end) }
+    end)
 end
 
 -- Ctrl+click. All items: ItemListControl.lua:161-185 (toggle in the primary
@@ -819,12 +943,13 @@ function pob_itemsOpenForEdit(kind, key)
     local bm, it = ctx()
     local item = it and resolve(it, kind, key)
     if not item then return fail("no such item") end
+    craft = nil
     if kind == "item" then
         local newItem = new("Item"):Item(item:BuildRaw())
         newItem.id = item.id
         it:SetDisplayItem(newItem)
     else
-        it:CreateDisplayItemFromRaw(item.raw, true)
+        createDisplayItemSafe(it, item.raw, true)
     end
     markDisplayFresh(it)                  -- SetDisplayItem built the tooltip
     return { ok = it.displayItem ~= nil, _emit = { "items" } }
@@ -968,12 +1093,14 @@ end
 -- ItemSlotControl:CanReceiveDrag / ReceiveDrag (ItemSlotControl.lua:114-130).
 function pob_itemsCanDropOnSlot(slotName, kind, key)
     local bm, it = ctx()
+    if it then it:UpdateSockets() end
     local value = it and resolve(it, kind, key)
     return value ~= nil and it.slots[slotName] ~= nil and it:IsItemValidForSlot(value, slotName) and true or false
 end
 
 function pob_itemsDropOnSlot(slotName, kind, key)
     local bm, it = ctx()
+    if it then it:UpdateSockets() end
     local value = it and resolve(it, kind, key)
     local slot = it and it.slots[slotName]
     if not value or not slot then return fail("no such item or slot") end
@@ -1738,12 +1865,14 @@ end
 -- Live validity + the Save button tooltip (ItemsTab.lua:2250-2267).
 function pob_itemsEditTextCheck(text, rarityIndex)
     local bm, it = ctx()
-    if not it then return { valid = false, lines = { } } end
+    if not it then return { valid = false, lines = { }, children = { } } end
     local item = new("Item"):Item(editTextRaw(text, rarityIndex))
     if item.base then
-        return { valid = true, lines = tipLines(function(tip) it:AddItemTooltip(tip, item, nil, true) end) }
+        local td = tipData(function(tip) it:AddItemTooltip(tip, item, nil, true) end)
+        td.valid = true
+        return td
     end
-    return { valid = false, lines = tipLines(function(tip)
+    return { valid = false, children = { }, lines = tipLines(function(tip)
         tip:AddLine(14, "The item is invalid.")
         tip:AddLine(14, "Check that the item's title and base name are in the correct format.")
         tip:AddLine(14, "For Rare and Unique items, the first 2 lines must be the title and base name. E.g.:")
@@ -1755,15 +1884,16 @@ function pob_itemsEditTextCheck(text, rarityIndex)
 end
 
 -- Save / Create (ItemsTab.lua:2244-2251): re-create the display item from the
--- text, keeping its id so Save still replaces in place.
+-- text, keeping its id so Save still replaces in place. Uses createDisplayItemSafe
+-- to break any CopyAnointsAndEldritchImplicits mod-line table aliasing.
 function pob_itemsEditTextSave(text, rarityIndex, alsoAdd)
     local bm, it = ctx()
     if not it then return fail("no build") end
     local raw = editTextRaw(text, rarityIndex)
     if not new("Item"):Item(raw).base then return fail("The item is invalid.") end
     local id = it.displayItem and it.displayItem.id
-    it:CreateDisplayItemFromRaw(raw, not it.displayItem)
-    it.displayItem.id = id
+    craft = nil
+    createDisplayItemSafe(it, raw, not it.displayItem, id)
     if alsoAdd then
         it:AddDisplayItem()
         return done(nil, EMIT_TREE)
@@ -1877,10 +2007,10 @@ end
 
 function pob_itemsCraftNewTooltip(rarityIdx, title, typeIdx, baseIdx)
     local bm, it = ctx()
-    if not it then return { lines = { } } end
+    if not it then return { lines = { }, children = { } } end
     local item = makeCraftItem(it, rarityIdx, title, typeIdx, baseIdx)
-    if not item then return { lines = { } } end
-    return { lines = tipLines(function(tip) it:AddItemTooltip(tip, item, nil, true) end) }
+    if not item then return { lines = { }, children = { } } end
+    return tipData(function(tip) it:AddItemTooltip(tip, item, nil, true) end)
 end
 
 function pob_itemsCraftNewCreate(rarityIdx, title, typeIdx, baseIdx)
@@ -1896,6 +2026,68 @@ function pob_itemsCraftNewCreate(rarityIdx, title, typeIdx, baseIdx)
     it.lastCraftBaseSel = tonumber(baseIdx)
     local openEditText = (not item.crafted and item.rarity ~= "NORMAL") and true or false
     return { ok = true, openEditText = openEditText, _emit = { "items" } }
+end
+
+---------------------------------------------------------------------------
+-- 6.4 Comparison rules & keyboard shortcut helpers
+---------------------------------------------------------------------------
+
+-- Ctrl+V paste item from game clipboard (ItemsTab.lua:1548-1552). Optional
+-- `text` bypasses Paste() for selftests (QClipboard is unsafe under --headless).
+-- Uses createDisplayItemSafe to break CopyAnointsAndEldritchImplicits aliasing.
+function pob_itemsPaste(text)
+    local bm, it = ctx()
+    if not it then return fail("no build") end
+    local raw = text
+    if raw == nil then
+        raw = Paste and Paste() or nil
+    end
+    if type(raw) ~= "string" or not raw:match("%S") then
+        return fail("empty clipboard")
+    end
+    raw = raw:gsub("\r\n", "\n"):gsub("\r", "\n")
+    if sanitiseText then raw = sanitiseText(raw) end
+    if not new("Item"):Item(raw).base then
+        return fail("invalid item text")
+    end
+    craft = nil
+    local ok = createDisplayItemSafe(it, raw, true)
+    if not ok then return fail("invalid item text") end
+    markDisplayFresh(it)
+    return { ok = true, name = it.displayItem.name or "", _emit = { "items" } }
+end
+
+-- Ctrl+D toggle stat differences in item tooltips (ItemsTab.lua:1575-1578).
+function pob_itemsToggleStatDiff()
+    local bm, it = ctx()
+    if not it then return fail("no build") end
+    it.showStatDifferences = not it.showStatDifferences
+    dispKey.item, dispKey.rev, dispKey.showDiff = nil, nil, nil
+    if it.displayItem then
+        it:UpdateDisplayItemTooltip()
+        markDisplayFresh(it)
+    end
+    bm.buildFlag = true
+    return done({ showStatDifferences = it.showStatDifferences and true or false }, EMIT)
+end
+
+-- Rules: GetComparisonSlotNameForItem (ItemsTab.lua:2685-2702) and
+-- IsItemValidForSlot (ItemsTab.lua:2705-2758), always after UpdateSockets().
+function pob_itemsCompareSlot(kind, key, activeOnly)
+    local bm, it = ctx()
+    if not it then return "" end
+    it:UpdateSockets()
+    local item = resolve(it, kind, key)
+    if not item then return "" end
+    return it:GetComparisonSlotNameForItem(item, activeOnly and true or false) or ""
+end
+
+function pob_itemsIsValidForSlot(kind, key, slotName)
+    local bm, it = ctx()
+    if not it then return false end
+    it:UpdateSockets()
+    local item = resolve(it, kind, key)
+    return (item ~= nil and it.slots[slotName] ~= nil and it:IsItemValidForSlot(item, slotName)) and true or false
 end
 
 ---------------------------------------------------------------------------
@@ -2857,6 +3049,254 @@ function pob_selftestItemsCraftNew()
     end)
     it.lastCraftRaritySel, it.lastCraftTypeSel, it.lastCraftBaseSel = savedRarity, savedType, savedBase
     pcall(function() it:SetDisplayItem() end)
+    itRestore(bm, it, snap)
+    return finish(res, ok, err)
+end
+
+-- Phase 6 Part 6.4: comparison tooltips (slotOnlyTooltips, equipped diffs,
+-- influence header art/badges, DB source text, Shift-held granted-skill child
+-- tooltips, jewel-radius cloned-spec compare), rules (IsItemValidForSlot,
+-- GetComparisonSlotNameForItem, CopyAnointsAndEldritchImplicits non-aliasing
+-- + hover safety), pob_itemsPaste, and Ctrl+D showStatDifferences toggle.
+function pob_selftestItemsCompare()
+    local bm, it = ctx()
+    if not it then return { ok = false, error = "no itemsTab" } end
+    local snap = itSnapshot(bm, it)
+    local spec = bm.spec
+    local specSnap = spec:CreateUndoState()
+    local savedJewels = copyTable(spec.jewels, true)
+    local savedSlotOnly = main.slotOnlyTooltips
+    local savedMigrate = main.migrateEldritchImplicits
+    local savedFlavour = main.showFlavourText
+    local savedShowDiff = it.showStatDifferences
+    local res = { }
+    local ok, err = pcall(function()
+        it:SetDisplayItem()
+        it.showStatDifferences = true
+        main.showFlavourText = true
+        main.slotOnlyTooltips = true
+
+        local function add(raw)
+            local item = new("Item"):Item(raw)
+            if not item.base then error("fixture base missing: " .. tostring(raw:match("\n(.-)\n"))) end
+            item:NormaliseQuality()
+            it:AddItem(item, true)
+            return item
+        end
+
+        -- 1. Influence header art & badges (dual + single influence)
+        local infHelm = add("Rarity: Rare\nCP Dual Helm\nIron Hat\nShaper Item\nElder Item\n+30 to maximum Life\n")
+        local singleHelm = add("Rarity: Rare\nCP Single Helm\nIron Hat\nSearing Exarch Item\n+20 to maximum Life\n")
+        it:PopulateSlots()
+        local infTip = pob_itemsTooltip("item", infHelm.id, false)
+        res.influenceDualHeader = infTip.header == "RARE" and infTip.showHeaderArt == true
+            and infTip.influenceHeader1 == "Shaper" and infTip.influenceHeader2 == "Elder"
+            and infTip.influenceIcon1:find("shapericon.png", 1, true) ~= nil
+            and infTip.influenceIcon2:find("eldericon.png", 1, true) ~= nil
+            and infTip.headerLeft:find("itemsheaderrareleft.png", 1, true) ~= nil
+            and infTip.color:sub(1, 1) == "#"
+        local sTip = pob_itemsTooltip("item", singleHelm.id, false)
+        res.influenceSingleMirror = sTip.influenceHeader1 == "Exarch" and sTip.influenceHeader2 == "Exarch"
+
+        -- 2. Source text in DB mode
+        dbRun("unique", 20000)
+        local srcName
+        for name, uItem in pairs(main.uniqueDB.list) do
+            if uItem.source and uItem.source ~= "" then srcName = name break end
+        end
+        local srcTip = srcName and pob_itemsTooltip("unique", srcName, false) or { lines = { } }
+        res.sourceTextShown = srcName ~= nil and linesText(srcTip.lines):find("Source:", 1, true) ~= nil
+
+        -- 3. Shift-held granted-skill child tooltips
+        local skillRing = add("Rarity: Rare\nCP Skill Ring\nGold Ring\nGrants Level 20 Herald of Ash Skill\n")
+        local tipNoShift = pob_itemsTooltip("item", skillRing.id, false)
+        local tipShift = pob_itemsTooltip("item", skillRing.id, true)
+        res.grantedSkillTipHint = linesText(tipNoShift.lines):find("Hold Shift", 1, true) ~= nil
+            and #tipNoShift.children == 0
+        res.grantedSkillShiftChild = #tipShift.children >= 1 and #tipShift.children[1].lines > 0
+            and linesText(tipShift.children[1].lines):find("Herald of Ash", 1, true) ~= nil
+            and IsKeyDown("SHIFT") == false
+
+        -- 4. Equipped diffs + main.slotOnlyTooltips
+        local ring1 = add("Rarity: Rare\nCP Ring One\nGold Ring\n+10 to maximum Life\n")
+        local ring2 = add("Rarity: Rare\nCP Ring Two\nGold Ring\n+15 to maximum Life\n")
+        local ring3 = add("Rarity: Rare\nCP Ring Upgrade\nGold Ring\n+80 to maximum Life\n")
+        it:PopulateSlots()
+        pob_itemsEquip("Ring 1", ring1.id)
+        pob_itemsEquip("Ring 2", ring2.id)
+
+        main.slotOnlyTooltips = true
+        local slotOnlyTxt = linesText(pob_itemsSlotTooltip("Ring 1", ring3.id, false).lines)
+        res.slotOnlyOneSlot = slotOnlyTxt:find("Equipping this item in Ring 1 will give you:", 1, true) ~= nil
+            and slotOnlyTxt:find("Equipping this item in Ring 2 will give you:", 1, true) == nil
+            and slotOnlyTxt:find("Life", 1, true) ~= nil
+
+        main.slotOnlyTooltips = false
+        local allSlotsTxt = linesText(pob_itemsSlotTooltip("Ring 1", ring3.id, false).lines)
+        res.slotAllTwoSlots = allSlotsTxt:find("Equipping this item in Ring 1 will give you:", 1, true) ~= nil
+            and allSlotsTxt:find("Equipping this item in Ring 2 will give you:", 1, true) ~= nil
+
+        main.slotOnlyTooltips = true
+        local removeTxt = linesText(pob_itemsSlotTooltip("Ring 1", 0, false).lines)
+        res.slotSelfRemoveDiff = removeTxt:find("Removing this item from Ring 1 will give you:", 1, true) ~= nil
+            and removeTxt:find("Life", 1, true) ~= nil
+
+        -- 5. Rules: IsItemValidForSlot & GetComparisonSlotNameForItem
+        local bow = add("Rarity: Rare\nCP Bow\nShort Bow\n")
+        local quiver = add("Rarity: Rare\nCP Quiver\nSerrated Arrow Quiver\n")
+        local shield = add("Rarity: Rare\nCP Shield\nSplintered Tower Shield\n")
+        local wand = add("Rarity: Rare\nCP Wand\nDriftwood Wand\n")
+        local dagger = add("Rarity: Rare\nCP Dagger\nGlass Shank\n")
+        local sword = add("Rarity: Rare\nCP Sword\nRusted Sword\n")
+        it:PopulateSlots()
+        pob_itemsEquip("Weapon 1", bow.id)
+        res.validBowOffhand = pob_itemsIsValidForSlot("item", quiver.id, "Weapon 2") == true
+            and pob_itemsIsValidForSlot("item", shield.id, "Weapon 2") == false
+        pob_itemsEquip("Weapon 1", wand.id)
+        res.validWandDualWield = pob_itemsIsValidForSlot("item", wand.id, "Weapon 2") == true
+            and pob_itemsIsValidForSlot("item", dagger.id, "Weapon 2") == false
+
+        res.compareSlotEquipped = pob_itemsCompareSlot("item", ring2.id, false) == "Ring 2"
+        res.compareSlotPrimary = pob_itemsCompareSlot("item", ring3.id, false) == "Ring 1"
+        pob_itemsSetWeaponSet(2)
+        res.compareSlotSwapActive = pob_itemsCompareSlot("item", sword.id, true) == "Weapon 1 Swap"
+        pob_itemsSetWeaponSet(1)
+
+        -- 6. Jewel-radius cloned-spec comparison (Intuitive Leap + disconnected node)
+        -- Intuitive Leap has zero stat mods of its own; any diff on removal can ONLY
+        -- come from buildSpecForJewelComparison cloning the spec and pruning discNode.
+        local leap = add("Rarity: Unique\nIntuitive Leap\nViridian Jewel\nRadius: Small\nPassives in Radius can be Allocated without being connected to your tree\n")
+        local plainJewel = add("Rarity: Rare\nCP Plain Jewel\nCobalt Jewel\n+10 to maximum Life\n")
+        it:PopulateSlots()
+        local sockNode
+        for _, n in pairs(spec.nodes) do
+            if n.type == "Socket" and not n.expansionJewel and not n.charmSocket and n.path and #n.path > 0 then
+                -- Pick a socket whose Small radius contains at least one stat node not on its path.
+                local onPath = { [n.id] = true }
+                for _, pn in ipairs(n.path) do onPath[pn.id] = true end
+                local hasCandidate = false
+                for rnId, rn in pairs(n.nodesInRadius and n.nodesInRadius[1] or { }) do
+                    if not onPath[rnId] and (rn.type == "Normal" or rn.type == "Notable") and rn.modList and #rn.modList > 0 then
+                        hasCandidate = true
+                        break
+                    end
+                end
+                if hasCandidate and (not sockNode or #n.path < #sockNode.path) then
+                    sockNode = n
+                end
+            end
+        end
+        res.jewelSocketFound = sockNode ~= nil
+        if sockNode then
+            spec:AllocNode(sockNode)
+            spec:BuildAllDependsAndPaths()
+            bm.buildFlag = true
+            pob_recalculate()
+            -- Empty allocated socket is chosen by GetComparisonSlotNameForItem for unequipped jewels.
+            res.compareSlotEmptyJewel = pob_itemsCompareSlot("item", plainJewel.id, false) == ("Jewel " .. sockNode.id)
+
+            local sockSlotName = "Jewel " .. sockNode.id
+            pob_itemsEquip(sockSlotName, leap.id)
+            spec:BuildAllDependsAndPaths()
+            bm.buildFlag = true
+            pob_recalculate()
+
+            -- Pick an unallocated, disconnected stat node inside Intuitive Leap's radius.
+            local discNode
+            for _, n in pairs(spec.nodes) do
+                if not n.alloc and (n.type == "Normal" or n.type == "Notable")
+                        and n.intuitiveLeapLikesAffecting and #n.intuitiveLeapLikesAffecting > 0
+                        and n.modList and #n.modList > 0 then
+                    local adjAlloc = false
+                    for _, ln in ipairs(n.linked or { }) do
+                        if ln.alloc then adjAlloc = true break end
+                    end
+                    if not adjAlloc then discNode = n break end
+                end
+            end
+            res.radiusDiscNodeFound = discNode ~= nil
+            if discNode then
+                spec:AllocNode(discNode)
+                spec:BuildAllDependsAndPaths()
+                bm.buildFlag = true
+                pob_recalculate()
+                local leapTip = pob_itemsSlotTooltip(sockSlotName, leap.id, false)
+                local leapTxt = linesText(leapTip.lines)
+                local afterHdr = leapTxt:match("Removing this item from .- will give you:(.*)$") or ""
+                res.radiusJewelCompareDiff = discNode.alloc == true
+                    and afterHdr:find("%^x[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][%+%-]") ~= nil
+                res.radiusSpecUnmutated = spec.allocNodes[discNode.id] ~= nil
+                    and spec.jewels[sockNode.id] == leap.id and it.items[-1] == nil
+            end
+        end
+
+        -- 7. CopyAnointsAndEldritchImplicits: non-aliasing on editor paths + hover safety
+        local anointedAmu = add("Rarity: Rare\nCP Equipped Amu\nGold Amulet\nImplicits: 2\n{crafted}Allocates Beef\n12% increased Rarity of Items found\n")
+        local eldritchHelm = add("Rarity: Rare\nCP Eldritch Helm\nIron Hat\nSearing Exarch Item\nImplicits: 1\n{exarch}10% increased Armour\n")
+        it:PopulateSlots()
+        pob_itemsEquip("Amulet", anointedAmu.id)
+        pob_itemsEquip("Helmet", eldritchHelm.id)
+        main.migrateEldritchImplicits = true
+
+        -- Hovering an un-anointed Shaper amulet must NOT copy anoints or touch displayItem.
+        local shaperAmuRaw = "Item Class: Amulets\r\nRarity: Rare\r\nCP Shaper Amu\r\nGold Amulet\r\nShaper Item\r\n+25 to maximum Life\r\n"
+        local hoverAmu = add(shaperAmuRaw:gsub("\r\n", "\n"))
+        it:SetDisplayItem()
+        local hTip = pob_itemsTooltip("item", hoverAmu.id, false)
+        res.hoverNoAnointCopy = #hoverAmu.enchantModLines == 0
+            and linesText(hTip.lines):find("Allocates Beef", 1, true) == nil
+            and it.displayItem == nil
+
+        -- Pasting a Shaper amulet triggers ItemsTab.lua:2047 alias + :2056 early return;
+        -- createDisplayItemSafe MUST break the enchantModLines alias!
+        local pasted = pob_itemsPaste(shaperAmuRaw)
+        local dispAmu = it.displayItem
+        local anointCopied = dispAmu ~= nil and #dispAmu.enchantModLines == 1
+            and dispAmu.enchantModLines[1].line == "Allocates Beef"
+        local notAliased = dispAmu ~= nil and dispAmu.enchantModLines ~= anointedAmu.enchantModLines
+        if dispAmu then
+            -- Mutating displayItem's enchantModLines must NOT affect the equipped amulet.
+            dispAmu.enchantModLines[1].line = "MUTATED_TEST"
+        end
+        res.anointNonAliasing = pasted.ok == true and anointCopied and notAliased
+            and anointedAmu.enchantModLines[1].line == "Allocates Beef"
+
+        -- Eldritch implicit migration via paste also breaks implicitModLines alias.
+        local plainHelmRaw = "Rarity: Rare\nCP Pasted Helm\nIron Hat\n+40 to maximum Life\n"
+        local pHelm = pob_itemsPaste(plainHelmRaw)
+        local dispHelm = it.displayItem
+        res.eldritchNonAliasing = pHelm.ok == true and dispHelm ~= nil
+            and dispHelm.cleansing == true and #dispHelm.implicitModLines >= 1
+            and dispHelm.implicitModLines ~= eldritchHelm.implicitModLines
+
+        -- Invalid / empty paste refused without clobbering displayItem.
+        res.pasteInvalidRefused = not pob_itemsPaste("").ok
+            and not pob_itemsPaste("Not an item\nTotally Bogus Base\n").ok
+            and it.displayItem == dispHelm
+
+        -- 8. Ctrl+D showStatDifferences toggle refreshes display tooltip
+        local beforeToggle = linesText(pob_itemsGetLists().display.lines)
+        local tOff = pob_itemsToggleStatDiff()
+        local offTxt = linesText(pob_itemsGetLists().display.lines)
+        local tOn = pob_itemsToggleStatDiff()
+        local onTxt = linesText(pob_itemsGetLists().display.lines)
+        res.ctrlDToggle = tOff.ok == true and tOff.showStatDifferences == false
+            and offTxt:find("Press Ctrl+D", 1, true) ~= nil
+            and offTxt:find("Equipping this item", 1, true) == nil
+            and tOn.ok == true and tOn.showStatDifferences == true
+            and beforeToggle:find("Equipping this item", 1, true) ~= nil
+            and onTxt:find("Equipping this item", 1, true) ~= nil
+    end)
+    main.slotOnlyTooltips = savedSlotOnly
+    main.migrateEldritchImplicits = savedMigrate
+    main.showFlavourText = savedFlavour
+    it.showStatDifferences = savedShowDiff
+    pcall(function() it:SetDisplayItem() end)
+    pcall(function()
+        spec:RestoreUndoState(specSnap)
+        spec.jewels = copyTable(savedJewels, true)
+        spec:BuildAllDependsAndPaths()
+    end)
     itRestore(bm, it, snap)
     return finish(res, ok, err)
 end
