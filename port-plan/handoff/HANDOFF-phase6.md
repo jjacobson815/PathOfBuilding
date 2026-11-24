@@ -4,7 +4,7 @@ Read this AFTER `port-plan/STATUS.md` and BEFORE `phases/PHASE-6-items-tab.md`.
 The original task prompt still applies in full; this file only says where things
 stand and what the last session learned.
 
-## Where things stand (2026-09-29)
+## Where things stand (2026-11-05)
 
 | Item | State |
 |---|---|
@@ -12,12 +12,12 @@ stand and what the last session learned.
 | Draft PR | https://github.com/jjacobson815/PathOfBuilding/pull/7 (against `dev`); CI green on `6ddfc60`, see the session report for the 6.2 push |
 | Part 6.1 | DONE, ticked, committed, pushed (`6ddfc60`) |
 | Part 6.2 | DONE in the first Windows session, ticked, committed, pushed; check `items-lists` (44 flags). Drag-drop / tooltips / shared-sets pane NOT eyeballed (no computer-use tools) |
-| Part 6.3 | items 1-2 DONE (1: editor panel, variants, sockets/links, edit-text popup, check `items-editor`, 25 flags; 2: craft popups + influence/quality/catalyst/cluster sections, check `items-craft`, 40 flags, via the craft-session capture engine in `pob_items.lua`); items 3-4 open (item 4's edit-text half done). Next: 6.3 item 3 |
+| Part 6.3 | items 1-3 DONE (1: editor panel, variants, sockets/links, edit-text popup, check `items-editor`, 25 flags; 2: craft popups + influence/quality/catalyst/cluster sections, check `items-craft`, 43 flags, via the craft-session capture engine in `pob_items.lua`; 3: affix dropdowns & roll sliders, custom modifier popup, crucible modifier popup, mod range sliders, interactive tooltip line disabling, check `items-affix`, 26 flags); item 4 open (edit-text half done with item 1: `ItemTextPopup.qml`; craft-item popup open). Next: 6.3 item 4 |
 | Parts 6.4 – 6.5 | NOT STARTED |
-| Gate | Windows: `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0` (checks `items-slots`, `items-lists`, `items-editor`, `items-craft`) |
+| Gate | Windows: `pob-selftest EXIT=0`, `pob-qt --headless EXIT=0` (checks `items-slots` 31, `items-lists` 44, `items-editor` 25, `items-craft` 43, `items-affix` 26) |
 | Phase 7 switch | NOT done. STATUS.md must keep "ACTIVE: Phase 6" until 6.5 is ticked |
 
-Continue at **Part 6.3 item 3**. Do not redo 6.1 / 6.2 / 6.3 items 1-2.
+Continue at **Part 6.3 item 4 (craft-item popup)**. Do not redo 6.1 / 6.2 / 6.3 items 1-3.
 
 ## Setup traps (cost the last session time)
 

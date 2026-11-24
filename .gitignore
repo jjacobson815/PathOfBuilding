@@ -77,8 +77,12 @@ captures/
 /_*.py
 /_*.ps1
 
-# Local editor/agent settings
-.claude/settings.local.json
+# Local / retired third-party agent tooling (Antigravity AGENTS.md + .agents/ stay tracked)
+.claude/
+.kilo/
+.superpowers/
+.rooignore
+.mcp.json
 
 # Repo-root scratch dir (swept build logs + one-off analysis scripts)
 /_scratch/
@@ -87,7 +91,6 @@ captures/
 /AQ.*.txt
 /$null
 
-src/poe_api_response.json
 src/poe_api_response.json
 runtime/SimpleGraphic/Screenshots
 
