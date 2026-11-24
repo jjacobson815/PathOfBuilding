@@ -977,6 +977,9 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     if (!pob_run_lua_check(engine, "pob_selftestItemsCompare", "items-compare")) return false;
     // Phase 6 Part 6.5: <Items> XML save/load round-trip (sets, variants, ModRange, sockets, weights, legacy flat <Slot>).
     if (!pob_run_lua_check(engine, "pob_selftestItemsPersist", "items-persist")) return false;
+    // Phase 9: Notes tab & Party tab (rich EditControl, color codes, zoom, ParseBuffs, <Notes>/<Party> round-trip).
+    if (!pob_run_lua_check(engine, "pob_selftestNotes", "notes")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestPartyTab", "party-tab")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

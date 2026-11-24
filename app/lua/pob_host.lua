@@ -6543,6 +6543,7 @@ end
 require("pob_timeless")
 require("pob_skills")
 require("pob_items")
+require("pob_notes_party")
 
 -- Old-tree art (follow-up to Phase 4): every data era must resolve node icons
 -- and frames. <= 3_24 trees carry no sprites.lua and no skillSprites filenames,
