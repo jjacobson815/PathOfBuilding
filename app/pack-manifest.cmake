@@ -14,15 +14,24 @@
 # devMode=false (no version parsed), so userPath stays on Documents either way.
 
 if(NOT DEFINED POB_MANIFEST_SRC)
-    message(WARNING "pack-manifest: POB_MANIFEST_SRC not set; skipping manifest stamp")
-    return()
+    message(FATAL_ERROR "pack-manifest: POB_MANIFEST_SRC not set; cannot stamp manifest")
+endif()
+if(NOT EXISTS "${POB_MANIFEST_SRC}")
+    message(FATAL_ERROR "pack-manifest: source manifest not found: ${POB_MANIFEST_SRC}")
+endif()
+
+if(NOT DEFINED POB_MANIFEST_BRANCH OR POB_MANIFEST_BRANCH STREQUAL "")
+    set(POB_MANIFEST_BRANCH "release")
+endif()
+if(NOT DEFINED POB_MANIFEST_PLATFORM OR POB_MANIFEST_PLATFORM STREQUAL "")
+    set(POB_MANIFEST_PLATFORM "win32")
 endif()
 
 file(READ "${POB_MANIFEST_SRC}" _man)
 if(NOT _man MATCHES "branch=")
     string(REGEX REPLACE
         "(<Version number=\"[^\"]*\")[ \t]*/>"
-        "\\1 branch=\"release\" platform=\"win32\" />"
+        "\\1 branch=\"${POB_MANIFEST_BRANCH}\" platform=\"${POB_MANIFEST_PLATFORM}\" />"
         _man "${_man}")
 endif()
 file(WRITE "${CMAKE_INSTALL_PREFIX}/dist/manifest.xml" "${_man}")

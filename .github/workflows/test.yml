@@ -1,10 +1,11 @@
 name: Run Tests
 on:
   push:
-    branches: [ dev ]
+    branches: [ dev, main, master ]
   pull_request:
-    branches: [ dev ]
+    branches: [ dev, main, master ]
   workflow_dispatch:
+
 jobs:
   run_tests:
     runs-on: ubuntu-latest
@@ -14,6 +15,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Run tests
         run: busted --lua=luajit
+
   check_modcache:
     runs-on: ubuntu-latest
     container: ghcr.io/pathofbuildingcommunity/pathofbuilding-tests:latest
@@ -26,7 +28,7 @@ jobs:
         env:
           LUA_PATH: ../runtime/lua/?.lua;../runtime/lua/?/init.lua
           REGENERATE_MOD_CACHE: 1
-        run: cd src; luajit HeadlessWrapper.lua
+        run: cd src && luajit HeadlessWrapper.lua
       - run: git config --global --add safe.directory $(pwd)
       - name: Check if the generated ModCache is different
         run: git diff --exit-code src/Data/ModCache.lua

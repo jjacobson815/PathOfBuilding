@@ -12,6 +12,7 @@ SimpleGraphic) reference using resolution-independent and structural metrics:
 Usage:
   python tools/screenshot_diff.py <legacy.png> <new.png> [label]
 """
+import argparse
 import sys
 import numpy as np
 from PIL import Image, ImageFilter
@@ -41,15 +42,21 @@ def hist_dist(a, b, bins=32):
         ha += 1e-6
         hb += 1e-6
         chi.append(0.5 * np.sum((ha - hb) ** 2 / (ha + hb)))
-        corr.append(np.corrcoef(ha, hb)[0, 1])
+        c_val = np.corrcoef(ha, hb)[0, 1]
+        corr.append(1.0 if np.isnan(c_val) else float(c_val))
     return float(np.mean(chi)), float(np.mean(corr))
 
 
 def box_filter(x, r=3):
-    """Uniform (box) blur via PIL — avoids scipy dependency."""
-    im = Image.fromarray(np.clip(x, 0, 255).astype(np.uint8))
-    blurred = im.filter(ImageFilter.BoxBlur(r))
-    return np.asarray(blurred, dtype=np.float64)
+    """Uniform (box) blur in float64 via summed-area table (no uint8 clipping)."""
+    k = 2 * r + 1
+    p = np.pad(x, r, mode="edge")
+    cs = (
+        np.pad(p, ((1, 0), (1, 0)), mode="constant", constant_values=0.0)
+        .cumsum(axis=0)
+        .cumsum(axis=1)
+    )
+    return (cs[k:, k:] - cs[:-k, k:] - cs[k:, :-k] + cs[:-k, :-k]) / (k * k)
 
 
 def ssim_luminance(a, b):
@@ -61,8 +68,8 @@ def ssim_luminance(a, b):
     C2 = (0.03 * L) ** 2
     mu_a, mu_b = box_filter(ya), box_filter(yb)
     a2, b2, ab = box_filter(ya ** 2), box_filter(yb ** 2), box_filter(ya * yb)
-    sa2 = a2 - mu_a ** 2
-    sb2 = b2 - mu_b ** 2
+    sa2 = np.maximum(a2 - mu_a ** 2, 0.0)
+    sb2 = np.maximum(b2 - mu_b ** 2, 0.0)
     sab = ab - mu_a * mu_b
     num = (2 * mu_a * mu_b + C1) * (2 * sab + C2)
     den = (mu_a ** 2 + mu_b ** 2 + C1) * (sa2 + sb2 + C2)
@@ -122,14 +129,23 @@ def compare(legacy_path, new_path, label=""):
 
 
 def main():
-    pairs = []
-    # Default pairs from the user's triage request.
-    pairs.append(("skill_tree/legacy.png", "skill_tree/new.png", "skill_tree"))
-    pairs.append(("import/legacy.png", "import/new.png", "import"))
-    # Allow CLI overrides.
-    args = sys.argv[1:]
-    if len(args) >= 2:
-        pairs = [(args[0], args[1], args[2] if len(args) > 2 else "cli")]
+    parser = argparse.ArgumentParser(
+        description="Compare a new Qt screenshot against a legacy reference PNG."
+    )
+    parser.add_argument("legacy", nargs="?", help="Path to baseline/legacy PNG")
+    parser.add_argument("new", nargs="?", help="Path to new Qt PNG")
+    parser.add_argument("label", nargs="?", default="cli", help="Label for output")
+    args = parser.parse_args()
+
+    if args.legacy and args.new:
+        pairs = [(args.legacy, args.new, args.label)]
+    elif not args.legacy and not args.new:
+        pairs = [
+            ("app/tests/capture-baseline/tree.png", "captures/tree.png", "tree"),
+            ("app/tests/capture-baseline/import.png", "captures/import.png", "import"),
+        ]
+    else:
+        parser.error("Provide both <legacy.png> and <new.png>, or neither for defaults.")
 
     results = []
     for leg, new, lab in pairs:

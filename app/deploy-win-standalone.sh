@@ -31,23 +31,49 @@ export PATH="$MINGW/bin:$MINGW/share/qt6/bin:$PATH"   # qt6/bin holds qmlimports
 command -v windeployqt.exe >/dev/null || { echo "windeployqt.exe not on PATH (set MINGW=... to your mingw64 root)"; exit 1; }
 
 echo "[deploy] 1/4 cmake --install -> $DIST"
-cmake --install "$BUILD" --prefix "$DIST/.." >/dev/null    # lays out exe, lua, src, runtime (+ lua-utf8/lua51 via install rule)
+CMAKE_INSTALL_ALWAYS=1 cmake --install "$BUILD" --prefix "$DIST/.." >/dev/null    # lays out exe, lua, src, runtime (+ lua-utf8/lua51 via install rule)
 cp -f "$BUILD/pob-qt.exe" "$DIST/pob-qt.exe"               # force-copy so dist is never stale vs build
 
 echo "[deploy] 2/4 windeployqt (Qt6 DLLs + qml modules + plugins, Fusion style)"
 windeployqt.exe --qmldir "$ROOT/app/qml" --no-translations "$DIST/pob-qt.exe" >/dev/null
 
+# Verify critical Qt6 plugins and runtime assets deployed cleanly; fail loudly if missing.
 # The 3_27+/3_28+ trees ship their ascendancy/bloodline art as .webp, which Qt can
 # only decode through the qtimageformats webp plugin -- a SEPARATE msys2 package
-# (mingw-w64-x86_64-qt6-imageformats). Without it QImageReader returns a null
-# QImage and that art renders blank, with no error logged anywhere, so check for it
-# here rather than shipping a dist that is quietly missing artwork. Runs after
-# windeployqt and before the closure pass, which is what pulls libwebp in.
-if [ ! -f "$DIST/imageformats/qwebp.dll" ]; then
-    echo "[deploy] ERROR: imageformats/qwebp.dll was not deployed." >&2
-    echo "[deploy]        Install it and re-run: pacman -S mingw-w64-x86_64-qt6-imageformats" >&2
-    exit 1
-fi
+# (mingw-w64-x64-64/mingw-w64-x86_64-qt6-imageformats). Without it QImageReader returns
+# a null QImage and that art renders blank, with no error logged anywhere.
+required_files=(
+    "pob-qt.exe"
+    "Qt6Core.dll"
+    "Qt6Gui.dll"
+    "Qt6Network.dll"
+    "Qt6Qml.dll"
+    "Qt6Quick.dll"
+    "platforms/qwindows.dll"
+    "imageformats/qwebp.dll"
+    "runtime/lua-utf8.dll"
+    "runtime/lua51.dll"
+    "lua/pob_host.lua"
+    "src/Launch.lua"
+    "src/installed.cfg"
+    "manifest.xml"
+)
+for rel in "${required_files[@]}"; do
+    if [ ! -f "$DIST/$rel" ]; then
+        echo "[deploy] ERROR: required runtime asset missing: $DIST/$rel" >&2
+        if [ "$rel" = "imageformats/qwebp.dll" ]; then
+            echo "[deploy]        Install it and re-run: pacman -S mingw-w64-x86_64-qt6-imageformats" >&2
+        fi
+        exit 1
+    fi
+done
+
+for reldir in "runtime/lua" "runtime/SimpleGraphic/Fonts" "src/TreeData"; do
+    if [ ! -d "$DIST/$reldir" ]; then
+        echo "[deploy] ERROR: required runtime directory missing: $DIST/$reldir" >&2
+        exit 1
+    fi
+done
 
 echo "[deploy] 3/4 copy mingw dependency closure next to exe (iterate to fixpoint)"
 prev=0
@@ -62,6 +88,20 @@ for pass in 1 2 3 4 5; do
     prev="$n"
 done
 echo "[deploy]     $prev DLLs next to exe"
+
+# Ensure Qt6::Network TLS/OpenSSL dependencies are present if qopensslbackend.dll was deployed.
+if [ -f "$DIST/tls/qopensslbackend.dll" ]; then
+    for ssl_dll in "$MINGW/bin/libssl-"*.dll "$MINGW/bin/libcrypto-"*.dll; do
+        if [ -f "$ssl_dll" ]; then
+            b="$(basename "$ssl_dll")"
+            [ -f "$DIST/$b" ] || cp "$ssl_dll" "$DIST/"
+        fi
+    done
+    if ! ls "$DIST"/libssl-*.dll >/dev/null 2>&1 || ! ls "$DIST"/libcrypto-*.dll >/dev/null 2>&1; then
+        echo "[deploy] ERROR: qopensslbackend.dll is deployed but OpenSSL DLLs (libssl/libcrypto) are missing." >&2
+        exit 1
+    fi
+fi
 
 echo "[deploy] 4/4 write qt.conf (point Qt at dist-local plugins + qml)"
 cat > "$DIST/qt.conf" <<'EOF'
@@ -81,7 +121,7 @@ echo "[deploy] verifying with a clean-PATH smoke test (no mingw on PATH)..."
 # --capture writes relative to the engine cwd (dist/src), so use a bare dir name.
 ( unset QML_IMPORT_PATH QT_PLUGIN_PATH; PATH="/c/Windows/System32:/c/Windows" \
     "$DIST/pob-qt.exe" --capture _deploycheck >/dev/null 2>&1 ) || true
-if grep -q "viewList count=9" "$DIST/src/_deploycheck/_status.log" 2>/dev/null; then
+if grep -Eq "viewList count=(9|10)" "$DIST/src/_deploycheck/_status.log" 2>/dev/null; then
     rm -rf "$DIST/src/_deploycheck"
     echo "[deploy] OK — standalone dist boots the engine with no mingw on PATH: $DIST"
     echo "[deploy] $(ls "$DIST"/*.dll | wc -l) DLLs bundled; dist/pob-qt.exe is now double-clickable."

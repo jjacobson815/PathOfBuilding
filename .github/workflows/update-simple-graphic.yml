@@ -1,29 +1,13 @@
-name: Update SimpleGraphic DLLs
+name: Update SimpleGraphic DLLs (Retired)
+# Retired in Phase 14.3: the Qt6/QML port replaces SimpleGraphic completely.
+# Kept gated on manual workflow_dispatch only so legacy dispatch events do not
+# open noisy PRs or fail fork CI.
 on:
-    repository_dispatch:
-        types: [update-simple-graphic]
+  workflow_dispatch:
+
 jobs:
-    update:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v3
-              with:
-                ref: 'dev'
-            - name: Download DLLs
-              uses: robinraju/release-downloader@v1
-              with:
-                repository: ${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic
-                tag: ${{ github.event.client_payload.tag }}
-                fileName: SimpleGraphicDLLs-x64-windows.tar
-                extract: true
-                out-file-path: runtime
-            - name: Create Pull Request
-              uses: peter-evans/create-pull-request@v5
-              with:
-                title: Update to SimpleGraphic ${{ github.event.client_payload.tag }}
-                branch: simple-graphic-${{ github.event.client_payload.tag }}
-                body: |
-                    Update DLLs to SimpleGraphic-${{ github.event.client_payload.tag }} from ${{ github.event.client_payload.release_link }}
-                commit-message: Update DLLs to SimpleGraphic-${{ github.event.client_payload.tag }}
-              
+  retired:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retired notice
+        run: echo "SimpleGraphic has been replaced by the Qt6/QML host (app/src/main.cpp). This workflow is retired."

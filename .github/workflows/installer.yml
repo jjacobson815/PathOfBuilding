@@ -1,31 +1,69 @@
-name: Create new installer
+name: Create Windows Installer
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
-      tag_name:
-        description: 'Tag to build'
-        required: true
-        default: 'v2.x.x'
+      version:
+        description: 'Installer version override (defaults to manifest.xml)'
+        required: false
+        default: ''
+
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 jobs:
-  release:
+  installer:
+    name: Build Windows NSIS Installer
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
-            - name: Checkout
-              uses: actions/checkout@v3
-              with:
-                repository: 'PathOfBuildingCommunity/PathOfBuilding-Installer'
-                ref: 'master'
-                ssh-key: '${{ secrets.POB_INSTALLER_KEY }}'
-            - name: Install NSIS
-              run: |
-                choco install nsis --yes
-                echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-            - name: Create installer
-              run: 'python3 make_release.py --game-version 1'
-            - name: Upload artifact
-              run: >
-                gh release upload ${{ github.event.release.tag_name || github.event.inputs.tag_name }} (Get-ChildItem Dist -File).FullName --clobber -R ${{ github.repository }};
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up MSYS2 MinGW64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-declarative
+            mingw-w64-x86_64-qt6-svg
+            mingw-w64-x86_64-qt6-imageformats
+            mingw-w64-x86_64-luajit
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-zlib
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --yes
+          echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Build pob-qt
+        run: |
+          cmake -S app -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release
+          ninja -C build-win pob-qt
+      - name: Deploy standalone dist & build NSIS installer
+        run: |
+          export MINGW="/mingw64"
+          bash app/deploy-win-standalone.sh
+          if [ -n "${{ inputs.version }}" ]; then
+            bash app/installer/build-installer.sh --version "${{ inputs.version }}"
+          else
+            bash app/installer/build-installer.sh
+          fi
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PathOfBuilding-Qt-Installer
+          path: dist-installer/*.exe
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release'
+        shell: pwsh
+        run: |
+          gh release upload ${{ github.event.release.tag_name }} (Get-ChildItem dist-installer/*.exe).FullName --clobber -R ${{ github.repository }}
