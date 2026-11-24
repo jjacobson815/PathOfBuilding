@@ -46,16 +46,33 @@ SKIP_DEPS=1 tools/linux-selftest.sh
 ```
 
 ## Ad-Hoc Lua Probe Against the Real Engine
-Create a small probe script that loads `pob_host.lua` first, then run it with `pob-selftest` from `cwd = src/`:
+Create a small probe script that loads `pob_host.lua` first, prints a `PROBE ... ok=true` line, and exits with `os.exit(ok and 0 or 1)` (either at the end of the script or in its first-check hook) so execution exits cleanly without falling through to unrelated `pob_run_all_selftests` entries:
 ```lua
 _POB_LUA_DIR = _SRC_DIR .. "/../app/lua"
 dofile(_POB_LUA_DIR .. "/pob_host.lua")
 -- probe assertions / diagnostics here
+local ok = true
+print("PROBE example ok=" .. tostring(ok))
+os.exit(ok and 0 or 1)
 ```
-```bash
-cd src
-../build-linux/pob-selftest "$PWD" "$PWD/../runtime" /tmp/probe.lua
-```
+- **Linux:**
+  ```bash
+  cd src
+  ../build-linux/pob-selftest "$PWD" "$PWD/../runtime" /tmp/probe.lua
+  ```
+- **Windows (MinGW64):**
+  ```bash
+  cd src
+  PATH="/c/msys64/mingw64/bin:$PATH" QT_FORCE_STDERR_LOGGING=1 \
+    ../build-win/pob-selftest.exe "$PWD" "$PWD/../runtime" ../_tmp_probe.lua
+  ```
+- **Concurrent `/swarm` or Git worktree (`workspace: "share"`) probes on Windows:** Copy the main repo's `build-win/pob-selftest.exe` to a worktree-local `_tmp_selftest.exe` before running so concurrent probes never hold an OS file lock against `ld.exe` during `ninja -C build-win` or break when `selftest_checks.h` gains new compiled checks. Delete both `_tmp_selftest.exe` and `_tmp_probe.lua` before staging/committing:
+  ```bash
+  cp ../main-repo/build-win/pob-selftest.exe ./_tmp_selftest.exe
+  cd src && PATH="/c/msys64/mingw64/bin:$PATH" QT_FORCE_STDERR_LOGGING=1 \
+    ../_tmp_selftest.exe "$PWD" "$PWD/../runtime" ../_tmp_probe.lua
+  cd .. && rm -f _tmp_selftest.exe _tmp_probe.lua
+  ```
 
 ## Gate Verification Checklist
 - Both `pob-selftest` and `pob-qt --headless` exit with code `0` (exit code is the sole verdict).

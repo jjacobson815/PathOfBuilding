@@ -262,7 +262,7 @@ public:
     // management, popups, power report, timeless finder). Calls the top-level
     // Lua global `name` (must start with "pob_" and must not be a selftest) and
     // then emits the change signals the LUA side reports in the result's
-    // `_emit` list ("build", "tree", "items", "skills", "config", "calcs") --
+    // `_emit` list ("build", "tree", "items", "skills", "config", "notes", "party", "calcs") --
     // the function that performed the mutation is the one that knows what it
     // touched, so signal selection lives next to it rather than being guessed
     // here. A result without `_emit` emits nothing (pure getters).

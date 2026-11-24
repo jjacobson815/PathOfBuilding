@@ -19,9 +19,11 @@ These invariants govern all C++ and QML work under `app/` and override older doc
 - **Text measurement vs positioning:** Use `TextMetrics` (`.tgf` atlas for legacy measurements like ellipsis/column widths), but position Qt-painted TTF text using a real layout box and `horizontalAlignment` — never `x: anchor - measuredWidth` arithmetic.
 - **No clipboard on Qt `offscreen`:** `QClipboard::setText` segfaults under `pob-qt --headless`. Selftests must never reach the real `Copy()` path.
 - **QML is compiled into qrc:** Always rebuild (`ninja -C build-win` or `ninja -C build-linux`) after any QML edit before running captures or interactive checks. `--headless` does not load QML.
+- **Dynamic `setContextProperty` tokens vs `qmllint.exe`:** Static `qmllint.exe` cannot validate dynamically injected host properties (`theme.*`, `luaEngine.*`). Cross-check every `theme.<token>` reference against `Q_PROPERTY` declarations in `app/src/Theme.h` and always run `pob-qt.exe --capture` after QML edits to catch `[undefined] to QColor` or runtime binding errors.
 
 ## Build, Editing & Runtime Hygiene
 - **Binaries run with `cwd = src/`** so the embedded engine resolves data paths relative to CWD.
+- **Windows `run_command` shell:** Antigravity's Windows `run_command` defaults to PowerShell—invoke bash snippets explicitly via `C:/Program Files/Git/bin/bash.exe -lc "..."` rather than mixing `FOO=bar cmd` or bash `for` loops into raw PowerShell.
 - **Windows MinGW64 `PATH`:** Prefix `PATH="/c/msys64/mingw64/bin:$PATH"` for both `ninja` (prevents silent `FAILED: [code=1]` from missing `cc1plus.exe` DLLs) and executing `pob-selftest.exe` / `pob-qt.exe` (prevents exit `127`).
 - **`app/src/selftest_checks.h` line endings:** This file contains mixed CRLF and LF regions; match exact per-region context when editing.
 - **Baselines are Windows captures:** Only re-baseline `app/tests/capture-baseline/*.png` on Windows; Linux captures differ in font rendering across every view.

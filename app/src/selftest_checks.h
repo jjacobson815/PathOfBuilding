@@ -988,6 +988,56 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     // Phase 9: Notes tab & Party tab (rich EditControl, color codes, zoom, ParseBuffs, <Notes>/<Party> round-trip).
     if (!pob_run_lua_check(engine, "pob_selftestNotes", "notes")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestPartyTab", "party-tab")) return false;
+    {
+        QStringList order;
+        int notesCount = 0;
+        int partyCount = 0;
+        const auto cNotes = QObject::connect(&engine, &LuaEngine::notesChanged, &engine, [&] {
+            ++notesCount;
+            order.append(QStringLiteral("notes"));
+        });
+        const auto cParty = QObject::connect(&engine, &LuaEngine::partyChanged, &engine, [&] {
+            ++partyCount;
+            order.append(QStringLiteral("party"));
+        });
+        const auto cCalcs = QObject::connect(&engine, &LuaEngine::calcsChanged, &engine, [&] {
+            order.append(QStringLiteral("calcs"));
+        });
+
+        const QVariantMap origNotes = engine.invoke(QStringLiteral("pob_notesGetState")).toMap();
+        const QVariantMap origParty = engine.invoke(QStringLiteral("pob_partyGetState")).toMap();
+        const QString origText = origNotes.value(QStringLiteral("text")).toString();
+        const bool origShowAdv = origParty.value(QStringLiteral("showAdvanced")).toBool();
+
+        engine.invoke(QStringLiteral("pob_notesSetText"), { QStringLiteral("selftest-note") });
+        const bool notesOk = (notesCount == 1);
+
+        engine.invoke(QStringLiteral("pob_partySetShowAdvanced"), { !origShowAdv });
+        const bool partyOk = (partyCount == 1);
+
+        order.clear();
+        engine.invoke(QStringLiteral("pob_partyRebuildAll"));
+        const int partyIdx = order.indexOf(QStringLiteral("party"));
+        const int calcsIdx = order.indexOf(QStringLiteral("calcs"));
+        const bool orderOk = (partyIdx >= 0 && calcsIdx >= 0 && partyIdx < calcsIdx);
+
+        engine.invoke(QStringLiteral("pob_notesSetText"), { origText });
+        engine.invoke(QStringLiteral("pob_partySetShowAdvanced"), { origShowAdv });
+
+        QObject::disconnect(cNotes);
+        QObject::disconnect(cParty);
+        QObject::disconnect(cCalcs);
+
+        if (!notesOk || !partyOk || !orderOk) {
+            qCritical() << "SELFTEST FAILED (invoke-notes-party-emit):"
+                        << "notesOk=" << notesOk
+                        << "partyOk=" << partyOk
+                        << "orderOk=" << orderOk
+                        << "order=" << order;
+            return false;
+        }
+        qDebug() << "SELFTEST OK: invoke-notes-party-emit";
+    }
 
     qDebug() << "SELFTEST PASSED";
     return true;

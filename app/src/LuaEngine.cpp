@@ -1347,6 +1347,8 @@ QVariant LuaEngine::invoke(const QString& name, const QVariantList& args) {
     if (seen.contains("items")) emit itemsChanged();
     if (seen.contains("skills")) emit skillsChanged();
     if (seen.contains("config")) emit configChanged();
+    if (seen.contains("notes")) emit notesChanged();
+    if (seen.contains("party")) emit partyChanged();
     if (seen.contains("calcs")) emit calcsChanged();
     return r;
 }
