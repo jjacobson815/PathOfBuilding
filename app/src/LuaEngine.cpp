@@ -44,6 +44,10 @@
 #include <string>
 #include <vector>
 
+#ifndef POB_UPDATE_REPO
+#define POB_UPDATE_REPO "jjacobson815/PathOfBuilding"
+#endif
+
 LuaEngine::LuaEngine(QObject* parent) : QObject(parent) {}
 
 LuaEngine::~LuaEngine() {
@@ -59,10 +63,14 @@ LuaEngine* LuaEngine::selfOf(lua_State* L) {
 }
 
 bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QString& hostFile,
-                     const QStringList& launchArgs) {
+                     const QStringList& launchArgs, bool devMode) {
     m_srcDir = srcDir;
     m_runtimeDir = runtimeDir;
     m_launchArgs = launchArgs;
+    m_devMode = devMode || (qEnvironmentVariable("POB_DEV_MODE").trimmed() == QLatin1String("1"));
+    m_updateRepo = qEnvironmentVariable("POB_UPDATE_REPO").trimmed();
+    if (m_updateRepo.isEmpty())
+        m_updateRepo = QStringLiteral(POB_UPDATE_REPO);
     m_clock.start();   // monotonic clock backing GetTime (ms since init)
 
     // GetUserPath() must return the Documents dir; the engine appends
@@ -157,6 +165,11 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
     // shims (lcurl/safe.lua, lzip.lua) via package.path in pob_host.lua.
     lua_pushstring(m_L, QFileInfo(hostFile).dir().absolutePath().toUtf8().constData());
     lua_setglobal(m_L, "_POB_LUA_DIR");
+    // Wave 2 (Phase 14.2 / 15.3): expose dev-mode flag and update repo override.
+    lua_pushboolean(m_L, m_devMode ? 1 : 0);
+    lua_setglobal(m_L, "_POB_DEV_MODE");
+    lua_pushstring(m_L, m_updateRepo.toUtf8().constData());
+    lua_setglobal(m_L, "POB_UPDATE_REPO");
 
     // CLI `arg` table (Lua convention: arg[0]=program, arg[1..]=params). Set
     // before the host bootstrap runs OnInit so Main.lua can read arg[1] as an
@@ -872,6 +885,18 @@ QStringList LuaEngine::modeNames() const {
     return out;
 }
 
+QVariant LuaEngine::viewList() const {
+    const QVariantList raw = getPath("main.modes.BUILD.viewList").toList();
+    QVariantList filtered;
+    filtered.reserve(raw.size());
+    for (const QVariant& item : raw) {
+        if (item.toMap().value(QStringLiteral("id")).toString() == QLatin1String("COMPARE"))
+            continue;
+        filtered.append(item);
+    }
+    return filtered;
+}
+
 // --- QML shell bridge helpers (Phase 1a) ------------------------------------
 
 // Write a dotted Lua path to `value`. Navigates the table chain to the parent
@@ -967,6 +992,8 @@ QString LuaEngine::currentView() const {
 // pump one OnFrame so the engine (Draw dispatch, sidebar highlight) reflects it.
 void LuaEngine::setActiveView(const QString& viewId) {
     if (currentMode() != "BUILD")
+        return;
+    if (viewId == QLatin1String("COMPARE"))
         return;
     setPath("main.modes.BUILD.viewMode", viewId);
     runCallback("OnFrame");
@@ -1406,6 +1433,7 @@ void LuaEngine::emitNamedSignal(const QString& name) {
     else if (name == "compare") emit compareChanged();
     else if (name == "network") emit networkChanged();
     else if (name == "import") emit importChanged();
+    else if (name == "update") emit updateChanged();
     else if (name == "buildList") emit buildListChanged();
     else if (name == "mode") {
         emit modeChanged();
@@ -1432,7 +1460,7 @@ QVariant LuaEngine::invoke(const QString& name, const QVariantList& args) {
     // refreshes on calcsChanged sees every other model already current.
     static const char* kOrder[] = {
         "build", "tree", "items", "skills", "config", "notes", "party",
-        "compare", "network", "import", "buildList", "mode", "calcs"
+        "compare", "network", "import", "update", "buildList", "mode", "calcs"
     };
     for (const char* sig : kOrder) {
         if (seen.contains(QLatin1String(sig))) emitNamedSignal(QLatin1String(sig));

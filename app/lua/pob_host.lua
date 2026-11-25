@@ -2125,6 +2125,32 @@ arg = arg or { }
 dofile(_SRC_DIR .. "/Launch.lua")
 mainObject.continuousIntegrationMode = os.getenv("CI")
 
+-- Wave 2 (Phase 14.2): keep legacy Update.exe / UpdateCheck / UpdateApply paths
+-- permanently inert so Launch:OnInit / OnFrame / Main.lua never spawn legacy updaters.
+if launch then
+    launch.CheckForUpdate = function(self)
+        self.updateCheckRunning = false
+        self.updateAvailable = nil
+        self.updateProgress = nil
+        self.updateErrMsg = nil
+    end
+    launch.ApplyUpdate = function(self)
+        self.updateAvailable = nil
+        self.updateProgress = nil
+    end
+end
+
+-- Wave 2 (Phase 14.2 / 15.3): wire _POB_DEV_MODE (--dev or POB_DEV_MODE=1) into
+-- launch.devMode before Modules/Main initializes (so ModCache regen / dev checks see it)
+-- without modifying src/Launch.lua.
+local _origPLoadModuleForDev = PLoadModule
+function PLoadModule(fileName, ...)
+    if fileName == "Modules/Main" and _POB_DEV_MODE and launch then
+        launch.devMode = true
+    end
+    return _origPLoadModuleForDev(fileName, ...)
+end
+
 -- Surface engine errors (launch:ShowErrMsg is a silent no-op in headless hosts).
 if mainObject and mainObject.ShowErrMsg then
     local origShowErr = mainObject.ShowErrMsg
@@ -2136,6 +2162,10 @@ if mainObject and mainObject.ShowErrMsg then
 end
 
 runCallback("OnInit")
+PLoadModule = _origPLoadModuleForDev
+if _POB_DEV_MODE and launch then
+    launch.devMode = true
+end
 runCallback("OnFrame") -- initial frame so the mode initialises
 -- Force a clean, fully-initialised build. The engine may have tried to restore a
 -- stale last-session build (e.g. ~~temp~~.xml) from Settings.xml, which fails
@@ -6564,6 +6594,12 @@ do
     local ok, err = pcall(require, "pob_import")
     if not ok and not tostring(err):find("module 'pob_import' not found", 1, true) then
         if pob and pob.log then pob.log("pob_import load error: " .. tostring(err)) end
+    end
+end
+do
+    local ok, err = pcall(require, "pob_update")
+    if not ok and not tostring(err):find("module 'pob_update' not found", 1, true) then
+        if pob and pob.log then pob.log("pob_update load error: " .. tostring(err)) end
     end
 end
 

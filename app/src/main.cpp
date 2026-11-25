@@ -192,17 +192,19 @@ int main(int argc, char** argv) {
     QString srcDir, runtimeDir, hostFile;
     bool headless = false;
     bool capture = false;
+    bool devMode = false;
     QString captureDir;
     // Positional (non-harness) CLI args passed through to the engine as `arg`
     // (arg[0]=program, arg[1..]=params). The engine reads arg[1] as an
     // open-on-launch build file / import URL (fully realized in Phase 11). Our
-    // own harness flags (--headless/--capture/--src/--runtime/--host) are
+    // own harness flags (--headless/--capture/--dev/--src/--runtime/--host) are
     // consumed here and NOT forwarded, so they can't be mistaken for a build/URL.
     QStringList launchArgs;
     launchArgs << QString::fromLocal8Bit(argv[0]);
     for (int i = 1; i < argc; i++) {
         QString a = argv[i];
         if (a == "--headless") headless = true;
+        else if (a == "--dev") devMode = true;
         else if (a == "--capture") {
             capture = true;
             // Optional output directory: --capture [outdir]
@@ -258,7 +260,7 @@ int main(int argc, char** argv) {
         LuaEngine engine;
         QObject::connect(&engine, &LuaEngine::logMessage,
                          [](const QString& m) { qDebug().noquote() << "[lua]" << m; });
-        if (!engine.init(srcDir, runtimeDir, hostFile, launchArgs)) {
+        if (!engine.init(srcDir, runtimeDir, hostFile, launchArgs, devMode)) {
             qCritical() << "Failed to initialise Lua engine";
             return 1;
         }
@@ -343,7 +345,7 @@ int main(int argc, char** argv) {
     LuaEngine engine;
     QObject::connect(&engine, &LuaEngine::logMessage,
                      [](const QString& m) { qDebug().noquote() << "[lua]" << m; });
-    if (!engine.init(srcDir, runtimeDir, hostFile, launchArgs)) {
+    if (!engine.init(srcDir, runtimeDir, hostFile, launchArgs, devMode)) {
         mainLog("engine.init FAILED");
         qCritical() << "Failed to initialise Lua engine";
         return 1;

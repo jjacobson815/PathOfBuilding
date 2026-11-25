@@ -28,7 +28,7 @@ public:
     // (arg[0]=program, arg[1..]=params; the engine reads arg[1] as an
     // open-on-launch build file / import URL — fully realized in Phase 11).
     bool init(const QString& srcDir, const QString& runtimeDir, const QString& hostFile,
-              const QStringList& launchArgs = {});
+              const QStringList& launchArgs = {}, bool devMode = false);
     lua_State* state() const { return m_L; }
 
     // Read a global Lua value (by name) as a QVariant.
@@ -43,7 +43,10 @@ public:
 
     // Convenience accessors for the QML shell.
     Q_INVOKABLE QStringList modeNames() const;
-    Q_INVOKABLE QVariant viewList() const { return getPath("main.modes.BUILD.viewList"); }
+    // Wave 2 (Phase 13): returns main.modes.BUILD.viewList with "COMPARE" filtered out.
+    Q_INVOKABLE QVariant viewList() const;
+    Q_INVOKABLE bool devMode() const { return m_devMode; }
+    Q_INVOKABLE QString updateRepo() const { return m_updateRepo; }
 
     // Phase 1c: active BUILD-view control (sidebar). The engine tracks the
     // active view in buildMode.viewMode (a string id such as "TREE"/"ITEMS");
@@ -353,6 +356,7 @@ signals:
     void partyChanged();       // party members
     void networkChanged();     // async network / subscript activity (Phase 10)
     void importChanged();      // import/export tab async updates (Phase 11)
+    void updateChanged();      // async GitHub Releases update check (Phase 14.2)
     void buildListChanged();   // LIST-mode build library
     void modeChanged();        // mode switch / new build loaded (refresh all)
     void viewChanged();        // active view (sidebar) changed
@@ -431,6 +435,8 @@ private:
     QString m_userDir;
     QString m_luaDir;
     QStringList m_launchArgs;   // exposed to Lua as the `arg` table
+    bool m_devMode = false;     // true when --dev or POB_DEV_MODE=1 (Phase 14.2/15.3)
+    QString m_updateRepo;       // GitHub owner/repo for Phase 14.2 update checks
     QElapsedTimer m_clock;      // monotonic clock backing GetTime (ms since init)
     TextMetrics* m_textMetrics = nullptr;  // .tgf-backed string measurement (Phase 1.2a)
     SubScriptManager* m_subScripts = nullptr; // Phase 10 worker-thread subscripts
