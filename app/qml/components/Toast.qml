@@ -11,6 +11,7 @@ import QtQuick.Layouts
 // wrapped/variable text anyway.
 Item {
     id: root
+    objectName: "pob.toast.card"
 
     property string toastId: ""
     property string message: ""
@@ -38,6 +39,7 @@ Item {
         spacing: 2
 
         ColorText {
+            objectName: "pob.toast.title"
             sourceText: root._title
             defaultColor: theme.text
             font.family: theme.fontVar
@@ -47,6 +49,7 @@ Item {
             wrapMode: Text.Wrap
         }
         ColorText {
+            objectName: "pob.toast.body"
             visible: root._body.length > 0
             sourceText: root._body
             defaultColor: theme.text
@@ -56,6 +59,7 @@ Item {
             wrapMode: Text.Wrap
         }
         Button {
+            objectName: "pob.toast.dismiss"
             label: "Dismiss"
             Layout.alignment: Qt.AlignRight
             Layout.preferredWidth: 70

@@ -15,13 +15,14 @@ local m_max = math.max
 local LOADOUT_EMIT = { "build", "tree", "items", "skills", "config", "calcs" }
 local SPECTRE_EMIT = { "build", "skills", "calcs" }
 
+local _ASSET_BASE = (_SRC_DIR or ".") .. "/"
 local SPECTRE_CATEGORIES = {
-    { key = "Beast",     label = "Beast",     icon = "Assets/monstercategory/categorybeasts.png" },
-    { key = "Humanoid",  label = "Humanoid",  icon = "Assets/monstercategory/categoryhumanoid.png" },
-    { key = "Eldritch",  label = "Eldritch",  icon = "Assets/monstercategory/categoryeldritch.png" },
-    { key = "Construct", label = "Construct", icon = "Assets/monstercategory/categoryconstruct.png" },
-    { key = "Demon",     label = "Demon",     icon = "Assets/monstercategory/categorydemon.png" },
-    { key = "Undead",    label = "Undead",    icon = "Assets/monstercategory/categoryundead.png" },
+    { key = "Beast",     label = "Beast",     icon = _ASSET_BASE .. "Assets/monstercategory/categorybeasts.png" },
+    { key = "Humanoid",  label = "Humanoid",  icon = _ASSET_BASE .. "Assets/monstercategory/categoryhumanoid.png" },
+    { key = "Eldritch",  label = "Eldritch",  icon = _ASSET_BASE .. "Assets/monstercategory/categoryeldritch.png" },
+    { key = "Construct", label = "Construct", icon = _ASSET_BASE .. "Assets/monstercategory/categoryconstruct.png" },
+    { key = "Demon",     label = "Demon",     icon = _ASSET_BASE .. "Assets/monstercategory/categorydemon.png" },
+    { key = "Undead",    label = "Undead",    icon = _ASSET_BASE .. "Assets/monstercategory/categoryundead.png" },
 }
 
 local SPECTRE_SEARCH_MODES = { "Names", "Skills", "Both" }

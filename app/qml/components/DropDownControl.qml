@@ -33,6 +33,7 @@ import QtQuick.Controls as QC
 // currentIndex from engine state without re-entering their own handler.
 Item {
     id: root
+    objectName: "pob.dropdown.root"
 
     property var model: []
     property int currentIndex: -1
@@ -81,6 +82,7 @@ Item {
     }
     SearchHost {
         id: sh
+        objectName: "pob.dropdown.search"
         valueAccessor: root._plain
         listAccessor: function () {
             var a = []
@@ -131,16 +133,17 @@ Item {
         controlEnabled: root.controlEnabled
     }
 
-    Label {
+    ColorText {
         id: valueLabel
+        objectName: "pob.dropdown.value"
         anchors.left: parent.left
         anchors.leftMargin: 4
         anchors.right: arrow.left
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
-        clip: true
-        label: root.currentLabel.length > 0 ? root.currentLabel : root.placeholder
-        size: root.size
+        elide: Text.ElideRight
+        sourceText: root.currentLabel.length > 0 ? root.currentLabel : root.placeholder
+        font.pixelSize: root.size
         defaultColor: !root.controlEnabled ? theme.muted
                     : root.currentLabel.length > 0 ? theme.text
                     : theme.mutedDark
@@ -148,6 +151,7 @@ Item {
 
     Arrow {
         id: arrow
+        objectName: "pob.dropdown.arrow"
         anchors.right: parent.right
         anchors.rightMargin: 5
         anchors.verticalCenter: parent.verticalCenter
@@ -188,6 +192,7 @@ Item {
 
     QC.Popup {
         id: listPopup
+        objectName: "pob.dropdown.popup"
 
         // Positioned in root's local space; Popup itself renders in the window
         // overlay, so no ancestor `clip: true` can cut the list off.
@@ -232,6 +237,7 @@ Item {
             }
             ListView {
                 id: list
+                objectName: "pob.dropdown.list"
                 anchors.fill: parent
                 anchors.topMargin: root._headerH
                 anchors.rightMargin: sb.visible ? sb.width + 2 : 0
@@ -455,6 +461,7 @@ Item {
         tt.clear()
         if (root.tooltipFunc) root.tooltipFunc(tt)
         else if (root.tooltipText) tt.addLine(14, root.tooltipText)
+        else if (valueLabel.truncated) tt.addLine(14, valueLabel.sourceText)
         if (tt.lines.length > 0) {
             var win = Window.window
             var origin = win ? root.mapToItem(win.contentItem, 0, 0) : Qt.point(0, 0)

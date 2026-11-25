@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Window
 import QtQuick.Controls as QC
+import "QmlBridge.js" as QmlBridge
 
 // TimelessJewelPopup — Phase 4 Part 4.5, ports TreeTab:FindTimelessJewel
 // (TreeTab.lua:1369-2891, "Find a Timeless Jewel", 916x565) over the
@@ -21,6 +22,7 @@ import QtQuick.Controls as QC
 // (legacy fetches the league list from the network — Phase 10/12).
 PopupBase {
     id: root
+    objectName: "pob.timeless.root"
 
     property var st: ({})
     property bool fallbackShown: false
@@ -36,24 +38,24 @@ PopupBase {
         if (_rowCache[i] === undefined) {
             const page = Math.floor(i / 200) * 200
             const r = luaEngine.invoke("pob_timelessGetResults", [page + 1, 200])
-            const rows = (r && r.rows && r.rows.length !== undefined) ? r.rows : []
+            const rows = _arr(r ? r.rows : null)
             for (let k = 0; k < rows.length; k++) _rowCache[page + k] = rows[k]
         }
         return _rowCache[i] || ({ label: "", tooltip: [] })
     }
     property bool tradeStarted: false
-    readonly property var nodeOptions: (st.nodeOptions && st.nodeOptions.length !== undefined) ? st.nodeOptions : []
+    readonly property var nodeOptions: _arr(st ? st.nodeOptions : null)
 
     title: "Find a Timeless Jewel"
     padding: 10
 
-    function _arr(v) { return (v && v.length !== undefined) ? v : [] }
+    function _arr(v) { return QmlBridge.toArray(v) }
 
     function apply(s) {
         if (!s) return
         _syncing = true
         _rowCache = ({})
-        const first = (s.results && s.results.length !== undefined) ? s.results : []
+        const first = _arr(s.results)
         for (let k = 0; k < first.length; k++) _rowCache[k] = first[k]
         st = s
         jewelSelect.model = _arr(s.jewelTypes)
@@ -128,6 +130,7 @@ PopupBase {
                     Label { label: "^7Jewel Type:"; size: 16; Layout.preferredWidth: 150 }
                     DropDownControl {
                         id: jewelSelect
+                        objectName: "pob.timeless.jewel_drop"
                         Layout.preferredWidth: 200; Layout.preferredHeight: 20
                         onSelected: function (i) { root.set("jewelType", i + 1) }
                     }
@@ -160,6 +163,7 @@ PopupBase {
                     Label { label: "^7Jewel Socket:"; size: 16; Layout.preferredWidth: 150 }
                     DropDownControl {
                         id: socketSelect
+                        objectName: "pob.timeless.socket_drop"
                         Layout.preferredWidth: 200; Layout.preferredHeight: 20
                         popupMinWidth: 260
                         onSelected: function (i) { root.set("socket", i + 1) }
@@ -326,6 +330,7 @@ PopupBase {
                     clip: true
                     ListView {
                         id: resultList
+                        objectName: "pob.timeless.results"
                         anchors.fill: parent
                         anchors.margins: 2
                         model: root.resultCount
@@ -386,6 +391,7 @@ PopupBase {
                     CheckBox { id: searchMore; Layout.preferredWidth: 18; Layout.preferredHeight: 18
                         Layout.leftMargin: labelWidth + 12; label: "Search Maximum Amount:" }
                     Button {
+                        objectName: "pob.timeless.trade_btn"
                         implicitWidth: 150; implicitHeight: 20
                         label: root.tradeStarted ? "Open Next Trade URL" : "Open Trade URL"
                         controlEnabled: root.resultCount > 0
@@ -416,7 +422,7 @@ PopupBase {
         RowLayout {
             Layout.alignment: Qt.AlignHCenter
             spacing: 10
-            Button { implicitWidth: 80; implicitHeight: 20; label: "Search"
+            Button { objectName: "pob.timeless.btn_search"; implicitWidth: 80; implicitHeight: 20; label: "Search"
                 onClicked: {
                     root.apply(luaEngine.invoke("pob_timelessSearch", []))
                     root.selIndex = root.resultCount > 0 ? 0 : -1
@@ -427,7 +433,7 @@ PopupBase {
                 onClicked: { root.apply(luaEngine.invoke("pob_timelessReset", [])); root.selIndex = -1; root.highlightIndex = -1; root.tradeStarted = false } }
             Button { implicitWidth: 80; implicitHeight: 20; label: "Cancel"
                 onClicked: root.close() }
-            Label { id: msgLabel; size: 14 }
+            Label { id: msgLabel; size: 14; visible: label.length > 0 }
         }
     }
 

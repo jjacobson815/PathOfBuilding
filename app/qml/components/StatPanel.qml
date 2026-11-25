@@ -179,6 +179,7 @@ Item {
 
     ListView {
         id: list
+        objectName: "pob.statpanel.list"
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: parent.left
@@ -193,6 +194,7 @@ Item {
 
         delegate: Item {
             id: rowItem
+            objectName: "pob.statpanel.row." + modelData.kind
             required property var modelData
             width: list.width
             height: modelData.height
@@ -255,6 +257,7 @@ Item {
 
     ScrollBar {
         id: scrollBar
+        objectName: "pob.statpanel.scrollbar"
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.bottom: parent.bottom

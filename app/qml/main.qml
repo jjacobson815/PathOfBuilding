@@ -3,6 +3,7 @@ import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Controls
 import QtQml            // Instantiator, for the generated Ctrl+N view hotkeys
+import "components/QmlBridge.js" as QmlBridge
 import "views"
 // Namespaced import (avoids the components/Button.qml vs QtQuick.Controls.Button
 // ambiguity this file's top bar relies on): reach the component library as
@@ -43,8 +44,9 @@ Window {
     // sidebar. Each entry is { group: string, items: [ {id,label,key,group,tab}, ... ] }.
     property var groups: (function () {
         var buckets = {}
-        for (var i = 0; i < allViews.length; i++) {
-            var v = allViews[i]
+        var views = QmlBridge.toArray(root.allViews)
+        for (var i = 0; i < views.length; i++) {
+            var v = views[i]
             if (!buckets[v.group]) buckets[v.group] = []
             buckets[v.group].push(v)
         }
@@ -143,6 +145,7 @@ Window {
                                     model: modelData.items
                                     delegate: Rectangle {
                                         id: navBtn
+                                        objectName: "pob.shell.sidebar.btn_nav_" + modelData.id
                                         Layout.alignment: Qt.AlignLeft
                                         Layout.preferredWidth: modelData.group === "primary"
                                             ? theme.navWidthPrimary : theme.navWidthUtility
@@ -359,6 +362,7 @@ Window {
     // happens after the save resolves: LIST closes the build, EXIT quits.
     Widgets.ConfirmPopup {
         id: savePrompt
+        objectName: "pob.shell.dialog.save_prompt"
         title: " Unsaved Changes "
         confirmLabel: "Save"
         extraLabel: "Don't Save"
@@ -434,10 +438,10 @@ Window {
     // own `key` field (8 BUILD views), so the bindings stay correct if the
     // registry changes.
     Instantiator {
-        model: root.allViews
+        model: QmlBridge.toArray(root.allViews)
         delegate: Shortcut {
-            sequence: "Ctrl+" + modelData.key
-            enabled: root.activeMode === "BUILD"
+            sequence: modelData && modelData.key ? ("Ctrl+" + modelData.key) : ""
+            enabled: root.activeMode === "BUILD" && !!(modelData && modelData.key)
             onActivated: luaEngine.setActiveView(modelData.id)
         }
     }

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QC
 import "../components" as Widgets
+import "../components/QmlBridge.js" as QmlBridge
 
 // CALCS view — Phase 8 (Calcs Tab & Breakdown).
 // Ports src/Classes/CalcsTab.lua, CalcSectionControl.lua, CalcBreakdownControl.lua:
@@ -34,8 +35,7 @@ Item {
     property var breakdownData: null
     property rect breakdownAnchor: Qt.rect(0, 0, 0, 0)
 
-    readonly property var _sections: (gridData && gridData.sections && gridData.sections.length !== undefined)
-                                     ? gridData.sections : []
+    readonly property var _sections: QmlBridge.toArray(gridData ? gridData.sections : null)
     readonly property int colWidth: (gridData && gridData.colWidth) ? gridData.colWidth : 230
     readonly property bool portraitMode: !!(gridData && gridData.portrait)
 
@@ -260,6 +260,7 @@ Item {
 
                 Widgets.EditControl {
                     id: searchBox
+                    objectName: "pob.calcs.input_search"
                     Layout.preferredWidth: 260
                     Layout.preferredHeight: 20
                     placeholder: "Search (Ctrl+F)"
@@ -274,6 +275,7 @@ Item {
                 }
 
                 Widgets.Button {
+                    objectName: "pob.calcs.btn_clear_search"
                     visible: calcsView.searchQuery.length > 0
                     label: "Clear"
                     Layout.preferredWidth: 48
@@ -387,6 +389,7 @@ Item {
             // Hover / pinned breakdown panel (CalcBreakdownControl)
             Widgets.CalcBreakdownPanel {
                 id: breakdownPanel
+                objectName: "pob.calcs.breakdownPanel"
                 z: 50
                 breakdownData: calcsView.breakdownData
                 pinned: calcsView.breakdownPinned

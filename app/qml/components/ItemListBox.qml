@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import "QmlBridge.js" as QmlBridge
 
 // ItemListBox — a legacy ListControl for item rows (Phase 6 Part 6.2): the
 // all-items list (ItemListControl), the Uniques / Rare Templates lists
@@ -22,6 +23,7 @@ FocusScope {
     id: root
 
     property var rows: []
+    readonly property var _rows: QmlBridge.toArray(rows)
     property string title: ""                 // "" = no header row
     property string defaultText: ""
     property string dragKind: ""              // payload kind; "" = rows cannot be dragged
@@ -29,7 +31,7 @@ FocusScope {
     property bool reorderable: false
     property var tooltipFn: null
     property int selIndex: -1
-    readonly property int count: rows && rows.length !== undefined ? rows.length : 0
+    readonly property int count: _rows.length
     readonly property bool hasSel: selIndex >= 0 && selIndex < count
     readonly property int rowHeight: 16
     // Header buttons (Delete, Sort, ...) are placed by the view over this row.
@@ -89,6 +91,7 @@ FocusScope {
 
     Rectangle {
         id: box
+        objectName: "pob.itemList.box"
         y: root.headerHeight
         width: root.width
         height: root.height - root.headerHeight
@@ -100,6 +103,7 @@ FocusScope {
         clip: true
 
         Column {
+            objectName: "pob.itemList.emptyText"
             visible: root.count === 0 && root.defaultText !== ""
             x: 6; y: 4
             // Label is one line; legacy defaultText has "\n"s. A later line
@@ -116,10 +120,11 @@ FocusScope {
 
         ListView {
             id: list
+            objectName: "pob.itemList.list"
             anchors.fill: parent
             anchors.margins: 2
             anchors.rightMargin: sb.visible ? 18 : 2
-            model: root.count
+            model: root._rows
             interactive: false
             boundsBehavior: Flickable.StopAtBounds
             delegate: Rectangle {
@@ -129,8 +134,11 @@ FocusScope {
                      : index === ma.hoverIndex ? theme.hover : "transparent"
                 Label {
                     x: 2
+                    width: parent.width - 4
+                    clip: true
+                    elide: Text.ElideRight
                     anchors.verticalCenter: parent.verticalCenter
-                    label: root.rows[index] ? root.rows[index].label : ""
+                    label: (modelData && modelData.label) ? modelData.label : ""
                     size: 14
                 }
             }
@@ -139,6 +147,7 @@ FocusScope {
 
         // Insertion marker while a drag hovers (ListControl draws the gap line).
         Rectangle {
+            objectName: "pob.itemList.insertMarker"
             visible: drop.containsDrag
             x: 2
             width: list.width
@@ -149,6 +158,7 @@ FocusScope {
 
         ScrollBar {
             id: sb
+            objectName: "pob.itemList.scrollBar"
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: parent.bottom
@@ -163,6 +173,7 @@ FocusScope {
 
         MouseArea {
             id: ma
+            objectName: "pob.itemList.mouseArea"
             anchors.fill: list
             hoverEnabled: true
             property int hoverIndex: -1
@@ -183,13 +194,15 @@ FocusScope {
                 }
                 hoverIndex = rowAt(mouse.y)
                 const dx = mouse.x - pressX, dy = mouse.y - pressY
-                if (pressed && pressIndex >= 0 && root.dragKind !== "" && (mouse.buttons & Qt.LeftButton)
+                if (pressed && pressIndex >= 0 && pressIndex < root._rows.length && root.dragKind !== "" && (mouse.buttons & Qt.LeftButton)
                         && !(mouse.modifiers & Qt.ControlModifier) && dx * dx + dy * dy > 100) {
                     tip.hide()
+                    const rowItem = root._rows[pressIndex]
+                    if (!rowItem) return
                     ghost.start(ma, mouse.x, mouse.y, "Item",
-                                { kind: root.dragKind, key: root.rows[pressIndex].key, from: pressIndex,
+                                { kind: root.dragKind, key: rowItem.key, from: pressIndex,
                                   shift: shiftHeld, src: root },
-                                root.rows[pressIndex].label)
+                                rowItem.label || "")
                 }
             }
             onExited: hoverIndex = -1
@@ -222,6 +235,7 @@ FocusScope {
 
         DropArea {
             id: drop
+            objectName: "pob.itemList.dropArea"
             anchors.fill: parent
             keys: ["Item"]
             property int dropIndex: 0
@@ -253,7 +267,7 @@ FocusScope {
 
     function _showTip() {
         const i = ma.hoverIndex
-        if (i < 0 || ghost.active || !tooltipFn) { tip.hide(); return }
+        if (i < 0 || ghost.active || typeof tooltipFn !== "function") { tip.hide(); return }
         tip.clear()
         tooltipFn(i, tip, ma.shiftHeld)
         if (!tip.lines || !tip.lines.length) { tip.hide(); return }

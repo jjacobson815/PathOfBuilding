@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import "../components" as Widgets
 import "../components/StatDiff.js" as StatDiff
+import "../components/QmlBridge.js" as QmlBridge
 
 // SKILLS view — Phase 5, ports src/Classes/SkillsTab.lua over the live
 // skillsTab (bridge: app/lua/pob_skills.lua). Legacy geometry (non-portrait):
@@ -42,10 +43,10 @@ Item {
 
     property var st: ({})
     property var lists: ({})
-    readonly property var groups: st && st.groups && st.groups.length !== undefined ? st.groups : []
-    readonly property var sets: st && st.sets && st.sets.length !== undefined ? st.sets : []
+    readonly property var groups: QmlBridge.toArray(st ? st.groups : null)
+    readonly property var sets: QmlBridge.toArray(st ? st.sets : null)
     readonly property var detail: st && st.detail ? st.detail : null
-    readonly property var gems: detail && detail.gems && detail.gems.length !== undefined ? detail.gems : []
+    readonly property var gems: QmlBridge.toArray(detail ? detail.gems : null)
     property int hoverGemRow: 0          // 1-based gem row whose name is hovered
 
     property bool _pending: false
@@ -70,6 +71,11 @@ Item {
 
     function _pushDetail() {
         const d = detail
+        if (groupDetail._lastGi !== groupDetail.gi) {
+            labelDebounce.stop()
+            countDebounce.stop()
+            groupDetail._lastGi = groupDetail.gi
+        }
         const o = st.options || {}
         sortByDps.state = !!o.sortGemsByDPS
         sortField.currentIndex = (o.sortField || 1) - 1
@@ -160,12 +166,14 @@ Item {
             }
             Widgets.DropDownControl {
                 id: setSelect
+                objectName: "pob.skills.drop_set"
                 x: 76; y: 8
                 width: 210; height: 20
                 controlEnabled: root.sets.length > 1
                 onSelected: function (index) { root.call("pob_skillsSetActiveSet", [index + 1]) }
             }
             Widgets.Button {
+                objectName: "pob.skills.btn_manage_set"
                 anchors.left: setSelect.right
                 anchors.leftMargin: 4
                 anchors.verticalCenter: setSelect.verticalCenter
@@ -177,6 +185,7 @@ Item {
             // --- Socket group list (SkillsTab.lua:109) ---
             Widgets.SocketGroupList {
                 id: groupList
+                objectName: "pob.skills.list_socket_groups"
                 x: 20; y: 34
                 width: 360; height: 320
                 groups: root.groups
@@ -220,14 +229,16 @@ Item {
                 y: groupList.y + 20 + 300 + 45
                 Widgets.CheckBox {
                     id: sortByDps
+                    objectName: "pob.skills.check_sort_dps"
                     y: 70; width: 20; height: 20
                     label: "Sort gems by DPS:"
                     onToggled: function (s) { root.call("pob_skillsSetOption", ["sortGemsByDPS", s]) }
                 }
                 Widgets.DropDownControl {
                     id: sortField
+                    objectName: "pob.skills.drop_sort_field"
                     x: 30; y: 70; width: 140; height: 20
-                    model: root.lists.sortFields || []
+                    model: QmlBridge.toArray(root.lists.sortFields)
                     onSelected: function (i) { root.call("pob_skillsSetOption", ["sortField", i + 1]) }
                 }
                 Widgets.Label {
@@ -238,11 +249,14 @@ Item {
                 }
                 Widgets.DropDownControl {
                     id: defaultLevel
+                    objectName: "pob.skills.drop_default_level"
                     y: 94; width: 170; height: 20
-                    model: root.lists.defaultLevels || []
+                    model: QmlBridge.toArray(root.lists.defaultLevels)
                     tooltipForItem: function (item, tt) {
-                        const i = (root.lists.defaultLevels || []).indexOf(item)
-                        const d = (root.lists.defaultLevelDescriptions || [])[i]
+                        const lvls = QmlBridge.toArray(root.lists.defaultLevels)
+                        const descs = QmlBridge.toArray(root.lists.defaultLevelDescriptions)
+                        const i = lvls.indexOf(item)
+                        const d = descs[i]
                         if (d) d.split("\n").forEach(function (l) { tt.addLine(16, "^7" + l) })
                     }
                     onSelected: function (i) { root.call("pob_skillsSetOption", ["defaultGemLevel", i + 1]) }
@@ -255,6 +269,7 @@ Item {
                 }
                 Widgets.EditControl {
                     id: defaultQuality
+                    objectName: "pob.skills.input_default_quality"
                     y: 118; width: 60; height: 20
                     isNumeric: true; maxChars: 2
                     onEdited: function (t) { root.call("pob_skillsSetOption", ["defaultGemQuality", t]) }
@@ -267,12 +282,14 @@ Item {
                 }
                 Widgets.DropDownControl {
                     id: supportTypes
+                    objectName: "pob.skills.drop_support_types"
                     y: 142; width: 170; height: 20
-                    model: root.lists.supportTypes || []
+                    model: QmlBridge.toArray(root.lists.supportTypes)
                     onSelected: function (i) { root.call("pob_skillsSetOption", ["showSupportGemTypes", i + 1]) }
                 }
                 Widgets.CheckBox {
                     id: showLegacy
+                    objectName: "pob.skills.check_show_legacy"
                     y: 166; width: 20; height: 20
                     label: "^7Show legacy gems:"
                     onToggled: function (s) { root.call("pob_skillsSetOption", ["showLegacyGems", s]) }
@@ -285,6 +302,7 @@ Item {
                 x: 20 + 360 + 20
                 y: groupList.y + 20
                 visible: root.detail !== null
+                property int _lastGi: 0
                 readonly property int gi: root.st.displayIndex || 0
                 readonly property bool isSource: !!(root.detail && root.detail.source)
 
@@ -293,6 +311,7 @@ Item {
 
                 Widgets.EditControl {
                     id: groupLabel
+                    objectName: "pob.skills.input_group_label"
                     width: 380; height: 20
                     placeholder: "Label"
                     maxChars: 50
@@ -307,12 +326,13 @@ Item {
                 }
                 Widgets.DropDownControl {
                     id: groupSlot
+                    objectName: "pob.skills.drop_group_slot"
                     x: 85; y: 28; width: 130; height: 20
-                    model: root.lists.slots || []
+                    model: QmlBridge.toArray(root.lists.slots)
                     popupMinWidth: 150
                     controlEnabled: !groupDetail.isSource
                     tooltipForItem: function (item, tt) {
-                        const i = (root.lists.slots || []).indexOf(item)
+                        const i = QmlBridge.toArray(root.lists.slots).indexOf(item)
                         const t = luaEngine.invoke("pob_skillsSlotTooltip", [i + 1])
                         StatDiff.fillFromLines(tt, t)
                     }
@@ -323,12 +343,14 @@ Item {
                 }
                 Widgets.CheckBox {
                     id: groupEnabled
+                    objectName: "pob.skills.check_group_enabled"
                     x: 85 + 130 + 70; y: 28; width: 20; height: 20
                     label: "Enabled:"
                     onToggled: function (s) { root.call("pob_skillsSetGroupEnabled", [groupDetail.gi, s]) }
                 }
                 Widgets.CheckBox {
                     id: groupFullDPS
+                    objectName: "pob.skills.check_group_fulldps"
                     x: groupEnabled.x + 20 + 145; y: 28; width: 20; height: 20
                     label: "Include in Full DPS:"
                     onToggled: function (s) { root.call("pob_skillsSetGroupFullDPS", [groupDetail.gi, s]) }
@@ -341,6 +363,7 @@ Item {
                 }
                 Widgets.EditControl {
                     id: groupCount
+                    objectName: "pob.skills.input_group_count"
                     visible: groupDetail.isSource
                     x: countLabel.x + countLabel.implicitWidth + 4; y: 28; width: 60; height: 20
                     isNumeric: true; maxChars: 2
@@ -358,6 +381,7 @@ Item {
                     }
                     Widgets.GemSelect {
                         id: imbuedSelect
+                        objectName: "pob.skills.drop_imbued_support"
                         x: imbuedLabel.x + imbuedLabel.width + 8; y: 56
                         width: 250; height: 20
                         groupIndex: groupDetail.gi
@@ -371,6 +395,7 @@ Item {
                         }
                     }
                     Widgets.Button {
+                        objectName: "pob.skills.btn_clear_imbued"
                         x: imbuedSelect.x + 252; y: 56; width: 20; height: 20
                         label: "x"
                         controlEnabled: !!(root.detail && root.detail.imbuedEnabled)
@@ -418,6 +443,7 @@ Item {
                                 Debounce { id: countDb; apply: function (v) { root.call("pob_skillsSetGemCount", [groupDetail.gi, gemRow.r, v]) } }
 
                                 Widgets.Button {
+                                    objectName: "pob.skills.row_gem.btn_delete"
                                     width: 20; height: 20
                                     label: "x"
                                     controlEnabled: gemRow.g !== null
@@ -425,6 +451,7 @@ Item {
                                     onClicked: root.call("pob_skillsDeleteGem", [groupDetail.gi, gemRow.r])
                                 }
                                 Widgets.GemSelect {
+                                    objectName: "pob.skills.row_gem.select_gem"
                                     x: 22; width: 300; height: 20
                                     groupIndex: groupDetail.gi
                                     row: gemRow.r
@@ -433,7 +460,8 @@ Item {
                                     highlighted: {
                                         const h = root.hoverGemRow
                                         if (h < 1 || h === gemRow.r || h > root.gems.length) return false
-                                        return root.gems[h - 1].links.indexOf(gemRow.r) >= 0
+                                        const lnks = QmlBridge.toArray(root.gems[h - 1] ? root.gems[h - 1].links : null)
+                                        return lnks.indexOf(gemRow.r) >= 0
                                     }
                                     onHoverChanged: function (on) {
                                         if (on) root.hoverGemRow = gemRow.r
@@ -443,6 +471,7 @@ Item {
                                 }
                                 Widgets.EditControl {
                                     id: levelEdit
+                                    objectName: "pob.skills.row_gem.input_level"
                                     x: 324; width: 60; height: 20
                                     isNumeric: true; maxChars: 2
                                     controlEnabled: gemRow.g !== null
@@ -451,6 +480,7 @@ Item {
                                 }
                                 Widgets.EditControl {
                                     id: qualityEdit
+                                    objectName: "pob.skills.row_gem.input_quality"
                                     x: 386; width: 60; height: 20
                                     isNumeric: true; maxChars: 2
                                     controlEnabled: gemRow.g !== null
@@ -462,6 +492,7 @@ Item {
                                 }
                                 Widgets.CheckBox {
                                     id: enabledBox
+                                    objectName: "pob.skills.row_gem.check_enabled"
                                     x: 464; width: 20; height: 20
                                     controlEnabled: gemRow.g !== null
                                     tooltipFunc: function (tt) {
@@ -471,6 +502,7 @@ Item {
                                 }
                                 Widgets.EditControl {
                                     id: countEdit
+                                    objectName: "pob.skills.row_gem.input_count"
                                     x: 502; width: 60; height: 20
                                     visible: !!(gemRow.g && gemRow.g.countShown)
                                     isNumeric: true; maxChars: 2
@@ -491,6 +523,7 @@ Item {
                                 // Vaal gems: "Enable <effect>:" boxes on a second line.
                                 Widgets.CheckBox {
                                     id: global1
+                                    objectName: "pob.skills.row_gem.check_vaal_1"
                                     visible: !!(gemRow.g && gemRow.g.global1Shown)
                                     x: labelWidth + 12; y: 22; width: 20; height: 20
                                     label: gemRow.g ? gemRow.g.global1Label : ""
@@ -498,6 +531,7 @@ Item {
                                 }
                                 Widgets.CheckBox {
                                     id: global2
+                                    objectName: "pob.skills.row_gem.check_vaal_2"
                                     visible: !!(gemRow.g && gemRow.g.global2Shown)
                                     x: (global1.visible ? global1.x + 20 : 0) + labelWidth + 16; y: 22; width: 20; height: 20
                                     label: gemRow.g ? gemRow.g.global2Label : ""

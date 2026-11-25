@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls as QC
 
 // DragGhost — the moving label of a cross-control drag (legacy ListControl's
@@ -15,13 +16,16 @@ import QtQuick.Controls as QC
 //   ghost.finish()                                  // onReleased -> drop
 Rectangle {
     id: root
+    objectName: "pob.dragghost.root"
 
     property string dragType: ""
     property var dragValue: null
     property string text: ""
     readonly property bool active: Drag.active
 
-    parent: QC.Overlay.overlay
+    // Keep lexical parent until start(); when active, reparent to the
+    // ApplicationWindow overlay if present, else the window contentItem so
+    // plain QQuickView hosts (such as QtQuickTest) still render it cleanly.
     visible: Drag.active
     z: 1000
     width: lbl.implicitWidth + 8
@@ -38,6 +42,7 @@ Rectangle {
 
     Label {
         id: lbl
+        objectName: "pob.dragghost.label"
         x: 4
         anchors.verticalCenter: parent.verticalCenter
         label: root.text
@@ -52,6 +57,8 @@ Rectangle {
     }
 
     function start(from, x, y, type, value, label) {
+        const target = QC.Overlay.overlay || (from && from.Window.window ? from.Window.window.contentItem : null)
+        if (target && parent !== target) parent = target
         dragType = type
         dragValue = value
         text = label

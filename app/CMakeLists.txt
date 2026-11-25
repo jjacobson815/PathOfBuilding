@@ -7,7 +7,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick Svg QuickControls2)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick Svg QuickControls2 QuickTest Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LUAJIT REQUIRED luajit)
 
@@ -92,6 +92,57 @@ target_link_libraries(pob-selftest PRIVATE
 target_compile_definitions(pob-selftest PRIVATE
     POB_LUA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/lua"
     POB_NO_GUI
+)
+
+# --- Qt6::QuickTest UI harness ---------------------------------------------
+add_executable(pob-ui-test
+    tests/ui/main.cpp
+    tests/ui/UiTestHelper.cpp
+    tests/ui/UiTestHelper.h
+    src/LuaEngine.cpp
+    src/SubScriptManager.cpp
+    src/TextMetrics.cpp
+    src/Theme.cpp
+    src/ColorText.cpp
+    src/BuildModel.cpp
+    src/SocketGroupModel.cpp
+    src/BuildListModel.cpp
+    src/SaveLoadModel.cpp
+    src/TreeModel.cpp
+    src/TreeGroupModel.cpp
+    src/TreeConnectorModel.cpp
+    src/TreeViewController.cpp
+    src/ItemModel.cpp
+    src/ItemSlotModel.cpp
+    src/JewelSocketModel.cpp
+    src/SkillModel.cpp
+    src/CalcModel.cpp
+    src/ConfigModel.cpp
+    src/NotesController.cpp
+    src/CompareModel.cpp
+    src/PartyModel.cpp
+    src/TreeScene.cpp
+    src/TintedTextureMaterial.cpp
+    src/luabridge.cpp
+    qml/qml.qrc
+    shaders/shaders.qrc
+)
+target_include_directories(pob-ui-test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/ui
+    ${LUAJIT_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
+)
+target_link_libraries(pob-ui-test PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::Svg Qt6::QuickControls2
+    Qt6::QuickTest Qt6::Test
+    ${LUAJIT_LIBRARIES}
+    ZLIB::ZLIB
+    ${CURL_LIBRARIES}
+)
+target_compile_definitions(pob-ui-test PRIVATE
+    POB_LUA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/lua"
+    POB_UI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/ui"
 )
 
 # --- Phase 6c: self-contained distribution layout -------------------------

@@ -8,6 +8,7 @@ import QtQuick
 // canned dialogs don't each hand-roll the same Chrome+MouseArea+Text.
 Chrome {
     id: root
+    objectName: "pob.popupbutton.root"
 
     property string label: ""
     signal clicked()
@@ -19,6 +20,7 @@ Chrome {
 
     Text {
         id: labelText
+        objectName: "pob.popupbutton.text"
         anchors.centerIn: parent
         text: root.label
         color: theme.text
@@ -26,6 +28,7 @@ Chrome {
     }
     MouseArea {
         id: ma
+        objectName: "pob.popupbutton.ma"
         anchors.fill: parent
         hoverEnabled: true
         onClicked: root.clicked()

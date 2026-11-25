@@ -31,6 +31,7 @@ import PathOfBuilding 1.0
 // as signals for the host view to handle.
 Item {
     id: treeViewerRoot
+    objectName: "pob.treeviewer.root"
 
     property var controller: treeViewController
     // Pan/zoom + hover (tooltips). Legacy embeds pass no input events at all.
@@ -120,6 +121,7 @@ Item {
 
         TreeScene {
             id: sceneGraph
+            objectName: "pob.treeviewer.scene"
             anchors.fill: parent
             controller: treeViewerRoot.controller
             showSearch: treeViewerRoot.showSearch
@@ -129,6 +131,7 @@ Item {
 
         MouseArea {
             id: mouseArea
+            objectName: "pob.treeviewer.ma"
             anchors.fill: parent
             z: 2
             enabled: treeViewerRoot.interactive

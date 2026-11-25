@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QC
 import QtQuick.Layouts
 import "../components" as Widgets
+import "../components/QmlBridge.js" as QmlBridge
 
 // PARTY view — Phase 9, ports src/Classes/PartyTab.lua over the live partyTab
 // (bridge: app/lua/pob_notes_party.lua).
@@ -41,7 +42,7 @@ Item {
         if (!importCodeIn.editing) {
             importCodeIn.text = s.importCode || ""
         }
-        const dests = (s.destinations && s.destinations.length !== undefined) ? s.destinations : []
+        const dests = QmlBridge.toArray(s.destinations)
         destSelect.model = dests
         destSelect.currentIndex = (s.destinationIndex || 1) - 1
         appendCheck.state = !!s.append
@@ -75,8 +76,8 @@ Item {
 
     readonly property bool _adv: !!(st && st.showAdvanced)
     readonly property var _bufs: (st && st.buffers) ? st.buffers : ({})
-    readonly property int _leftExpandedH: Math.max(160, root.height - 460)
-    readonly property int _rightExpandedH: Math.max(160, root.height - 440)
+    readonly property int _leftExpandedH: Math.max(120, root.height - 460)
+    readonly property int _rightExpandedH: Math.max(120, root.height - 440)
 
     RowLayout {
         anchors.fill: parent
@@ -118,6 +119,7 @@ Item {
 
                     Widgets.EditControl {
                         id: importCodeIn
+                        objectName: "pob.party.input_import_code"
                         Layout.preferredWidth: 328
                         Layout.preferredHeight: 20
                         size: 14
@@ -137,6 +139,8 @@ Item {
                     }
 
                     Widgets.Label {
+                        objectName: "pob.party.label_import_detail"
+                        visible: label.length > 0
                         label: (root.st && root.st.importDetail) ? root.st.importDetail : ""
                         size: 16
                     }
@@ -148,6 +152,7 @@ Item {
 
                     Widgets.DropDownControl {
                         id: destSelect
+                        objectName: "pob.party.drop_destination"
                         width: 160
                         height: 20
                         tooltipText: "Destination for Import/clear\nCurrently Links Skills do not export"
@@ -157,6 +162,7 @@ Item {
                     }
 
                     Widgets.Button {
+                        objectName: "pob.party.btn_import"
                         implicitWidth: 120
                         implicitHeight: 20
                         label: "Import"
@@ -172,6 +178,7 @@ Item {
                         height: 20
                         Widgets.CheckBox {
                             id: appendCheck
+                            objectName: "pob.party.check_append"
                             anchors.right: parent.right
                             height: 20
                             label: "Append"
@@ -181,6 +188,7 @@ Item {
                     }
 
                     Widgets.Button {
+                        objectName: "pob.party.btn_clear"
                         implicitWidth: 120
                         implicitHeight: 20
                         label: "Clear"
@@ -198,6 +206,7 @@ Item {
                         height: 20
                         Widgets.CheckBox {
                             id: advCheck
+                            objectName: "pob.party.check_advanced"
                             anchors.right: parent.right
                             height: 20
                             label: "^7Show Advanced Info"
@@ -207,6 +216,7 @@ Item {
                     }
 
                     Widgets.Button {
+                        objectName: "pob.party.btn_disable_effects"
                         implicitWidth: 150
                         implicitHeight: 20
                         label: "Disable Party Effects"
@@ -215,6 +225,7 @@ Item {
                     }
 
                     Widgets.Button {
+                        objectName: "pob.party.btn_rebuild"
                         implicitWidth: 120
                         implicitHeight: 20
                         label: "^7Rebuild All"
@@ -225,6 +236,7 @@ Item {
 
                 Widgets.PartyBufferBox {
                     id: aurasBox
+                    objectName: "pob.party.box_auras"
                     Layout.fillWidth: true
                     title: "^7Auras"
                     bufferKey: "auras"
@@ -236,6 +248,7 @@ Item {
 
                 Widgets.PartyBufferBox {
                     id: warcriesBox
+                    objectName: "pob.party.box_warcries"
                     Layout.fillWidth: true
                     title: "^7Warcry Skills"
                     bufferKey: "warcries"
@@ -247,6 +260,7 @@ Item {
 
                 Widgets.PartyBufferBox {
                     id: linksBox
+                    objectName: "pob.party.box_links"
                     Layout.fillWidth: true
                     title: "^7Link Skills"
                     bufferKey: "links"
@@ -271,6 +285,7 @@ Item {
 
                 Widgets.PartyBufferBox {
                     id: partyStatsBox
+                    objectName: "pob.party.box_party_stats"
                     Layout.fillWidth: true
                     title: "^7Party Member Stats"
                     bufferKey: "partyStats"
@@ -282,6 +297,7 @@ Item {
 
                 Widgets.PartyBufferBox {
                     id: enemyCondBox
+                    objectName: "pob.party.box_enemy_cond"
                     Layout.fillWidth: true
                     title: "^7Enemy Conditions"
                     bufferKey: "enemyCond"
@@ -293,6 +309,7 @@ Item {
 
                 Widgets.PartyBufferBox {
                     id: enemyModsBox
+                    objectName: "pob.party.box_enemy_mods"
                     Layout.fillWidth: true
                     title: "^7Enemy Modifiers"
                     bufferKey: "enemyMods"
@@ -304,6 +321,7 @@ Item {
 
                 Widgets.PartyBufferBox {
                     id: cursesBox
+                    objectName: "pob.party.box_curses"
                     Layout.fillWidth: true
                     title: "^7Curses"
                     bufferKey: "curses"

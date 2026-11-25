@@ -881,6 +881,34 @@ function pob_selftestNetwork()
                 and #dlErr > 0
         end
 
+        -- 4b. Offline TLS CA-init: HTTPS against the plain-HTTP loopback server must fail with
+        -- a handshake/SSL-connect error, never CURLE_SSL_CACERT_BADFILE ("SSL CA cert").
+        do
+            local curl = require("lcurl.safe")
+            local easy = curl.easy()
+            easy:setopt_url("https://127.0.0.1:" .. tostring(serverPort) .. "/hello")
+            easy:setopt_connecttimeout(3)
+            easy:setopt_ssl_verifypeer(1)
+            local okTls, tlsErr = easy:perform()
+            easy:close()
+            local mainMsg = tlsErr and tostring(tlsErr) or ""
+
+            local wDone, wErr = false, nil
+            launch:DownloadPage("https://127.0.0.1:" .. tostring(serverPort) .. "/hello", function(_, e)
+                wErr = e
+                wDone = true
+            end)
+            pumpUntil(function() return wDone end, 5000)
+            local workerMsg = type(wErr) == "string" and wErr or ""
+
+            res.tlsCaMainMsg = mainMsg
+            res.tlsCaWorkerMsg = workerMsg
+            res.tlsCaInitOk = okTls == nil and #mainMsg > 0
+                and not mainMsg:find("SSL CA cert", 1, true)
+                and wDone and #workerMsg > 0
+                and not workerMsg:find("SSL CA cert", 1, true)
+        end
+
         -- 5. Proxy + force-IPv4 option propagation + PoEURL resolve & shrink through local proxy.
         do
             launch.proxyURL = baseUrl
@@ -1071,6 +1099,7 @@ function pob_selftestNetwork()
         and res.downloadPostOk == true
         and res.delayedNonBlockingOk == true
         and res.lcurlErrorMsgOk == true
+        and res.tlsCaInitOk == true
         and res.proxyIpv4Ok == true
         and res.poeurlShrinkOk == true
         and res.poeurlResolveOk == true

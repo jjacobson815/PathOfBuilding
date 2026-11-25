@@ -21,6 +21,7 @@ import QtQuick
 // inside a Layout.
 Item {
     id: root
+    objectName: "pob.dragsource.root"
 
     property string dragType: ""
     property var dragValue: null
@@ -44,6 +45,7 @@ Item {
 
     MouseArea {
         id: ma
+        objectName: "pob.dragsource.ma"
         anchors.fill: parent
         drag.target: root
         drag.threshold: 10

@@ -1,4 +1,5 @@
 import QtQuick
+import "QmlBridge.js" as QmlBridge
 
 // CalcSectionCard — Phase 8 Part 8.1.
 // Ports CalcSectionControl (CalcSectionControl.lua) for a single CalcSections
@@ -23,8 +24,7 @@ Rectangle {
     signal inputChanged(string name, var value)
     signal manageSpectresRequested()
 
-    readonly property var _subs: (sectionObj && sectionObj.subs && sectionObj.subs.length !== undefined)
-                                 ? sectionObj.subs : []
+    readonly property var _subs: sectionObj ? QmlBridge.toArray(sectionObj.subs) : []
     readonly property string borderCol: (sectionObj && sectionObj.colour) ? sectionObj.colour : "#FFFFFF"
     readonly property int cardWidth: (sectionObj && sectionObj.width) ? sectionObj.width : 230
     readonly property int secIndex: (sectionObj && sectionObj.index) ? sectionObj.index : 0
@@ -43,7 +43,7 @@ Rectangle {
     function _indexOf(list, key, value) {
         if (!list || list.length === undefined) return -1
         for (var i = 0; i < list.length; i++) {
-            if (list[i] && list[i][key] === value) return i
+            if (list[i] && typeof list[i] === "object" && list[i][key] === value) return i
         }
         return list.length > 0 ? 0 : -1
     }
@@ -67,7 +67,7 @@ Rectangle {
             delegate: Column {
                 id: subCol
                 readonly property var subObj: root._subs[index] || ({})
-                readonly property var subRows: (subObj.rows && subObj.rows.length !== undefined) ? subObj.rows : []
+                readonly property var subRows: QmlBridge.toArray(subObj.rows)
                 readonly property string subKey: root.secIndex + ":" + (subObj.index || (index + 1))
                 width: cardCol.width
                 spacing: 0
@@ -112,6 +112,7 @@ Rectangle {
                     // +/- collapse button (CalcSectionControl.lua:50-55)
                     Rectangle {
                         id: toggleBtn
+                        objectName: "pob.calcsCard.toggleBtn"
                         anchors.right: parent.right
                         anchors.rightMargin: 2
                         anchors.verticalCenter: parent.verticalCenter
@@ -153,7 +154,7 @@ Rectangle {
                     delegate: Item {
                         id: rowBox
                         readonly property var rowObj: subCol.subRows[index] || ({})
-                        readonly property var rowCells: (rowObj.cells && rowObj.cells.length !== undefined) ? rowObj.cells : []
+                        readonly property var rowCells: rowObj ? QmlBridge.toArray(rowObj.cells) : []
                         readonly property string rowKey: subCol.subKey + ":" + (rowObj.index || (index + 1))
                         readonly property string rowBg: rowObj.bgCol || "#000000"
                         width: subCol.width
@@ -169,6 +170,7 @@ Rectangle {
                             color: (rowBox.rowObj.label && rowBox.rowObj.label.length > 0) ? rowBox.rowBg : "transparent"
 
                             ColorText {
+                                objectName: "pob.calcsCard.label"
                                 visible: !!(rowBox.rowObj.label && rowBox.rowObj.label.length > 0)
                                 anchors.right: parent.right
                                 anchors.rightMargin: 3
@@ -210,6 +212,7 @@ Rectangle {
 
                                     // Formatted stat value cell
                                     Rectangle {
+                                        objectName: "pob.calcsCard.activeHl"
                                         visible: cellWrap.ctrlName.length === 0
                                         x: 2; y: 0
                                         width: parent.width - 2
@@ -236,6 +239,7 @@ Rectangle {
                                         }
 
                                         MouseArea {
+                                            objectName: "pob.calcsCard.cellMouse"
                                             anchors.fill: parent
                                             hoverEnabled: cellWrap.isInteractive
                                             enabled: cellWrap.isInteractive
@@ -248,6 +252,7 @@ Rectangle {
 
                                     // Inline SkillSelect control cell (only in section 1 "View Skill Details")
                                     Loader {
+                                        objectName: "pob.calcsCard.skillLoader"
                                         visible: cellWrap.ctrlName.length > 0
                                         active: cellWrap.ctrlName.length > 0
                                         x: 6

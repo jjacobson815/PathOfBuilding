@@ -1,5 +1,6 @@
 import QtQuick
 import "StatDiff.js" as StatDiff
+import "QmlBridge.js" as QmlBridge
 
 // CraftNewPopup — Phase 6 Part 6.3 item 4: ItemsTab:CraftItem
 // (ItemsTab.lua:2774-2858). Pick rarity, optional title (for Rare/Unique/Relic),
@@ -15,7 +16,7 @@ PopupBase {
     signal created(bool openEditText)
 
     function _setBases(list, sel) {
-        const arr = (list && list.length !== undefined) ? list : []
+        const arr = QmlBridge.toArray(list)
         const mapped = []
         for (let i = 0; i < arr.length; i++) mapped.push({ idx: i + 1, label: arr[i] })
         baseDrop.model = mapped
@@ -24,8 +25,8 @@ PopupBase {
 
     function openFresh() {
         const init = luaEngine.invoke("pob_itemsCraftNewInit", []) || {}
-        const rars = (init.rarities && init.rarities.length !== undefined) ? init.rarities : []
-        const types = (init.types && init.types.length !== undefined) ? init.types : []
+        const rars = QmlBridge.toArray(init.rarities)
+        const types = QmlBridge.toArray(init.types)
         rarityDrop.model = rars
         rarityDrop.currentIndex = Math.max(0, Math.min(rars.length - 1, (init.raritySel || 3) - 1))
         titleEdit.text = ""
@@ -78,11 +79,13 @@ PopupBase {
         }
         DropDownControl {
             id: rarityDrop
+            objectName: "pob.craftNew.rarityDrop"
             x: 55; y: 20
             width: 100; height: 18
         }
         EditControl {
             id: titleEdit
+            objectName: "pob.craftNew.titleEdit"
             visible: rarityDrop.currentIndex >= 2
             x: 160; y: 20
             width: 190; height: 18
@@ -98,6 +101,7 @@ PopupBase {
         }
         DropDownControl {
             id: typeDrop
+            objectName: "pob.craftNew.typeDrop"
             x: 55; y: 45
             width: 295; height: 18
             searchable: true
@@ -113,6 +117,7 @@ PopupBase {
         }
         DropDownControl {
             id: baseDrop
+            objectName: "pob.craftNew.baseDrop"
             x: 55; y: 70
             width: 200; height: 18
             searchable: true
@@ -122,12 +127,14 @@ PopupBase {
         }
 
         Button {
+            objectName: "pob.craftNew.createBtn"
             x: 180 - 45 - 40; y: 100
             width: 80; height: 20
             label: "Create"
             onClicked: root._create()
         }
         Button {
+            objectName: "pob.craftNew.cancelBtn"
             x: 180 + 45 - 40; y: 100
             width: 80; height: 20
             label: "Cancel"

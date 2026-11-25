@@ -6,6 +6,7 @@ import QtQuick
 // Lua side needs.
 EditControl {
     id: root
+    objectName: "pob.craftEdit.root"
 
     property var craft: null
     property string name: ""
@@ -17,7 +18,7 @@ EditControl {
 
     // Imperative push (a bound `text` breaks on the first edit); only when the
     // Lua side differs, so a refresh never resets the caret while typing.
-    function push() { if (r.text !== undefined && r.text !== text) text = r.text }
+    function push() { if (r && typeof r.text === "string" && r.text !== text) text = r.text }
     onRChanged: push()
     Component.onCompleted: push()
 

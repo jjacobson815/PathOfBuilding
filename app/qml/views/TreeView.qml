@@ -3,6 +3,7 @@ import QtQuick.Window
 import QtQuick.Layouts
 import "../components" as Widgets
 import "../components/StatDiff.js" as StatDiff
+import "../components/QmlBridge.js" as QmlBridge
 
 // TREE view — the passive-tree tab: the embeddable TreeViewer plus legacy
 // TreeTab's bottom control strip (TreeTab.lua:31-367).
@@ -69,7 +70,7 @@ Item {
         var v = luaEngine.invoke("pob_getVersionState", [])
         versionState = v ? v : ({})
         if (!v) return
-        versionSelect.model = v.versions
+        versionSelect.model = QmlBridge.toArray(v.versions)
         versionSelect.currentIndex = v.current - 1
     }
 
@@ -78,7 +79,7 @@ Item {
         var p = luaEngine.invoke("pob_getPowerState", [])
         powerState = p ? p : ({})
         if (!p) return
-        powerStatSelect.model = p.statLabels
+        powerStatSelect.model = QmlBridge.toArray(p.statLabels)
         powerStatSelect.currentIndex = (p.statIndex || 1) - 1
         var d = depthValues.indexOf(p.maxDepth || 0)
         if (d < 0) { customDepth.visible = true; customDepth.text = String(p.maxDepth); d = 4 }
@@ -256,6 +257,7 @@ Item {
 
             Widgets.DropDownControl {
                 id: specSelect
+                objectName: "pob.treeview.spec_drop"
                 width: 190
                 height: 20
                 popupMinWidth: 260
@@ -280,6 +282,7 @@ Item {
                 height: 20
                 Widgets.CheckBox {
                     id: compareCheck
+                    objectName: "pob.treeview.compare_chk"
                     height: 20
                     width: 20
                     x: parent.width - 20
@@ -331,6 +334,7 @@ Item {
             }
 
             Widgets.Button {
+                objectName: "pob.treeview.btn_finder"
                 width: 150
                 height: 20
                 label: "Find Timeless Jewel"
@@ -344,6 +348,7 @@ Item {
                 height: 20
                 Widgets.CheckBox {
                     id: heatCheck
+                    objectName: "pob.treeview.heat_chk"
                     height: 20
                     width: 20
                     x: parent.width - 20
@@ -398,6 +403,7 @@ Item {
                 }
             }
             Widgets.Button {
+                objectName: "pob.treeview.btn_report"
                 visible: heatCheck.state
                 width: 130
                 height: 20

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "../components/QmlBridge.js" as QmlBridge
 
 // Generic build content shown for views that do not yet have a dedicated UI.
 // Extracted from main.qml (Part 1.1); behaviour unchanged. Shows a minimal
@@ -11,6 +12,7 @@ import QtQuick.Controls
 // "no dedicated view" condition lives at the instantiation site).
 ColumnLayout {
     id: placeholderView
+    objectName: "pob.placeholder.root"
     anchors.fill: parent
     anchors.margins: theme.space3
     spacing: theme.space2
@@ -22,7 +24,7 @@ ColumnLayout {
 
     // Resolve a view id to its human label (for the placeholder header).
     function viewLabel(id) {
-        var views = luaEngine.viewList()
+        var views = QmlBridge.toArray(luaEngine.viewList())
         for (var i = 0; i < views.length; i++)
             if (views[i].id === id) return views[i].label
         return id
@@ -32,6 +34,7 @@ ColumnLayout {
     RowLayout {
         spacing: theme.space2
         Button {
+            objectName: "pob.placeholder.btn_save"
             text: "Save"
             onClicked: {
                 saveLoadModel.saveBuild(saveLoadModel.defaultSavePath())
@@ -41,6 +44,7 @@ ColumnLayout {
             }
         }
         Button {
+            objectName: "pob.placeholder.btn_load"
             text: "Load"
             onClicked: {
                 saveLoadModel.loadBuildFile(saveLoadModel.defaultSavePath())
@@ -50,6 +54,9 @@ ColumnLayout {
             }
         }
         Text {
+            Layout.fillWidth: true
+            elide: Text.ElideRight
+            clip: true
             text: "Status: " + placeholderView.saveLoadStatus
             color: theme.muted
             font.pixelSize: theme.fontSize
@@ -67,6 +74,7 @@ ColumnLayout {
         font.bold: true
     }
     ListView {
+        objectName: "pob.placeholder.list"
         Layout.fillWidth: true
         Layout.fillHeight: true
         model: socketGroupModel

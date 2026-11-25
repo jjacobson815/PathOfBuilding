@@ -1,5 +1,6 @@
 import QtQuick
 import "StatDiff.js" as StatDiff
+import "QmlBridge.js" as QmlBridge
 
 // ItemDBPanel — Phase 6 Part 6.2: the "Import from:" Uniques / Rare
 // Templates switch plus one ItemDBControl (ItemDBControl.lua): slot / type
@@ -23,7 +24,7 @@ Item {
     property var st: ({})
     readonly property string which: st.selectDB === 2 ? "rare" : "unique"
     readonly property bool isUnique: which === "unique"
-    readonly property var rows: st.rows && st.rows.length !== undefined ? st.rows : []
+    readonly property var rows: st ? QmlBridge.toArray(st.rows) : []
     readonly property int listTop: isUnique ? 104 : 64
 
     signal requestEdit()          // a row was opened in the display item
@@ -42,7 +43,7 @@ Item {
         const f = st.filters || {}
         const set = function (dd, key) {
             const x = f[key]
-            dd.model = x && x.list && x.list.length !== undefined ? x.list : []
+            dd.model = x ? QmlBridge.toArray(x.list) : []
             dd.currentIndex = x ? x.sel - 1 : -1
         }
         set(slotDrop, "slot"); set(typeDrop, "type"); set(searchModeDrop, "searchMode")
@@ -82,7 +83,7 @@ Item {
 
     Timer {
         id: stepTimer
-        interval: 1
+        interval: 16
         repeat: true
         onTriggered: {
             const r = root.call("pob_itemsDBStep", [root.which])
@@ -103,6 +104,7 @@ Item {
     }
     DropDownControl {
         id: selectDB
+        objectName: "pob.itemDB.selectDB"
         // Fixed x, not anchored to the label: its TextMetrics width is the
         // legacy measurement and Qt paints wider (invariant #8).
         x: 96
@@ -115,12 +117,14 @@ Item {
     // Filters (ItemDBControl.lua:30-56), anchored above the list.
     DropDownControl {
         id: slotDrop
+        objectName: "pob.itemDB.slotDrop"
         x: 0; y: root.listTop - (root.isUnique ? 62 : 22) - 18
         width: 179; height: 18
         onSelected: function (i) { root.setFilter("slot", i + 1) }
     }
     DropDownControl {
         id: typeDrop
+        objectName: "pob.itemDB.typeDrop"
         anchors.left: slotDrop.right; anchors.leftMargin: 2
         y: slotDrop.y
         width: 179; height: 18
@@ -128,6 +132,7 @@ Item {
     }
     DropDownControl {
         id: sortDrop
+        objectName: "pob.itemDB.sortDrop"
         visible: root.isUnique
         x: 0; y: root.listTop - 42 - 18
         width: 179; height: 18
@@ -135,6 +140,7 @@ Item {
     }
     DropDownControl {
         id: leagueDrop
+        objectName: "pob.itemDB.leagueDrop"
         visible: root.isUnique
         anchors.left: sortDrop.right; anchors.leftMargin: 2
         y: sortDrop.y
@@ -158,6 +164,7 @@ Item {
     }
     EditControl {
         id: search
+        objectName: "pob.itemDB.searchEdit"
         x: 0; y: root.listTop - 2 - 18
         width: 258; height: 18
         placeholder: "Search"
@@ -173,6 +180,7 @@ Item {
 
     ItemListBox {
         id: dbList
+        objectName: "pob.itemDB.dbList"
         y: root.listTop
         width: 360
         height: Math.max(40, Math.min(root.isUnique ? 244 : 260, root.height - root.listTop))

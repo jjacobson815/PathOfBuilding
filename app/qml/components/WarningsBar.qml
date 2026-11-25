@@ -32,6 +32,7 @@ import QtQuick.Window
 //     Tier 0 "nothing hardcoded" rule.
 Item {
     id: root
+    objectName: "pob.warningsbar.root"
 
     // Legacy row geometry (Build.lua:581 rect height, Draw's y+2 text offset,
     // and the +8 width pad from the control's width function).
@@ -90,6 +91,7 @@ Item {
 
     Label {
         id: countLabel
+        objectName: "pob.warningsbar.count"
         x: 0
         y: 2
         size: root.textSize
@@ -107,6 +109,7 @@ Item {
     // the control's own width IS the string width + 8 (Build.lua:583-585).
     MouseArea {
         id: ma
+        objectName: "pob.warningsbar.ma"
         x: 0
         y: 0
         width: root.implicitWidth
@@ -115,7 +118,7 @@ Item {
         onContainsMouseChanged: root._showTooltip()
     }
 
-    Tooltip { id: tt }
+    Tooltip { id: tt; objectName: "pob.warningsbar.tooltip" }
 
     // Same hover/tooltip/viewport-flip flow as Button.qml's _showTooltip():
     // map to the window contentItem, build the viewport rect in the item's own

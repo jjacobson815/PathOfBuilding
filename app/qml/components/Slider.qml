@@ -18,6 +18,7 @@ import QtQuick.Window
 // nearest native equivalent, not a literal port.
 Item {
     id: root
+    objectName: "pob.slider.root"
 
     property real value: 0            // 0..1, mirrors legacy `val`
     property int divCount: 0          // 0 = continuous; >1 = detent count
@@ -89,6 +90,7 @@ Item {
     // Knob: a plain filled rect for a continuous slider, or a split up/down
     // arrow pair for a detent slider (mirrors legacy's two DrawArrow calls).
     Rectangle {
+        objectName: root.divCount <= 1 ? "pob.slider.knob" : ""
         visible: root.controlEnabled && root.divCount <= 1
         x: 2 + root.knobXForVal()
         y: 2
@@ -97,6 +99,7 @@ Item {
         color: (root.dragging || root.knobHitTest()) ? theme.text : theme.muted
     }
     Column {
+        objectName: root.divCount > 1 ? "pob.slider.knob" : ""
         visible: root.controlEnabled && root.divCount > 1
         x: 1 + root.knobXForVal()
         y: root.height / 2 - root.knobSize / 2
@@ -118,6 +121,7 @@ Item {
 
     MouseArea {
         id: ma
+        objectName: "pob.slider.ma"
         anchors.fill: parent
         hoverEnabled: true
         enabled: root.controlEnabled

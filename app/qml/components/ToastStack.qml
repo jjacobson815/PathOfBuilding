@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "QmlBridge.js" as QmlBridge
 
 // ToastStack — Tier 1.4, ported from ToastNotification.lua's Render() loop:
 // toasts stack bottom-up from the bottom-left corner (legacy anchors at
@@ -16,6 +17,8 @@ import QtQuick.Layouts
 // Repeater's own remove transition below covers the visual case instead).
 Item {
     id: root
+    objectName: "pob.toaststack.root"
+    visible: root._stackOrder.length > 0
 
     property var toasts: luaEngine.getToasts()
 
@@ -28,8 +31,9 @@ Item {
     // matches legacy's yOffset accumulation order (toasts iterated oldest-first,
     // each subsequent one pushed further UP from the anchor).
     readonly property var _stackOrder: {
+        var list = QmlBridge.toArray(root.toasts);
         var out = [];
-        for (var i = root.toasts.length - 1; i >= 0; i--) out.push(root.toasts[i]);
+        for (var i = list.length - 1; i >= 0; i--) out.push(list[i]);
         return out;
     }
 
@@ -44,9 +48,11 @@ Item {
         spacing: 4
 
         Repeater {
+            objectName: "pob.toaststack.repeater"
             model: root._stackOrder
             delegate: Toast {
                 id: toastItem
+                objectName: "pob.toaststack.toast"
                 required property var modelData
                 Layout.preferredWidth: 312
                 toastId: modelData.id

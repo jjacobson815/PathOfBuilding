@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Window
+import "QmlBridge.js" as QmlBridge
 
 // SpectreLibraryPopup — Phase 3 long-tail, ports Build.lua's Spectre Library
 // (Build.lua:1415-1841): dual-pane Spectres in Build / Available Spectres
@@ -27,8 +28,8 @@ PopupBase {
 
     property int buildSel: -1
     property int availSel: -1
-    readonly property int buildCount: Array.isArray(spectreList) ? spectreList.length : 0
-    readonly property int availCount: Array.isArray(available) ? available.length : 0
+    readonly property int buildCount: QmlBridge.toArray(spectreList).length
+    readonly property int availCount: QmlBridge.toArray(available).length
     readonly property bool hasBuildSel: buildSel >= 0 && buildSel < buildCount
     readonly property bool hasAvailSel: availSel >= 0 && availSel < availCount
 
@@ -46,24 +47,27 @@ PopupBase {
     property string selectedMinionId: ""
     property var minionStats: ({})
     readonly property var spawnLocations:
-        (minionStats && Array.isArray(minionStats.spawnLocations)) ? minionStats.spawnLocations : []
+        (minionStats && minionStats.spawnLocations) ? QmlBridge.toArray(minionStats.spawnLocations) : []
 
     function fileUrl(p) {
-        return p ? (p.charAt(0) === "/" ? "file://" : "file:///") + p : ""
+        if (!p) return ""
+        var norm = String(p).replace(/\\/g, "/")
+        return (norm.charAt(0) === "/" ? "file://" : "file:///") + norm
     }
 
     function _fillTooltipLines(tip, res) {
         tip.clear()
-        if (!res || !Array.isArray(res.lines)) return
-        for (var i = 0; i < res.lines.length; i++) {
-            var l = res.lines[i]
+        var lines = res ? QmlBridge.toArray(res.lines) : []
+        if (!lines.length) return
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i]
             if (l.separator || l.sep) tip.addSeparator(l.size || 2)
             else tip.addLine(l.size || 14, l.text && l.text.length > 0 ? l.text : " ", l.font, l.center === true)
         }
     }
 
     function _showTipAt(tip, item) {
-        var win = Window.window
+        var win = item ? item.Window.window : null
         var o = win ? item.mapToItem(win.contentItem, 0, 0) : Qt.point(0, 0)
         var vp = win ? Qt.rect(-o.x, -o.y, win.width, win.height) : Qt.rect(0, 0, item.width, item.height)
         tip.showAt(0, 0, item.width, item.height, vp)
@@ -111,11 +115,12 @@ PopupBase {
     function _applyQueryResult(st, syncBuildList) {
         if (!st || !st.ok) return
         if (syncBuildList)
-            spectreList = Array.isArray(st.spectreList) ? st.spectreList : []
-        available = Array.isArray(st.available) ? st.available : []
-        categories = Array.isArray(st.categories) ? st.categories : []
-        searchModes = Array.isArray(st.searchModes) ? st.searchModes : ["Names", "Skills", "Both"]
-        sortModes = Array.isArray(st.sortModes) ? st.sortModes : []
+            spectreList = QmlBridge.toArray(st.spectreList)
+        available = QmlBridge.toArray(st.available)
+        categories = QmlBridge.toArray(st.categories)
+        var sModes = QmlBridge.toArray(st.searchModes)
+        searchModes = sModes.length > 0 ? sModes : ["Names", "Skills", "Both"]
+        sortModes = QmlBridge.toArray(st.sortModes)
         totalSpectres = st.totalSpectres || 0
         filteredCount = st.filteredCount || 0
         if (availSel >= availCount) availSel = availCount - 1
@@ -196,12 +201,12 @@ PopupBase {
 
         RowLayout {
             spacing: 10
-            Layout.preferredWidth: 960
+            Layout.preferredWidth: 920
             Layout.preferredHeight: 440
 
             // ===== Left pane: Spectres in Build =====
             ColumnLayout {
-                Layout.preferredWidth: 230
+                Layout.preferredWidth: 220
                 Layout.fillHeight: true
                 spacing: 4
 
@@ -210,6 +215,7 @@ PopupBase {
                     Label { label: "^7Spectres in Build"; size: 14 }
                     Item { Layout.fillWidth: true }
                     Button {
+                        objectName: "pob.spectres.removeBtn"
                         implicitWidth: 64; implicitHeight: 18
                         label: "Remove"
                         controlEnabled: root.hasBuildSel
@@ -236,6 +242,7 @@ PopupBase {
 
                     ListView {
                         id: buildListView
+                        objectName: "pob.spectres.buildList"
                         anchors.fill: parent
                         anchors.margins: 2
                         model: root.spectreList
@@ -253,6 +260,7 @@ PopupBase {
                                 anchors.right: parent.right
                                 anchors.rightMargin: 4
                                 anchors.verticalCenter: parent.verticalCenter
+                                elide: Text.ElideRight
                                 label: "^7" + (modelData.name || modelData.id)
                                 size: 14
                             }
@@ -301,6 +309,7 @@ PopupBase {
                 RowLayout {
                     spacing: 6
                     Button {
+                        objectName: "pob.spectres.addBtn"
                         implicitWidth: 50; implicitHeight: 20
                         label: "Add"
                         controlEnabled: root.hasAvailSel
@@ -308,6 +317,7 @@ PopupBase {
                     }
                     EditControl {
                         id: searchEdit
+                        objectName: "pob.spectres.searchEdit"
                         Layout.fillWidth: true
                         Layout.preferredHeight: 20
                         placeholder: "Search spectres..."
@@ -318,6 +328,7 @@ PopupBase {
                     }
                     DropDownControl {
                         id: searchModeDrop
+                        objectName: "pob.spectres.searchMode"
                         Layout.preferredWidth: 85
                         Layout.preferredHeight: 20
                         model: root.searchModes
@@ -328,7 +339,8 @@ PopupBase {
                     }
                     DropDownControl {
                         id: sortModeDrop
-                        Layout.preferredWidth: 185
+                        objectName: "pob.spectres.sortMode"
+                        Layout.preferredWidth: 165
                         Layout.preferredHeight: 20
                         model: root.sortModes
                         onSelected: (i) => {
@@ -346,6 +358,7 @@ PopupBase {
                     Repeater {
                         model: root.categories
                         delegate: Rectangle {
+                            objectName: "pob.spectres.catToggle"
                             readonly property bool active: root.enabledCats[modelData.key] === true
                             width: 24
                             height: 24
@@ -384,6 +397,7 @@ PopupBase {
 
                     CheckBox {
                         id: corpseCheck
+                        objectName: "pob.spectres.corpseCheck"
                         implicitHeight: 18; implicitWidth: 18
                         label: "Corpse Only"
                         onToggled: (s) => {
@@ -396,6 +410,7 @@ PopupBase {
 
                     CheckBox {
                         id: showAllCheck
+                        objectName: "pob.spectres.showAllCheck"
                         implicitHeight: 18; implicitWidth: 18
                         label: "Show All"
                         onToggled: (s) => {
@@ -415,6 +430,7 @@ PopupBase {
 
                     ListView {
                         id: availListView
+                        objectName: "pob.spectres.availList"
                         anchors.fill: parent
                         anchors.margins: 2
                         model: root.available
@@ -432,6 +448,7 @@ PopupBase {
                                 anchors.right: parent.right
                                 anchors.rightMargin: 4
                                 anchors.verticalCenter: parent.verticalCenter
+                                elide: Text.ElideRight
                                 label: (modelData.recommended ? "^7" : "^8") + (modelData.name || modelData.id)
                                 size: 14
                             }
@@ -448,9 +465,10 @@ PopupBase {
                                     availTip.hide()
                                 }
                                 onPositionChanged: function (mouse) {
-                                    if (ghost.active) { ghost.moveTo(availRowMa, mouse.x, mouse.y); return }
+                                    if (ghost.active) { availTip.hide(); ghost.moveTo(availRowMa, mouse.x, mouse.y); return }
                                     var dx = mouse.x - pressX, dy = mouse.y - pressY
                                     if (pressed && dx * dx + dy * dy > 100) {
+                                        availTip.hide()
                                         ghost.start(availRowMa, mouse.x, mouse.y, "Spectre",
                                                     { kind: "available", entry: modelData },
                                                     modelData.name || modelData.id)
@@ -493,6 +511,7 @@ PopupBase {
                     Label { label: "^7Gem Level:"; size: 13 }
                     EditControl {
                         id: gemLevelEdit
+                        objectName: "pob.spectres.gemLevel"
                         Layout.preferredWidth: 44
                         Layout.preferredHeight: 20
                         isNumeric: true
@@ -526,6 +545,7 @@ PopupBase {
 
                         Label {
                             Layout.fillWidth: true
+                            elide: Text.ElideRight
                             label: root.minionStats.name ? ("^7" + root.minionStats.name) : "^8Select a spectre"
                             size: 15
                         }
@@ -599,6 +619,7 @@ PopupBase {
                                         anchors.right: parent.right
                                         anchors.rightMargin: 4
                                         anchors.verticalCenter: parent.verticalCenter
+                                        elide: Text.ElideRight
                                         label: "^7" + modelData
                                         size: 13
                                     }
@@ -635,6 +656,7 @@ PopupBase {
             spacing: 12
 
             PopupButton {
+                objectName: "pob.spectres.saveBtn"
                 label: "Save"
                 onClicked: root._save()
             }

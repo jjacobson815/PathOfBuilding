@@ -36,6 +36,7 @@ import QtQuick.Window
 // clamping in SetText rather than in the key handler.
 Item {
     id: root
+    objectName: "pob.edit.root"
 
     // --- value ---
     property string text: ""
@@ -87,6 +88,7 @@ Item {
     property bool _internalWrite: false
 
     Chrome {
+        objectName: "pob.edit.chrome"
         anchors.fill: parent
         hovered: root.hovered
         // A focused field reads as "active", matching legacy's focus highlight.
@@ -96,6 +98,7 @@ Item {
 
     TextInput {
         id: input
+        objectName: "pob.edit.input"
 
         anchors.fill: parent
         anchors.leftMargin: 4
@@ -170,16 +173,21 @@ Item {
         onAccepted: root._commit()
     }
 
-    // Placeholder ("prompt"). Rendered through Label so colour codes in the
-    // prompt text work the same as everywhere else.
-    Label {
+    // Placeholder ("prompt"). Rendered through ColorText so colour codes work
+    // and constrained fields elide cleanly instead of overflowing the border.
+    ColorText {
+        id: placeholderText
+        objectName: "pob.edit.placeholder"
         anchors.left: parent.left
         anchors.leftMargin: 4
+        anchors.right: parent.right
+        anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
         visible: root.empty && !input.activeFocus && root.placeholder.length > 0
-        label: root.placeholder
-        size: root.size
+        sourceText: root.placeholder
+        font.pixelSize: root.size
         defaultColor: theme.mutedDark
+        elide: Text.ElideRight
     }
 
     // Hover is tracked on a non-accepting area so it coexists with
@@ -198,7 +206,10 @@ Item {
     // adopt it as the new revert baseline so a later ESC doesn't resurrect a
     // value the model has already moved past.
     onTextChanged: {
-        if (!_internalWrite && !input.activeFocus) _preEditText = root.text
+        if (!_internalWrite && !input.activeFocus) {
+            if (input.text !== root.text) input.text = root.text
+            _preEditText = root.text
+        }
     }
 
     // --- API ---------------------------------------------------------------
@@ -267,6 +278,7 @@ Item {
         tt.clear()
         if (root.tooltipFunc) root.tooltipFunc(tt)
         else if (root.tooltipText) tt.addLine(14, root.tooltipText)
+        else if (placeholderText.visible && placeholderText.truncated) tt.addLine(14, root.placeholder)
         if (tt.lines.length > 0) {
             var win = Window.window
             var origin = win ? root.mapToItem(win.contentItem, 0, 0) : Qt.point(0, 0)

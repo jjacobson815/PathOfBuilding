@@ -15,6 +15,7 @@ import QtQuick
 // future ListControl (Tier 3), not this generic primitive.
 Item {
     id: root
+    objectName: "pob.droptarget.root"
 
     // (type: string, value: var) -> bool
     property var canReceiveDrag: function (type, value) { return false; }
@@ -32,6 +33,7 @@ Item {
 
     DropArea {
         id: area
+        objectName: "pob.droptarget.area"
         anchors.fill: parent
         onEntered: (drag) => {
             const src = drag.source;

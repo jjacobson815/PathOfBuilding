@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Controls as QC
+import "QmlBridge.js" as QmlBridge
 
 // GemSelect — Phase 5, ports GemSelectControl.lua (an EditControl with a
 // gem dropdown). The list, its matching (exact -> initials "ctf" -> prefix
@@ -61,7 +62,7 @@ FocusScope {
 
     function _fetch(buf) {
         const r = luaEngine.invoke("pob_skillsGemCandidates", [groupIndex, row, buf, filter])
-        rows = (r && r.rows && r.rows.length !== undefined) ? r.rows : []
+        rows = QmlBridge.toArray(r ? r.rows : null)
         _noMatches = !r || r.noMatches || rows.length === 0
     }
 
@@ -106,8 +107,11 @@ FocusScope {
     }
 
     function _exactId(t) {
-        const low = t.toLowerCase()
-        for (let i = 0; i < rows.length; i++) if (rows[i].name.toLowerCase() === low) return rows[i].id
+        const low = t ? t.toLowerCase() : ""
+        for (let i = 0; i < rows.length; i++) {
+            const name = rows[i] && rows[i].name ? rows[i].name.toLowerCase() : ""
+            if (name === low) return rows[i].id
+        }
         return ""
     }
 
@@ -140,6 +144,7 @@ FocusScope {
 
     TextInput {
         id: input
+        objectName: "pob.gemSelect.input"
         anchors.fill: parent
         anchors.leftMargin: 4
         anchors.rightMargin: root.imbued ? 4 : 40
@@ -169,7 +174,7 @@ FocusScope {
             if (activeFocus) {
                 root.openList()
                 selectAll()
-            } else if (root.dropped && !rowMa.containsMouse) {
+            } else if (root.dropped && !rowMa.containsMouse && !popupHover.hovered) {
                 // Focus lost while dropped: keep an exact match, else clear.
                 const id = root._exactId(text)
                 if (id === "") _setText("")
@@ -211,6 +216,7 @@ FocusScope {
             model: [ { t: "A", f: "grants_active_skill", tip: "Only show Active gems" },
                      { t: "S", f: "support", tip: "Only show Support gems" } ]
             delegate: Rectangle {
+                objectName: modelData.t === "A" ? "pob.gemSelect.filterActive" : "pob.gemSelect.filterSupport"
                 width: 16; height: 16
                 color: "transparent"
                 border.width: 1
@@ -298,8 +304,15 @@ FocusScope {
     // (typing stays in the TextInput) and closes only through this file.
     QC.Popup {
         id: listPopup
+        objectName: "pob.gemSelect.listPopup"
+        readonly property bool _flipUp: {
+            const win = root.Window.window
+            if (!win) return false
+            const p = root.mapToItem(win.contentItem, 0, root.height)
+            return (p.y + height) > win.height && root.mapToItem(win.contentItem, 0, 0).y >= height
+        }
         x: 0
-        y: root.height
+        y: _flipUp ? -height : root.height
         width: root.width
         height: Math.max(1, Math.min(15, root.rows.length || 1)) * 16 + 4
         padding: 0
@@ -314,8 +327,10 @@ FocusScope {
             border.color: theme.text
         }
         contentItem: Item {
+            HoverHandler { id: popupHover }
             ListView {
                 id: list
+                objectName: "pob.gemSelect.candidateList"
                 anchors.fill: parent
                 anchors.margins: 2
                 anchors.rightMargin: sb.visible ? 18 : 2
@@ -324,6 +339,7 @@ FocusScope {
                 model: root.rows.length > 0 ? root.rows
                      : [ { name: "<No matches>", color: "^7", marker: "", markerColor: "^7" } ]
                 delegate: Rectangle {
+                    objectName: "pob.gemSelect.rowDelegate"
                     width: list.width
                     height: 16
                     color: (index === rowMa.hoverRow || index === root.selIndex - 1

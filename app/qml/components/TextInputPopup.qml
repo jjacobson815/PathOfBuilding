@@ -10,6 +10,7 @@ import QtQuick.Layouts
 // non-blank pattern (e.g. NewFolderPopup's `buf:match("%S")` check).
 PopupBase {
     id: root
+    objectName: "pob.textpopup.root"
 
     property string prompt: ""
     property alias text: input.text
@@ -40,6 +41,7 @@ PopupBase {
 
             TextInput {
                 id: input
+                objectName: "pob.textpopup.input"
                 anchors.fill: parent
                 anchors.leftMargin: 6
                 anchors.rightMargin: 6
@@ -56,10 +58,12 @@ PopupBase {
             spacing: 10
 
             PopupButton {
+                objectName: "pob.textpopup.btn_confirm"
                 label: root.confirmLabel
                 onClicked: if (root.confirmEnabled) root.accept()
             }
             PopupButton {
+                objectName: "pob.textpopup.btn_cancel"
                 label: "Cancel"
                 onClicked: root.reject()
             }

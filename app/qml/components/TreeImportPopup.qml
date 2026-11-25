@@ -86,8 +86,8 @@ PopupBase {
         width: 540
         spacing: 8
         focus: true
-        Keys.onReturnPressed: (event) => { root.doImport(); event.accepted = true }
-        Keys.onEnterPressed: (event) => { root.doImport(); event.accepted = true }
+        Keys.onReturnPressed: (event) => { if (root.canImport) { root.doImport(); event.accepted = true } }
+        Keys.onEnterPressed: (event) => { if (root.canImport) { root.doImport(); event.accepted = true } }
 
         GridLayout {
             columns: 2
@@ -105,6 +105,7 @@ PopupBase {
                 controlEnabled: !root.resolving
                 TextInput {
                     id: nameInput
+                    objectName: "pob.treeImport.nameInput"
                     anchors.fill: parent
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6
@@ -129,6 +130,7 @@ PopupBase {
                 controlEnabled: !root.resolving
                 TextInput {
                     id: linkInput
+                    objectName: "pob.treeImport.linkInput"
                     anchors.fill: parent
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6
@@ -145,6 +147,8 @@ PopupBase {
         }
 
         ColorText {
+            objectName: "pob.treeImport.statusMsg"
+            visible: root.msg.length > 0
             Layout.alignment: Qt.AlignHCenter
             Layout.maximumWidth: 540
             sourceText: root.msg
@@ -156,12 +160,14 @@ PopupBase {
             Layout.alignment: Qt.AlignHCenter
             spacing: 10
             Button {
+                objectName: "pob.treeImport.importBtn"
                 implicitWidth: 80; implicitHeight: 20
                 label: root.resolving ? "Resolving..." : "Import"
                 controlEnabled: root.canImport
                 onClicked: root.doImport()
             }
             Button {
+                objectName: "pob.treeImport.cancelBtn"
                 implicitWidth: 80; implicitHeight: 20
                 label: "Cancel"
                 onClicked: {

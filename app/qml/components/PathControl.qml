@@ -13,6 +13,7 @@ import QtQuick
 // validate the exact drag payload shape against.
 Item {
     id: root
+    objectName: "pob.path.root"
 
     property string basePath: ""
     property string subPath: ""
@@ -43,6 +44,7 @@ Item {
 
     UndoHandler {
         id: undoHandler
+        objectName: "pob.path.undo"
         createState: function () { return root.subPath; }
         restoreState: function (state) { root._setSubPath(state, true); }
     }
@@ -77,12 +79,14 @@ Item {
                 anchors.verticalCenter: parent ? parent.verticalCenter : undefined
 
                 Button {
+                    objectName: "pob.path.segment"
                     label: modelData.label
                     height: root.height - 4
                     width: Math.max(24, textMetrics.width(root.height - 8, "VAR", modelData.label) + 10)
                     onClicked: root.setSubPath(modelData.path)
                 }
                 Arrow {
+                    objectName: "pob.path.chevron"
                     visible: index < root.folderList.length - 1
                     direction: "right"
                     width: 8

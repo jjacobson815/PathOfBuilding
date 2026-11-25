@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import "StatDiff.js" as StatDiff
+import "QmlBridge.js" as QmlBridge
 
 // ConfigOptionRow — Data-driven control factory for a single ConfigOptions entry
 // (Phase 7 Part 7.1). Renders the right-aligned label + control keyed on
@@ -34,18 +35,19 @@ Item {
 
     function syncFromOption() {
         if (!option) return
-        if (isCheck) {
+        var t = option.type ? String(option.type) : ""
+        if (t === "check") {
             checkCtrl.state = (option.value === true)
-        } else if (isNum) {
+        } else if (t === "count" || t === "countAllowZero" || t === "integer" || t === "float") {
             if (!numCtrl.editing) {
                 numCtrl.text = option.textValue !== undefined ? String(option.textValue) : ""
             }
             numCtrl.placeholder = option.placeholder !== undefined ? String(option.placeholder) : ""
-        } else if (isList) {
-            var opts = (option.options && option.options.length !== undefined) ? option.options : []
+        } else if (t === "list") {
+            var opts = QmlBridge.toArray(option.options)
             listCtrl.model = opts
             listCtrl.currentIndex = (option.selIndex !== undefined ? Number(option.selIndex) : 1) - 1
-        } else if (isText) {
+        } else if (t === "text") {
             if (!textCtrl.editing) {
                 textCtrl.text = option.textValue !== undefined ? String(option.textValue) : ""
             }
@@ -74,6 +76,7 @@ Item {
 
         Label {
             id: optLabel
+            objectName: "pob.configRow.label"
             anchors.right: root.isText ? undefined : parent.right
             anchors.left: root.isText ? parent.left : undefined
             anchors.verticalCenter: parent.verticalCenter
@@ -114,6 +117,7 @@ Item {
     // 1. CheckBox control
     CheckBox {
         id: checkCtrl
+        objectName: "pob.configRow.checkCtrl"
         visible: root.isCheck
         x: 228
         y: 1
@@ -141,6 +145,7 @@ Item {
 
         EditControl {
             id: numCtrl
+            objectName: "pob.configRow.numCtrl"
             anchors.fill: parent
             isNumeric: true
             allowNegative: root.optType === "integer" || root.optType === "countAllowZero"
@@ -173,6 +178,7 @@ Item {
 
         DropDownControl {
             id: listCtrl
+            objectName: "pob.configRow.listCtrl"
             anchors.fill: parent
             size: 14
             popupMinWidth: 160
@@ -182,8 +188,7 @@ Item {
                 if (item && item.val !== undefined) root._fillTooltip(tt, item.val)
             }
             onSelected: function(idx) {
-                var opts = (root.option && root.option.options && root.option.options.length !== undefined)
-                    ? root.option.options : []
+                var opts = root.option ? QmlBridge.toArray(root.option.options) : []
                 if (idx >= 0 && idx < opts.length) {
                     root.valueChanged(root.optVar, opts[idx].val)
                 }
@@ -209,6 +214,7 @@ Item {
 
         EditControl {
             id: textCtrl
+            objectName: "pob.configRow.textCtrl"
             anchors.fill: parent
             size: 14
             noTooltip: !root.hasTooltip

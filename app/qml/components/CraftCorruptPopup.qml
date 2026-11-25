@@ -39,13 +39,13 @@ CraftPopupBase {
         implicitWidth: 605
         implicitHeight: root.frameH
 
-        CraftButton { craft: root; name: "implicits"; x: 5; y: 5; width: 80 }
-        CraftButton { craft: root; name: "rolls"; x: 90; y: 5; width: 100 }
+        CraftButton { objectName: "pob.craftCorrupt.implicits"; craft: root; name: "implicits"; x: 5; y: 5; width: 80 }
+        CraftButton { objectName: "pob.craftCorrupt.rolls"; craft: root; name: "rolls"; x: 90; y: 5; width: 100 }
 
         CraftLabel { craft: root; staticLabel: "^7Source:"; rx: 95; y: 30; visible: root.rec("source").shown === true }
-        CraftDrop { craft: root; name: "source"; x: 100; y: 30; width: 150; height: 18 }
+        CraftDrop { objectName: "pob.craftCorrupt.source"; craft: root; name: "source"; x: 100; y: 30; width: 150; height: 18 }
         CraftLabel { craft: root; staticLabel: "^7Sort by:"; rx: 350; y: 20; visible: root.rec("sort").shown === true }
-        CraftDrop { craft: root; name: "sort"; x: 355; y: 20; width: 240; height: 18 }
+        CraftDrop { objectName: "pob.craftCorrupt.sort"; craft: root; name: "sort"; x: 355; y: 20; width: 240; height: 18 }
 
         Label {
             visible: root.rec("implicitCannotBeChangedLabel").shown === true
@@ -58,7 +58,7 @@ CraftPopupBase {
             delegate: Item {
                 readonly property int n: index + 1
                 CraftLabel { craft: root; name: "implicit" + n + "Label"; rx: 75; y: 35 + 20 * n }
-                CraftDrop { craft: root; name: "implicit" + n; x: 80; y: 35 + 20 * n; width: 440; height: 18 }
+                CraftDrop { objectName: "pob.craftCorrupt.implicit" + parent.n; craft: root; name: "implicit" + n; x: 80; y: 35 + 20 * n; width: 440; height: 18 }
             }
         }
 
@@ -78,6 +78,7 @@ CraftPopupBase {
                 }
                 Slider {
                     id: roll
+                    objectName: "pob.craftCorrupt.rollSlider"
                     width: 80; height: 18
                     property bool pushing: false
                     function push() {
@@ -99,7 +100,7 @@ CraftPopupBase {
             }
         }
 
-        CraftButton { craft: root; name: "save"; tip: true; x: 605 / 2 - 45 - 40; y: root.frameH - 24; width: 80 }
-        CraftButton { craft: root; name: "close"; x: 605 / 2 + 45 - 40; y: root.frameH - 24; width: 80 }
+        CraftButton { objectName: "pob.craftCorrupt.saveBtn"; craft: root; name: "save"; tip: true; x: 605 / 2 - 45 - 40; y: root.frameH - 24; width: 80 }
+        CraftButton { objectName: "pob.craftCorrupt.closeBtn"; craft: root; name: "close"; x: 605 / 2 + 45 - 40; y: root.frameH - 24; width: 80 }
     }
 }

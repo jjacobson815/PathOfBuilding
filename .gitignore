@@ -49,6 +49,7 @@ build-win/
 build-linux/
 dist/
 captures/
+docs/repomix-packs/
 
 # Scratch logs & analysis at repo root
 /build_*.log

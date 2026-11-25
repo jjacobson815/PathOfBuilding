@@ -3,6 +3,7 @@ import QtQuick.Layouts
 // QtQuick.Controls is namespaced (QQC) so its `Button`/`Popup` etc. don't collide
 // with the component-library Button.qml that shares this directory.
 import QtQuick.Controls as QQC
+import "QmlBridge.js" as QmlBridge
 
 // OptionsDialog — Part 1.4 (bullet 4). A faithful port of main:OpenOptionsPopup
 // (Modules/Main.lua ~865): the ~28 application/build settings dialog. Built on
@@ -47,8 +48,7 @@ PopupBase {
     onRejected: _revert()
 
     function _load() {
-        var list = luaEngine.getOptions()
-        if (!list) list = []
+        var list = QmlBridge.toArray(luaEngine.getOptions())
         var snap = ({})
         var draft = ({})
         var app = []
@@ -90,7 +90,7 @@ PopupBase {
 
     // Per-key text-field width (build path is long, separators tiny, etc.).
     function _fieldWidth(desc) {
-        if (desc.key === "buildPath") return 260
+        if (desc.key === "buildPath") return 228
         if (desc.key === "proxyURL") return 190
         if (desc.type === "color") return 96
         if (desc.maxChars === 1) return 36
@@ -232,7 +232,7 @@ PopupBase {
             spacing: 6
 
             ColorText {
-                Layout.preferredWidth: 200
+                Layout.preferredWidth: 184
                 Layout.alignment: Qt.AlignVCenter
                 horizontalAlignment: Text.AlignRight
                 wrapMode: Text.NoWrap
@@ -267,19 +267,21 @@ PopupBase {
             Component {
                 id: checkComp
                 CheckBox {
+                    objectName: "pob.options.check"
                     label: ""
                     state: rowRoot.modelData.value ? true : false
                     noTooltip: !(rowRoot.modelData.tooltip)
                     tooltipText: rowRoot.modelData.tooltip || ""
-                    onToggled: root._applyChange(rowRoot.modelData, newState)
+                    onToggled: function (newState) { root._applyChange(rowRoot.modelData, newState) }
                 }
             }
             Component {
                 id: dropComp
                 OptDropDown {
-                    options: rowRoot.modelData.options
+                    objectName: "pob.options.dropdown"
+                    options: QmlBridge.toArray(rowRoot.modelData.options)
                     currentVal: rowRoot.modelData.value
-                    onActivated: root._applyChange(rowRoot.modelData, val)
+                    onActivated: function (val) { root._applyChange(rowRoot.modelData, val) }
                 }
             }
             Component {
@@ -288,6 +290,7 @@ PopupBase {
                     spacing: 6
                     Slider {
                         id: sl
+                        objectName: "pob.options.slider"
                         Layout.preferredWidth: 160
                         Layout.preferredHeight: 18
                         property bool _ready: false
@@ -306,9 +309,10 @@ PopupBase {
             Component {
                 id: textComp
                 OptTextField {
+                    objectName: "pob.options.textField"
                     text: rowRoot.modelData.value !== undefined ? String(rowRoot.modelData.value) : ""
                     maxChars: rowRoot.modelData.maxChars || 0
-                    onEdited: root._applyChange(rowRoot.modelData, t)
+                    onEdited: function (t) { root._applyChange(rowRoot.modelData, t) }
                 }
             }
         }
@@ -325,7 +329,7 @@ PopupBase {
 
             Section {
                 label: "Application options"
-                Layout.preferredWidth: 470
+                Layout.preferredWidth: 448
                 Layout.preferredHeight: root._colHeight
                 Layout.alignment: Qt.AlignTop
                 ColumnLayout {
@@ -341,7 +345,7 @@ PopupBase {
 
             Section {
                 label: "Build-related options"
-                Layout.preferredWidth: 470
+                Layout.preferredWidth: 448
                 Layout.preferredHeight: root._colHeight
                 Layout.alignment: Qt.AlignTop
                 ColumnLayout {
@@ -360,11 +364,13 @@ PopupBase {
             Layout.alignment: Qt.AlignHCenter
             spacing: 12
             Button {
+                objectName: "pob.options.saveBtn"
                 label: "Save"
                 implicitWidth: 90
                 onClicked: root.accept()
             }
             Button {
+                objectName: "pob.options.cancelBtn"
                 label: "Cancel"
                 implicitWidth: 90
                 onClicked: root.reject()

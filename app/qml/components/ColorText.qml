@@ -10,6 +10,7 @@ import QtQuick
 // its own starting colour (e.g. a rarity colour for an item name).
 Text {
     id: root
+    objectName: "pob.colortext.root"
 
     property string sourceText: ""
     property color defaultColor: theme.text

@@ -16,6 +16,7 @@ import QtQuick
 // testable state stays possible if a future widget needs one.
 Rectangle {
     id: root
+    objectName: "pob.chrome.surface"
 
     property bool pressed: false
     property bool hovered: false

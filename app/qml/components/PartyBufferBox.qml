@@ -33,6 +33,7 @@ ColumnLayout {
     spacing: 2
 
     Widgets.Label {
+        objectName: "pob.partyBuffer.title"
         label: root.title
         size: 16
     }
@@ -53,7 +54,7 @@ ColumnLayout {
         Layout.preferredHeight: root.editorHeight
         color: theme.background
         border.width: 1
-        border.color: area.activeFocus ? theme.text : theme.border
+        border.color: area.activeFocus ? theme.accent : theme.border
 
         QC.ScrollView {
             anchors.fill: parent
@@ -61,6 +62,7 @@ ColumnLayout {
 
             QC.TextArea {
                 id: area
+                objectName: "pob.partyBuffer.editor"
                 color: theme.text
                 font.family: theme.fontFixed
                 font.pixelSize: 14
@@ -72,6 +74,14 @@ ColumnLayout {
                 onTextChanged: {
                     if (!root._syncing) {
                         editTimer.restart()
+                    }
+                }
+                onActiveFocusChanged: {
+                    if (!activeFocus && editTimer.running) {
+                        editTimer.stop()
+                        if (!root._syncing) {
+                            root.bufferEdited(root.bufferKey, area.text)
+                        }
                     }
                 }
 
@@ -91,12 +101,13 @@ ColumnLayout {
     }
 
     Column {
+        objectName: "pob.partyBuffer.summary"
         visible: !root.showAdvanced && root.hasSummary
         Layout.fillWidth: true
         spacing: 1
 
         Repeater {
-            model: root.summaryText.length > 0 ? root.summaryText.split("\n") : []
+            model: root.summaryText.trim().length > 0 ? root.summaryText.split("\n") : []
             delegate: Widgets.Label {
                 required property string modelData
                 label: modelData

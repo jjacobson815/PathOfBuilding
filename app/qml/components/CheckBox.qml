@@ -9,6 +9,7 @@ import QtQuick.Window
 // receives the CURRENT state, mirroring `DrawTooltip(..., self.state)`).
 Item {
     id: root
+    objectName: "pob.checkbox.root"
 
     property string label: ""
     property bool state: false
@@ -36,6 +37,7 @@ Item {
 
     Chrome {
         id: chrome
+        objectName: "pob.checkbox.chrome"
         anchors.fill: parent
         hovered: root.hovered
         pressed: ma.pressed && ma.containsMouse
@@ -44,6 +46,7 @@ Item {
     }
 
     CheckMark {
+        objectName: "pob.checkbox.mark"
         visible: root.state
         anchors.fill: parent
         anchors.margins: root.boxSize * 0.1
@@ -56,6 +59,7 @@ Item {
 
     Label {
         id: labelText
+        objectName: "pob.checkbox.label"
         visible: root.label.length > 0
         anchors.right: parent.left
         anchors.rightMargin: 5
@@ -74,6 +78,7 @@ Item {
     // Hit area covers the box PLUS the label to its left (legacy IsMouseOver).
     MouseArea {
         id: ma
+        objectName: "pob.checkbox.ma"
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom

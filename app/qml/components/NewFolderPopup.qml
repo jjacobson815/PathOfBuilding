@@ -10,6 +10,7 @@ import QtQuick
 // not the popup class itself).
 TextInputPopup {
     id: root
+    objectName: "pob.newfolder.root"
 
     prompt: "Enter folder name:"
     confirmLabel: "Create"

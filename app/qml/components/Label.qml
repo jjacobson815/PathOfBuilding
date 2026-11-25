@@ -13,6 +13,7 @@ import QtQuick
 // instead, which IS assignable.)
 ColorText {
     id: root
+    objectName: "pob.label.root"
 
     property string label: ""
     property int size: theme.fontSize

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "QmlBridge.js" as QmlBridge
 
 // MainSkillPanel — Phase 3 Part 3.2, the side bar's main-skill selector stack.
 // Ports the eight controls buildMode:Init builds at Build.lua:487-575, driven by
@@ -55,20 +56,21 @@ ColumnLayout {
         if (!d) return
         _syncing = true
         root.payload = d
-        groupDrop.model = d.socketGroups
-        groupDrop.currentIndex = _indexOf(d.socketGroups, "index", d.mainSocketGroup)
-        skillDrop.model = d.skills
-        skillDrop.currentIndex = _indexOf(d.skills, "index", d.mainActiveSkill)
-        partDrop.model = d.parts
-        partDrop.currentIndex = _indexOf(d.parts, "index", d.partIndex)
-        stageEdit.text = d.stages.value
-        mineEdit.text = d.mines.value
-        minionDrop.model = d.minion.list
-        minionDrop.currentIndex = d.minion.isItemSet
-            ? _indexOf(d.minion.list, "itemSetId", d.minion.selected)
-            : _indexOf(d.minion.list, "minionId", d.minion.selected)
-        minionSkillDrop.model = d.minionSkill.list
-        minionSkillDrop.currentIndex = d.minionSkill.index - 1
+        groupDrop.model = QmlBridge.toArray(d.socketGroups)
+        groupDrop.currentIndex = _indexOf(groupDrop.model, "index", d.mainSocketGroup)
+        skillDrop.model = QmlBridge.toArray(d.skills)
+        skillDrop.currentIndex = _indexOf(skillDrop.model, "index", d.mainActiveSkill)
+        partDrop.model = QmlBridge.toArray(d.parts)
+        partDrop.currentIndex = _indexOf(partDrop.model, "index", d.partIndex)
+        stageEdit.text = d.stages ? d.stages.value : ""
+        mineEdit.text = d.mines ? d.mines.value : ""
+        var mList = d.minion ? QmlBridge.toArray(d.minion.list) : []
+        minionDrop.model = mList
+        minionDrop.currentIndex = (d.minion && d.minion.isItemSet)
+            ? _indexOf(mList, "itemSetId", d.minion.selected)
+            : _indexOf(mList, "minionId", d.minion ? d.minion.selected : undefined)
+        minionSkillDrop.model = d.minionSkill ? QmlBridge.toArray(d.minionSkill.list) : []
+        minionSkillDrop.currentIndex = d.minionSkill ? (d.minionSkill.index - 1) : -1
         _syncing = false
     }
 
@@ -94,6 +96,7 @@ ColumnLayout {
 
         DropDownControl {
             id: groupDrop
+            objectName: "pob.mainskill.group"
             Layout.fillWidth: true
             Layout.preferredHeight: 18
             size: theme.fontSize
@@ -112,6 +115,7 @@ ColumnLayout {
 
         DropDownControl {
             id: skillDrop
+            objectName: "pob.mainskill.skill"
             Layout.fillWidth: true
             Layout.preferredHeight: 18
             size: theme.fontSize
@@ -126,6 +130,7 @@ ColumnLayout {
 
         DropDownControl {
             id: partDrop
+            objectName: "pob.mainskill.part"
             Layout.fillWidth: true
             Layout.preferredHeight: 18
             size: theme.fontSize
@@ -144,6 +149,7 @@ ColumnLayout {
             Label { label: "^7Stages:"; size: theme.fontSize }
             EditControl {
                 id: stageEdit
+                objectName: "pob.mainskill.stages"
                 Layout.preferredWidth: 60
                 Layout.preferredHeight: 18
                 isNumeric: true
@@ -163,6 +169,7 @@ ColumnLayout {
             Label { label: "^7Active Mines:"; size: theme.fontSize }
             EditControl {
                 id: mineEdit
+                objectName: "pob.mainskill.mines"
                 Layout.preferredWidth: 60
                 Layout.preferredHeight: 18
                 isNumeric: true
@@ -181,6 +188,7 @@ ColumnLayout {
             visible: root.payload.minion.shown === true
             DropDownControl {
                 id: minionDrop
+                objectName: "pob.mainskill.minion"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 18
                 size: theme.fontSize
@@ -202,6 +210,7 @@ ColumnLayout {
                 // dropdown shows (EquipItemInSet; DB / shared items are copied).
                 DropArea {
                     id: minionItemDrop
+                    objectName: "pob.mainskill.minionDrop"
                     anchors.fill: parent
                     keys: ["Item"]
                     enabled: root.suffix === "" && root.payload.minion.isItemSet === true
@@ -225,6 +234,7 @@ ColumnLayout {
                 }
             }
             Button {
+                objectName: "pob.mainskill.spectres"
                 label: "Manage Spectres..."
                 visible: root.payload.minion.libraryShown === true
                 Layout.preferredWidth: 120
@@ -235,6 +245,7 @@ ColumnLayout {
 
         DropDownControl {
             id: minionSkillDrop
+            objectName: "pob.mainskill.minionSkill"
             Layout.fillWidth: true
             Layout.preferredHeight: 16
             size: theme.fontSize

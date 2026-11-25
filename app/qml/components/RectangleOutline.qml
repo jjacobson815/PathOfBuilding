@@ -8,11 +8,14 @@ import QtQuick
 // `colors` param) maps to `border.color`.
 Rectangle {
     id: root
+    objectName: "pob.outline.root"
 
     property var colors: [1, 1, 1]
     property int stroke: 1
 
     color: "transparent"
     border.width: root.stroke
-    border.color: Qt.rgba(root.colors[0], root.colors[1], root.colors[2], 1)
+    border.color: (root.colors && root.colors.length >= 3)
+        ? Qt.rgba(root.colors[0], root.colors[1], root.colors[2], 1)
+        : theme.border
 }

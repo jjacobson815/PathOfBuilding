@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Window
+import "QmlBridge.js" as QmlBridge
 
 // MasteryPopup — Phase 4 Part 4.4, ports TreeTab:OpenMasteryPopup
 // (TreeTab.lua:1038-1063) + PassiveMasteryControl. One row per effect not
@@ -10,6 +11,7 @@ import QtQuick.Window
 // allocates the node (TreeTab:SaveMasteryPopup). Cancel leaves it untouched.
 PopupBase {
     id: root
+    objectName: "pob.mastery.root"
 
     property int nodeId: -1
     property var tracePath: []
@@ -18,14 +20,16 @@ PopupBase {
     property real listWidth: 300
     signal selectedEffect()
 
+    title: "Select Mastery Effect"
     padding: 8
 
     function openFor(id, trace) {
         const m = luaEngine.invoke("pob_getMasteryEffects", [id])
-        if (!m || !m.effects || m.effects.length === undefined || m.effects.length === 0) return false
+        const eff = QmlBridge.toArray(m ? m.effects : null)
+        if (eff.length === 0) return false
         nodeId = id
         tracePath = trace || []
-        effects = m.effects
+        effects = eff
         let w = 0
         for (let i = 0; i < effects.length; i++) w = Math.max(w, textMetrics.width(16, "VAR", effects[i].label) + 5)
         listWidth = w + 12
@@ -73,6 +77,7 @@ PopupBase {
                 model: root.effects
                 delegate: Rectangle {
                     id: row
+                    objectName: "pob.mastery.row"
                     width: list.width
                     height: 16
                     color: rowMa.containsMouse ? theme.hover : (modelData.selected ? theme.active : "transparent")
@@ -101,6 +106,7 @@ PopupBase {
             }
         }
         Button {
+            objectName: "pob.mastery.cancel"
             Layout.alignment: Qt.AlignHCenter
             implicitWidth: 90; implicitHeight: 20
             label: "Cancel"

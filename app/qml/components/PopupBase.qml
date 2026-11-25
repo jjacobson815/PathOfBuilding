@@ -27,6 +27,7 @@ import QtQuick.Controls
 // that's a rare, brief state (e.g. a Confirm opened from within Options).
 Dialog {
     id: root
+    objectName: "pob.popup.root"
 
     modal: true
     focus: true
@@ -39,6 +40,7 @@ Dialog {
     // to accept() and Escape closes via closePolicy.
     contentItem: FocusScope {
         id: contentScope
+        objectName: "pob.popup.scope"
         implicitWidth: childrenRect.width
         implicitHeight: childrenRect.height
         focus: true
@@ -86,6 +88,7 @@ Dialog {
             border.color: theme.borderStrong
             Text {
                 id: titleLabel
+                objectName: "pob.popup.title"
                 anchors.centerIn: parent
                 text: root.title
                 color: theme.text

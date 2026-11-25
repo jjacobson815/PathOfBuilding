@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "QmlBridge.js" as QmlBridge
 
 // SaveAsPopup — Phase 3 long-tail, ports Build.lua's Save As folder-browser
 // popup (Build.lua:1343-1412): build name with sanitizeBuildName validation
@@ -20,7 +21,7 @@ PopupBase {
     property string sortMode: "NAME"
     property var folders: []
     property int selFolderIndex: -1
-    readonly property int folderCount: Array.isArray(folders) ? folders.length : 0
+    readonly property int folderCount: QmlBridge.toArray(folders).length
     readonly property bool hasFolderSel: selFolderIndex >= 0 && selFolderIndex < folderCount
 
     property var _check: ({ valid: false, exists: false, fullPath: "" })
@@ -35,7 +36,7 @@ PopupBase {
             basePath = st.basePath || ""
             subPath = st.subPath || ""
             sortMode = st.sortMode || "NAME"
-            folders = Array.isArray(st.folders) ? st.folders : []
+            folders = QmlBridge.toArray(st.folders)
             selFolderIndex = -1
             nameEdit.text = st.defaultBuildName || ""
             sortDrop.currentIndex = (sortMode === "EDITED") ? 1 : 0
@@ -61,7 +62,7 @@ PopupBase {
         basePath = st.basePath || ""
         subPath = st.subPath || ""
         sortMode = st.sortMode || "NAME"
-        folders = Array.isArray(st.folders) ? st.folders : []
+        folders = QmlBridge.toArray(st.folders)
         selFolderIndex = -1
         sortDrop.currentIndex = (sortMode === "EDITED") ? 1 : 0
         recheck()
@@ -92,6 +93,7 @@ PopupBase {
             Label { label: "^7Build Name:"; size: 14 }
             EditControl {
                 id: nameEdit
+                objectName: "pob.saveAs.nameEdit"
                 Layout.fillWidth: true
                 placeholder: "Enter build name"
                 onEdited: (t) => root.recheck(t)
@@ -99,6 +101,7 @@ PopupBase {
         }
 
         Label {
+            objectName: "pob.saveAs.validationLabel"
             visible: root._check.exists === true || (!root._check.valid && nameEdit.text.length > 0)
             label: root._check.exists === true
                 ? "^1A build with that name already exists in this folder."
@@ -111,6 +114,7 @@ PopupBase {
             spacing: 6
 
             PathControl {
+                objectName: "pob.saveAs.path"
                 Layout.fillWidth: true
                 basePath: root.basePath
                 subPath: root.subPath
@@ -120,6 +124,7 @@ PopupBase {
             }
 
             Button {
+                objectName: "pob.saveAs.newFolder"
                 implicitWidth: 96; implicitHeight: 24
                 label: "New Folder..."
                 onClicked: {
@@ -130,6 +135,7 @@ PopupBase {
 
             DropDownControl {
                 id: sortDrop
+                objectName: "pob.saveAs.sortDrop"
                 Layout.preferredWidth: 145
                 Layout.preferredHeight: 24
                 model: ["Sort By Name", "Sort By Last Edited"]
@@ -150,7 +156,8 @@ PopupBase {
             focus: true
 
             Keys.onPressed: function (event) {
-                if ((event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) && root.hasFolderSel) {
+                if ((event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace)
+                        && root.hasFolderSel && root.folders[root.selFolderIndex]) {
                     var folderName = root.folders[root.selFolderIndex].name
                     var res = luaEngine.invoke("pob_saveAsDeleteFolder", [root.subPath, folderName])
                     if (!res || !res.ok) {
@@ -165,6 +172,7 @@ PopupBase {
 
             ListView {
                 id: folderList
+                objectName: "pob.saveAs.folderList"
                 anchors.fill: parent
                 anchors.margins: 2
                 model: root.folders
@@ -182,6 +190,7 @@ PopupBase {
                         anchors.right: parent.right
                         anchors.rightMargin: 6
                         anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
                         label: "^xCCCC66[Folder] ^7" + modelData.name
                         size: 14
                     }
@@ -205,12 +214,14 @@ PopupBase {
             spacing: 12
 
             Button {
+                objectName: "pob.saveAs.saveBtn"
                 implicitWidth: 80; implicitHeight: 24
                 label: "Save"
                 controlEnabled: root.canSave
                 onClicked: if (root.canSave) root.accept()
             }
             PopupButton {
+                objectName: "pob.saveAs.cancelBtn"
                 label: "Cancel"
                 onClicked: root.reject()
             }

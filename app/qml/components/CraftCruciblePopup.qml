@@ -15,11 +15,11 @@ CraftPopupBase {
                 readonly property int n: index + 1
                 readonly property int rowY: 45 + index * 22
                 CraftLabel { craft: root; staticLabel: "^7Node " + parent.n + ":"; rx: 95; y: parent.rowY }
-                CraftDrop { craft: root; name: "modSelectNode" + parent.n; x: 100; y: parent.rowY; width: 555; height: 18 }
+                CraftDrop { objectName: "pob.craftCrucible.node" + parent.n; craft: root; name: "modSelectNode" + parent.n; x: 100; y: parent.rowY; width: 555; height: 18 }
             }
         }
 
-        CraftButton { craft: root; name: "save"; tip: true; x: 710 / 2 - 45 - 40; y: 157; width: 80 }
-        CraftButton { craft: root; name: "close"; x: 710 / 2 + 45 - 40; y: 157; width: 80 }
+        CraftButton { objectName: "pob.craftCrucible.saveBtn"; craft: root; name: "save"; tip: true; x: 710 / 2 - 45 - 40; y: 157; width: 80 }
+        CraftButton { objectName: "pob.craftCrucible.closeBtn"; craft: root; name: "close"; x: 710 / 2 + 45 - 40; y: 157; width: 80 }
     }
 }

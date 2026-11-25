@@ -18,6 +18,7 @@ import "StatDiff.js" as StatDiff
 // legacy callbacks resize the popup (Corrupt's Scourge / Roll Ranges).
 PopupBase {
     id: root
+    objectName: "pob.craftBase.root"
 
     property var st: ({})
     readonly property bool live: st && st.open === true
@@ -29,7 +30,7 @@ PopupBase {
 
     function openCraft(kind, slot) {
         const r = _invoke("pob_itemsCraftOpen", [kind, slot])
-        if (!r || r.open !== true) return false
+        if (!r || r.open !== true) { st = ({}); return false }
         st = r
         title = r.title || ""
         open()

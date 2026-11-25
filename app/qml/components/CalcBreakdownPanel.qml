@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QC
 import "StatDiff.js" as StatDiff
+import "QmlBridge.js" as QmlBridge
 
 // CalcBreakdownPanel — Phase 8 Part 8.2.
 // Ports CalcBreakdownControl (CalcBreakdownControl.lua): hover-transient or
@@ -21,8 +22,8 @@ Item {
 
     signal closeRequested()
 
-    readonly property var _sections: (breakdownData && breakdownData.ok && breakdownData.sections && breakdownData.sections.length !== undefined)
-                                     ? breakdownData.sections : []
+    readonly property var _sections: (breakdownData && breakdownData.ok)
+                                     ? QmlBridge.toArray(breakdownData.sections) : []
     readonly property bool hasContent: _sections.length > 0
 
     visible: hasContent
@@ -56,6 +57,7 @@ Item {
     function clearSubTooltips() {
         cellTooltip.hide()
         _previewNodeId = -1
+        _previewCellRect = Qt.rect(0, 0, 0, 0)
     }
 
     onBreakdownDataChanged: clearSubTooltips()
@@ -68,12 +70,13 @@ Item {
     }
 
     function _colWidth(sec, colIdx) {
-        if (!sec || !sec.cols || sec.cols.length === undefined) return 40
-        var col = sec.cols[colIdx]
+        var cols = sec ? QmlBridge.toArray(sec.cols) : []
+        if (cols.length === 0) return 40
+        var col = cols[colIdx]
         var w = textMetrics.width(15, "VAR", col ? (col.label || "") : "") + 10
-        var rows = (sec.rows && sec.rows.length !== undefined) ? sec.rows : []
+        var rows = sec ? QmlBridge.toArray(sec.rows) : []
         for (var r = 0; r < rows.length; r++) {
-            var cells = (rows[r] && rows[r].cells && rows[r].cells.length !== undefined) ? rows[r].cells : []
+            var cells = rows[r] ? QmlBridge.toArray(rows[r].cells) : []
             var c = cells[colIdx]
             if (c && c.text) {
                 var cw = textMetrics.width(12, "VAR", c.text) + 10
@@ -115,10 +118,24 @@ Item {
 
     // Background + 2px border (bright green when pinned, muted green on hover).
     Rectangle {
+        objectName: "pob.breakdown.frame"
         anchors.fill: parent
         color: "#E6000000"
         border.width: 2
         border.color: root.pinned ? "#40FF40" : "#55AA55"
+
+        Button {
+            objectName: "pob.breakdown.closeBtn"
+            visible: root.pinned
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.topMargin: 4
+            anchors.rightMargin: 4
+            width: 18; height: 18
+            label: "x"
+            z: 5
+            onClicked: root.closeRequested()
+        }
 
         // Eat clicks inside the panel so click-away backdrop does not dismiss it.
         MouseArea {
@@ -177,7 +194,7 @@ Item {
         Column {
             id: textCol
             property var sec: ({})
-            readonly property var rawLines: (sec && sec.lines && sec.lines.length !== undefined) ? sec.lines : []
+            readonly property var rawLines: sec ? QmlBridge.toArray(sec.lines) : []
             spacing: 1
             padding: 2
 
@@ -207,7 +224,7 @@ Item {
             radiusValue: sec.radius || 0
             guidePath: sec.guide || ""
             overlayPath: sec.overlay || ""
-            polygonPoints: (sec.polygon && sec.polygon.length !== undefined) ? sec.polygon : []
+            polygonPoints: sec ? QmlBridge.toArray(sec.polygon) : []
         }
     }
 
@@ -217,8 +234,8 @@ Item {
         Column {
             id: tblCol
             property var sec: ({})
-            readonly property var cols: (sec && sec.cols && sec.cols.length !== undefined) ? sec.cols : []
-            readonly property var rows: (sec && sec.rows && sec.rows.length !== undefined) ? sec.rows : []
+            readonly property var cols: sec ? QmlBridge.toArray(sec.cols) : []
+            readonly property var rows: sec ? QmlBridge.toArray(sec.rows) : []
             readonly property var colWidths: {
                 var arr = []
                 for (var i = 0; i < cols.length; i++) arr.push(root._colWidth(sec, i))
@@ -273,7 +290,7 @@ Item {
                 delegate: Item {
                     id: rowItem
                     readonly property var rowObj: tblCol.rows[index] || ({})
-                    readonly property var rowCells: (rowObj.cells && rowObj.cells.length !== undefined) ? rowObj.cells : []
+                    readonly property var rowCells: rowObj ? QmlBridge.toArray(rowObj.cells) : []
                     width: tblCol.totalW
                     height: 16
 
@@ -335,6 +352,7 @@ Item {
 
                                 MouseArea {
                                     id: cellMouse
+                                    objectName: "pob.breakdown.tableCell"
                                     anchors.fill: parent
                                     hoverEnabled: cellBox.hasTip
                                     enabled: cellBox.hasTip
@@ -392,6 +410,7 @@ Item {
 
         TreeViewer {
             id: embeddedTree
+            objectName: "pob.breakdown.treePreview"
             anchors.fill: parent
             anchors.margins: 2
             interactive: false

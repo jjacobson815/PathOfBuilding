@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "QmlBridge.js" as QmlBridge
 
 // SpecManagePopup — Phase 4 Part 4.2, ports TreeTab:OpenSpecManagePopup
 // (TreeTab.lua:656-674) + PassiveSpecListControl. A list of every passive tree
@@ -13,6 +14,7 @@ import QtQuick.Layouts
 // without touching the engine side.
 PopupBase {
     id: root
+    objectName: "pob.specmanage.root"
 
     // Raised after a successful Import so the host can refresh around it.
     signal listEdited()
@@ -32,7 +34,7 @@ PopupBase {
 
     function refresh() {
         var st = luaEngine.invoke("pob_getSpecList", [])
-        specs = (st && st.specs && st.specs.length !== undefined) ? st.specs : []
+        specs = QmlBridge.toArray(st ? st.specs : null)
         if (selIndex >= count) selIndex = count - 1
     }
 
@@ -94,21 +96,21 @@ PopupBase {
 
         RowLayout {
             spacing: 6
-            Button { implicitWidth: 60; implicitHeight: 20; label: "New"
+            Button { objectName: "pob.specmanage.btn_new"; implicitWidth: 60; implicitHeight: 20; label: "New"
                 onClicked: root._askName("new", "", "New Tree") }
-            Button { implicitWidth: 60; implicitHeight: 20; label: "Copy"; controlEnabled: root.hasSel
+            Button { objectName: "pob.specmanage.btn_copy"; implicitWidth: 60; implicitHeight: 20; label: "Copy"; controlEnabled: root.hasSel
                 onClicked: root._askName("copy", root.specs[root.selIndex].title, "Copy Tree") }
-            Button { implicitWidth: 70; implicitHeight: 20; label: "Rename"; controlEnabled: root.hasSel
+            Button { objectName: "pob.specmanage.btn_ren"; implicitWidth: 70; implicitHeight: 20; label: "Rename"; controlEnabled: root.hasSel
                 onClicked: root._askName("rename", root.specs[root.selIndex].title, "Rename Tree") }
-            Button { implicitWidth: 60; implicitHeight: 20; label: "Delete"
+            Button { objectName: "pob.specmanage.btn_del"; implicitWidth: 60; implicitHeight: 20; label: "Delete"
                 controlEnabled: root.hasSel && root.count > 1
                 onClicked: deleteConfirm.open() }
             Item { Layout.fillWidth: true }
-            Button { implicitWidth: 44; implicitHeight: 20; label: "Up"
+            Button { objectName: "pob.specmanage.btn_up"; implicitWidth: 44; implicitHeight: 20; label: "Up"
                 controlEnabled: root.hasSel && root.selIndex > 0
                 tooltipText: "Move the selected tree up"
                 onClicked: root._move(-1) }
-            Button { implicitWidth: 50; implicitHeight: 20; label: "Down"
+            Button { objectName: "pob.specmanage.btn_down"; implicitWidth: 50; implicitHeight: 20; label: "Down"
                 controlEnabled: root.hasSel && root.selIndex < root.count - 1
                 tooltipText: "Move the selected tree down"
                 onClicked: root._move(1) }
@@ -136,7 +138,11 @@ PopupBase {
                     Label {
                         anchors.left: parent.left
                         anchors.leftMargin: 4
+                        anchors.right: parent.right
+                        anchors.rightMargin: 4
                         anchors.verticalCenter: parent.verticalCenter
+                        clip: true
+                        elide: Text.ElideRight
                         label: modelData.listLabel
                         size: 14
                     }

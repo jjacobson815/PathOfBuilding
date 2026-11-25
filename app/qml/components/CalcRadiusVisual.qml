@@ -25,7 +25,8 @@ Rectangle {
 
     function _fileUrl(p) {
         if (!p || p.length === 0) return ""
-        return (p.charAt(0) === "/" ? "file://" : "file:///") + p
+        var norm = String(p).replace(/\\/g, "/")
+        return (norm.charAt(0) === "/" ? "file://" : "file:///") + norm
     }
 
     onPolygonPointsChanged: aoeCanvas.requestPaint()
@@ -42,6 +43,7 @@ Rectangle {
 
         Image {
             id: guideImg
+            objectName: "pob.radiusVisual.guide"
             anchors.fill: parent
             source: root._fileUrl(root.guidePath)
             opacity: 0.75
@@ -51,6 +53,7 @@ Rectangle {
 
         Canvas {
             id: aoeCanvas
+            objectName: "pob.radiusVisual.canvas"
             anchors.fill: parent
             onPaint: {
                 var ctx = getContext("2d")
@@ -74,6 +77,7 @@ Rectangle {
 
         Image {
             id: uiImg
+            objectName: "pob.radiusVisual.ui"
             anchors.fill: parent
             source: root._fileUrl(root.overlayPath)
             fillMode: Image.Stretch

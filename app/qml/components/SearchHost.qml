@@ -16,6 +16,7 @@ import QtQuick
 // literal, case-insensitive substring search.
 QtObject {
     id: root
+    objectName: "pob.searchhost.root"
 
     property var listAccessor: null    // function(): array
     property var valueAccessor: null   // function(entry): string

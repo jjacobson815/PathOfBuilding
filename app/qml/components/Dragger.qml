@@ -17,6 +17,7 @@ import QtQuick.Window
 // bail-out.
 Item {
     id: root
+    objectName: "pob.dragger.root"
 
     property string label: ""
     property url imageSource: ""
@@ -40,6 +41,7 @@ Item {
     implicitHeight: 24
 
     Chrome {
+        objectName: "pob.dragger.chrome"
         anchors.fill: parent
         hovered: root.hovered
         pressed: ma.pressed && ma.containsMouse
@@ -61,6 +63,7 @@ Item {
     // DrawImage/DrawImageQuad fractional coordinates exactly.
     Canvas {
         id: glyph
+        objectName: "pob.dragger.glyph"
         visible: root.isGlyph
         anchors.fill: parent
 
@@ -117,6 +120,7 @@ Item {
 
     MouseArea {
         id: ma
+        objectName: "pob.dragger.ma"
         anchors.fill: parent
         hoverEnabled: true
         enabled: root.controlEnabled && !root.locked

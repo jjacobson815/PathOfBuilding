@@ -3,6 +3,7 @@
 #include "selftest_checks.h"
 #include "luabridge.h"
 #include "TextMetrics.h"
+#include "TlsCa.h"
 
 #include <QDebug>
 #ifndef POB_NO_GUI
@@ -82,7 +83,8 @@ bool LuaEngine::init(const QString& srcDir, const QString& runtimeDir, const QSt
     m_userDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     if (m_userDir.isEmpty())
         m_userDir = QDir::homePath() + "/Documents";
-    QDir().mkpath(m_userDir);
+    if (!QDir(m_userDir).exists())
+        QDir().mkpath(m_userDir);
 
     // Phase 1.2a: create the .tgf-backed text-measurement engine before the host
     // bootstrap runs, so DrawStringWidth/DrawStringCursorIndex are real from the
@@ -357,7 +359,7 @@ int LuaEngine::l_pob_makeDir(lua_State* L) {
         return 2;
     }
     QString path = QString::fromUtf8(lua_tostring(L, 1));
-    if (QDir().mkpath(path)) {
+    if (QDir(path).exists() || QDir().mkpath(path)) {
         lua_pushboolean(L, 1);
         return 1;
     }
@@ -581,6 +583,8 @@ int LuaEngine::l_pob_http(lua_State* L) {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, ssl_verifypeer ? 1L : 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, ssl_verifyhost ? 2L : 0L);
+    if (ssl_verifypeer)
+        pob::configureTlsCa(curl);
     if (!proxy.empty())
         curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
     if (ipresolve == 1)

@@ -10,6 +10,7 @@ import QtQuick
 // `modFlag` mirrors legacy's dirty-flag (set true by addUndoState).
 QtObject {
     id: root
+    objectName: "pob.undohandler.root"
 
     property var createState: function () { return null; }
     property var restoreState: function (state) {};

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
+import "QmlBridge.js" as QmlBridge
 
 // TopBar — Phase 3, ports buildMode's anchorTopBar control block
 // (Modules/Build.lua:121-308): `toggleSideBar` / `back` / `save` / `saveAs`,
@@ -56,7 +57,7 @@ Rectangle {
     property var classList: ({ classes: [], secondaryAscendancies: [] })
     property var loadoutState: ({ dropdown: [] })
     readonly property var loadoutEntries:
-        Array.isArray(loadoutState.dropdown) ? loadoutState.dropdown : []
+        QmlBridge.toArray(loadoutState.dropdown)
 
     // Every read below goes through these guards: getShellState()/getClassList()
     // both return null in LIST mode (no build), and a null payload must degrade
@@ -75,9 +76,8 @@ Rectangle {
     readonly property string pointsStr: points.str ? points.str : ""
     readonly property string pointsTooltip: points.tooltip ? points.tooltip : ""
 
-    readonly property var classes: classList.classes ? classList.classes : []
-    readonly property var secondaries:
-        classList.secondaryAscendancies ? classList.secondaryAscendancies : []
+    readonly property var classes: QmlBridge.toArray(classList.classes)
+    readonly property var secondaries: QmlBridge.toArray(classList.secondaryAscendancies)
     readonly property var curClass: (function () {
         var cs = root.classes
         for (var i = 0; i < cs.length; i++)
@@ -85,7 +85,7 @@ Rectangle {
         return null
     })()
     readonly property var ascendancies:
-        (curClass && curClass.ascendancies) ? curClass.ascendancies : []
+        (curClass && curClass.ascendancies) ? QmlBridge.toArray(curClass.ascendancies) : []
 
     // Window handle, for tooltip viewport math and for reparenting the confirm
     // dialog out of this 32px strip.
@@ -241,6 +241,7 @@ Rectangle {
         // ===== left group =====
 
         Button {
+            objectName: "pob.topbar.collapse"
             visible: root.hasBuild
             label: root.collapsed ? ">>" : "<<"
             Layout.preferredWidth: root._btnWidth(">>")
@@ -255,6 +256,7 @@ Rectangle {
         }
 
         Button {
+            objectName: "pob.topbar.back"
             visible: root.hasBuild
             label: "<< Back"
             controlEnabled: root.hasBuild
@@ -268,6 +270,7 @@ Rectangle {
         }
 
         Button {
+            objectName: "pob.topbar.save"
             visible: root.hasBuild
             label: "Save"
             controlEnabled: root.hasBuild && root.shell.canSave !== false
@@ -291,6 +294,7 @@ Rectangle {
         }
 
         Button {
+            objectName: "pob.topbar.saveAs"
             visible: root.hasBuild
             label: "Save As"
             controlEnabled: root.hasBuild
@@ -306,6 +310,7 @@ Rectangle {
         Item {
             visible: root.hasBuild
             id: namePlate
+            objectName: "pob.topbar.namePlate"
 
             readonly property string displayName: root.buildName.length > 0 ? root.buildName
                                                                             : "Unnamed build"
@@ -365,6 +370,7 @@ Rectangle {
         Rectangle {
             visible: root.hasBuild
             id: pointsPlate
+            objectName: "pob.topbar.points"
 
             Layout.preferredHeight: theme.controlSize
             Layout.preferredWidth: pointsLabel.width + 2 * theme.space2
@@ -395,6 +401,7 @@ Rectangle {
         Button {
             visible: root.hasBuild
             id: levelModeButton
+            objectName: "pob.topbar.levelMode"
             label: root.shell.levelAutoMode ? "Auto" : "Manual"
             controlEnabled: root.hasBuild
             Layout.preferredWidth: root._btnWidth("Manual")
@@ -411,6 +418,7 @@ Rectangle {
         EditControl {
             visible: root.hasBuild
             id: levelEdit
+            objectName: "pob.topbar.level"
 
             Layout.preferredWidth: 50
             Layout.preferredHeight: theme.controlSize
@@ -435,6 +443,7 @@ Rectangle {
         DropDownControl {
             visible: root.hasBuild
             id: classDrop
+            objectName: "pob.topbar.class"
 
             Layout.preferredWidth: 95
             Layout.preferredHeight: theme.controlSize
@@ -450,6 +459,7 @@ Rectangle {
         DropDownControl {
             visible: root.hasBuild
             id: ascendDrop
+            objectName: "pob.topbar.ascend"
 
             Layout.preferredWidth: 120
             Layout.preferredHeight: theme.controlSize
@@ -470,6 +480,7 @@ Rectangle {
         DropDownControl {
             visible: root.hasBuild
             id: secondaryDrop
+            objectName: "pob.topbar.secondary"
 
             Layout.preferredWidth: 150
             Layout.preferredHeight: theme.controlSize
@@ -490,6 +501,7 @@ Rectangle {
         DropDownControl {
             visible: root.hasBuild
             id: loadoutDrop
+            objectName: "pob.topbar.loadouts"
 
             Layout.preferredWidth: 145
             Layout.preferredHeight: theme.controlSize

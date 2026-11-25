@@ -5,6 +5,7 @@ import QtQuick.Layouts
 // banner driven by pob_update.lua via luaEngine.onUpdateChanged.
 Item {
     id: root
+    objectName: "pob.updatebanner.root"
 
     property var updateState: ({})
 
@@ -50,7 +51,9 @@ Item {
             spacing: theme.space2
 
             Label {
+                objectName: "pob.updatebanner.msg"
                 Layout.fillWidth: true
+                elide: Text.ElideRight
                 size: theme.fontSize
                 label: {
                     var cur = (root.updateState && root.updateState.currentVersion) ? root.updateState.currentVersion : "?"
@@ -60,6 +63,7 @@ Item {
             }
 
             Button {
+                objectName: "pob.updatebanner.open"
                 label: "Open Release Page"
                 Layout.preferredWidth: 136
                 Layout.preferredHeight: 20
@@ -74,6 +78,7 @@ Item {
             }
 
             Button {
+                objectName: "pob.updatebanner.dismiss"
                 label: "Dismiss"
                 Layout.preferredWidth: 68
                 Layout.preferredHeight: 20

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "QmlBridge.js" as QmlBridge
 
 // PowerReportPanel — Phase 4 Part 4.3, ports PowerReportListControl
 // (Classes/PowerReportListControl.lua) over pob_getPowerReport rows
@@ -9,6 +10,7 @@ import QtQuick.Layouts
 // re-filter; clicking a row raises nodeSelected(id) (legacy jumps the tree).
 Rectangle {
     id: root
+    objectName: "pob.powerreport.root"
 
     signal nodeSelected(int nodeId)
 
@@ -33,7 +35,7 @@ Rectangle {
 
     // ReList (:98-120) then ReSort (:58-96).
     function relist() {
-        const rows = (report.rows && report.rows.length !== undefined) ? report.rows : []
+        const rows = QmlBridge.toArray(report ? report.rows : null)
         const allocated = filterIndex === 2
         const showClusters = filterIndex === 1
         const out = []
@@ -75,6 +77,7 @@ Rectangle {
             }
             Item { Layout.fillWidth: true }
             CheckBox {
+                objectName: "pob.powerreport.chk_mast"
                 Layout.preferredHeight: 18
                 Layout.preferredWidth: 18
                 Layout.leftMargin: labelWidth + 6
@@ -83,6 +86,7 @@ Rectangle {
                 onToggled: function (s) { root.showMasteries = s; root.relist() }
             }
             DropDownControl {
+                objectName: "pob.powerreport.filter"
                 Layout.preferredWidth: 200
                 Layout.preferredHeight: 18
                 model: ["Show Unallocated", "Show Unallocated & Clusters", "Show Allocated"]
@@ -97,6 +101,7 @@ Rectangle {
             Repeater {
                 model: ["Type", "Node Name", root.report.statLabel || "Power", "Points", "Per Point"]
                 delegate: Rectangle {
+                    objectName: "pob.powerreport.hdr"
                     width: root.colWidth(index)
                     height: 18
                     color: root.sortCol === index + 1 ? theme.active : theme.titleBar
@@ -132,6 +137,7 @@ Rectangle {
                 }
                 MouseArea {
                     id: rowMa
+                    objectName: "pob.powerreport.row"
                     anchors.fill: parent
                     hoverEnabled: true
                     onClicked: if (modelData.id !== undefined) root.nodeSelected(modelData.id)

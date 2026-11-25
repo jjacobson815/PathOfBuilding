@@ -7,15 +7,16 @@ import QtQuick
 // the text gets a real box and Qt's own right alignment.
 Label {
     id: root
+    objectName: "pob.craftLabel.root"
 
     property var craft: null
     property string name: ""
     property string staticLabel: ""
     property real rx: 95
-    readonly property var r: (craft && name !== "") ? craft.rec(name) : ({})
+    readonly property var r: (craft && typeof craft.rec === "function" && name !== "") ? craft.rec(name) : ({})
 
     x: rx - width
-    width: 300
+    width: rx > 0 ? Math.min(300, rx) : 300
     horizontalAlignment: Text.AlignRight
     size: 16
     label: name !== "" ? (r.label || "") : staticLabel

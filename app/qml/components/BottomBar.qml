@@ -35,18 +35,21 @@ Item {
         spacing: 4
 
         Button {
+            objectName: "pob.bottombar.options"
             label: "Options"
             Layout.preferredWidth: 68
             Layout.preferredHeight: 20
             onClicked: root.optionsRequested()
         }
         Button {
+            objectName: "pob.bottombar.about"
             label: "About"
             Layout.preferredWidth: 68
             Layout.preferredHeight: 20
             onClicked: root.aboutRequested("")
         }
         Button {
+            objectName: "pob.bottombar.update"
             label: "Check for Update"
             Layout.preferredWidth: 140
             Layout.preferredHeight: 20
@@ -56,11 +59,13 @@ Item {
         ColumnLayout {
             spacing: 0
             ColorText {
+                objectName: "pob.bottombar.fork"
                 sourceText: "^8PoB Community Fork"
                 defaultColor: theme.text
                 font.pixelSize: theme.fontSizeSm
             }
             ColorText {
+                objectName: "pob.bottombar.version"
                 sourceText: "^8" + (root.versionBranch === "beta" ? "Beta: " : "Version: ") +
                             root.versionNumber + (root.versionBranch === "dev" ? " (Dev)" : "")
                 defaultColor: theme.text
@@ -68,6 +73,7 @@ Item {
             }
         }
         ColorText {
+            objectName: "pob.bottombar.devMode"
             visible: root.devMode
             sourceText: "^1Dev Mode"
             defaultColor: theme.danger

@@ -11,6 +11,7 @@ import QtQuick.Layouts
 // legacy's Cancel button (`function() end`).
 PopupBase {
     id: root
+    objectName: "pob.confirm.root"
 
     property string message: ""
     property string confirmLabel: "Confirm"
@@ -39,15 +40,18 @@ PopupBase {
             spacing: 10
 
             PopupButton {
+                objectName: "pob.confirm.btn_confirm"
                 label: root.confirmLabel
                 onClicked: root.accept()
             }
             PopupButton {
+                objectName: "pob.confirm.btn_extra"
                 label: root.extraLabel
                 visible: root.extraLabel !== ""
                 onClicked: root.extraClicked()
             }
             PopupButton {
+                objectName: "pob.confirm.btn_cancel"
                 label: "Cancel"
                 onClicked: root.reject()
             }

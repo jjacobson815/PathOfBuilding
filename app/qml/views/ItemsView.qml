@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Window
 import "../components" as Widgets
 import "../components/StatDiff.js" as StatDiff
+import "../components/QmlBridge.js" as QmlBridge
 
 // ITEMS view — Phase 6. Bridge: app/lua/pob_items.lua over the LIVE itemsTab.
 // STATE MODEL: `st` = pob_itemsGetState() (sets + slot panel) and `lists` =
@@ -33,17 +34,17 @@ Item {
     // State
     // ------------------------------------------------------------------
     property var st: ({})
-    readonly property var sets: st && st.sets && st.sets.length !== undefined ? st.sets : []
-    readonly property var allSlots: st && st.slots && st.slots.length !== undefined ? st.slots : []
+    readonly property var sets: QmlBridge.toArray(st ? st.sets : null)
+    readonly property var allSlots: QmlBridge.toArray(st ? st.slots : null)
     // Visible rows: legacy shows a slot when its shown() is true (which also
     // hides inactive sockets / abyssal sockets the item does not have).
     property var shownSlots: []
     property var specList: ({})
     property var lists: ({})
-    readonly property var itemRows: lists.items && lists.items.length !== undefined ? lists.items : []
-    readonly property var sharedRows: lists.shared && lists.shared.length !== undefined ? lists.shared : []
+    readonly property var itemRows: QmlBridge.toArray(lists ? lists.items : null)
+    readonly property var sharedRows: QmlBridge.toArray(lists ? lists.shared : null)
     readonly property var display: lists.display ? lists.display : ({ shown: false })
-    readonly property var displayLines: display.lines && display.lines.length !== undefined ? display.lines : []
+    readonly property var displayLines: QmlBridge.toArray(display ? display.lines : null)
     property string hoveredSlotName: ""
     property int hoveredSlotItemId: 0
     property bool _pending: false
@@ -75,8 +76,10 @@ Item {
         specList = sp ? sp : ({})
         setSelect.model = sets
         setSelect.currentIndex = (st.activeSet || 1) - 1
-        const specs = (specList.specs && specList.specs.length !== undefined) ? specList.specs : []
-        specSelect.model = specs.map(function (x) { return x.label })
+        const specs = QmlBridge.toArray(specList ? specList.specs : null)
+        const specLabels = []
+        for (let i = 0; i < specs.length; i++) specLabels.push(specs[i].label)
+        specSelect.model = specLabels
         specSelect.currentIndex = (specList.active || 1) - 1
         const wasShown = display.shown === true
         const l = call("pob_itemsGetLists")
@@ -97,7 +100,11 @@ Item {
         p.openCraft(kind, slot)
     }
     // Absolute paths from the bridge; Windows ones ("C:/...") need a third slash.
-    function fileUrl(p) { return p ? (p.charAt(0) === "/" ? "file://" : "file:///") + p : "" }
+    function fileUrl(p) {
+        if (!p) return ""
+        const s = String(p).replace(/\\/g, "/")
+        return (s.charAt(0) === "/" ? "file://" : "file:///") + s
+    }
     function snapRight() { Qt.callLater(function () { hflick.contentX = Math.max(0, hflick.contentWidth - hflick.width) }) }
 
     // ItemListControl:OnSelDelete — ask only when the item is in use.
@@ -194,6 +201,7 @@ Item {
             }
             Widgets.DropDownControl {
                 id: setSelect
+                objectName: "pob.items.drop_set"
                 x: 96; y: 8
                 width: 216; height: 20
                 controlEnabled: itemsView.sets.length > 1
@@ -205,6 +213,7 @@ Item {
                 onSelected: function (i) { itemsView.call("pob_itemsSetActiveSet", [i + 1]) }
             }
             Widgets.Button {
+                objectName: "pob.items.btn_manage_set"
                 anchors.left: setSelect.right
                 anchors.leftMargin: 4
                 anchors.verticalCenter: setSelect.verticalCenter
@@ -229,6 +238,7 @@ Item {
             }
             Widgets.Button {
                 id: ws1
+                objectName: "pob.items.btn_weapon_set_1"
                 x: 96 + 310 - 20 - 18; y: 42
                 width: 18; height: 18
                 label: "I"
@@ -237,6 +247,7 @@ Item {
             }
             Widgets.Button {
                 id: ws2
+                objectName: "pob.items.btn_weapon_set_2"
                 x: 96 + 310 - 18; y: 42
                 width: 18; height: 18
                 label: "II"
@@ -269,12 +280,14 @@ Item {
                             readonly property var rec: itemsView.shownSlots[index]
                             width: slotCol.width; height: 20
                             function selIdx() {
-                                const o = rec.options
+                                const o = rec ? QmlBridge.toArray(rec.options) : []
+                                if (o.length === 0) return -1
                                 for (let i = 0; i < o.length; i++) if (o[i].id === rec.selItemId) return i
                                 return 0
                             }
                             function push() {
-                                dd.model = rec.options
+                                const o = rec ? QmlBridge.toArray(rec.options) : []
+                                dd.model = o
                                 dd.currentIndex = selIdx()
                                 if (rec.isFlask) activeBox.state = rec.flaskActive
                                 if (dd.hovered) {
@@ -295,6 +308,7 @@ Item {
                             }
                             Widgets.CheckBox {
                                 id: activeBox
+                                objectName: "pob.items.check_flask_active"
                                 visible: !!(rec && rec.isFlask)
                                 anchors.right: dd.left
                                 anchors.rightMargin: 2
@@ -306,6 +320,7 @@ Item {
                             }
                             Widgets.DropDownControl {
                                 id: dd
+                                objectName: "pob.items.drop_slot"
                                 x: 96; width: 310; height: 20
                                 controlEnabled: !!(rec && rec.options.length > 1)
                                 tooltipFunc: function (tt) {
@@ -364,12 +379,14 @@ Item {
                         }
                         Widgets.DropDownControl {
                             id: specSelect
+                            objectName: "pob.items.drop_spec"
                             x: 96; y: 8
                             width: 216; height: 20
                             controlEnabled: (specSelect.model ? specSelect.model.length : 0) > 1
                             onSelected: function (i) { itemsView.call("pob_setActiveSpec", [i + 1]) }
                         }
                         Widgets.Button {
+                            objectName: "pob.items.btn_manage_spec"
                             x: 96 + 216 + 4; y: 8
                             width: 90; height: 20
                             label: "Manage..."
@@ -385,6 +402,7 @@ Item {
         // --------------------------------------------------------------
         Widgets.ItemListBox {
             id: itemList
+            objectName: "pob.items.list_all_items"
             x: 430; y: 8
             width: 360; height: 20 + 308
             title: "^7All items:"
@@ -408,18 +426,19 @@ Item {
             anchors.right: itemList.right
             y: itemList.y
             spacing: 4
-            Widgets.Button { width: 60; height: 18; label: "Sort"
+            Widgets.Button { objectName: "pob.items.btn_sort"; width: 60; height: 18; label: "Sort"
                 onClicked: itemsView.call("pob_itemsSortList") }
-            Widgets.Button { width: 100; height: 18; label: "Delete Unused"; controlEnabled: itemList.count > 0
+            Widgets.Button { objectName: "pob.items.btn_delete_unused"; width: 100; height: 18; label: "Delete Unused"; controlEnabled: itemList.count > 0
                 onClicked: itemsView.call("pob_itemsDeleteUnused") }
-            Widgets.Button { width: 70; height: 18; label: "Delete All"; controlEnabled: itemList.count > 0
+            Widgets.Button { objectName: "pob.items.btn_delete_all"; width: 70; height: 18; label: "Delete All"; controlEnabled: itemList.count > 0
                 onClicked: deleteAllConfirm.open() }
-            Widgets.Button { width: 60; height: 18; label: "Delete"; controlEnabled: itemList.hasSel
+            Widgets.Button { objectName: "pob.items.btn_delete_item"; width: 60; height: 18; label: "Delete"; controlEnabled: itemList.hasSel
                 onClicked: itemsView.askDelete(itemsView.itemRows[itemList.selIndex].key) }
         }
 
         Widgets.ItemDBPanel {
             id: dbPanel
+            objectName: "pob.items.panel_db"
             x: 430; y: itemList.y + itemList.height + 14
             width: 360
             height: hflick.height - y - 14
@@ -454,12 +473,13 @@ Item {
                         "If there's 2 slots an item can go in, ",
                         "holding Shift will put it in the second."
                     ]
-                    delegate: Widgets.Label { label: "^7" + modelData; size: 16 }
+                    delegate: Widgets.Label { label: modelData !== "" ? ("^7" + modelData) : " "; size: 16 }
                 }
             }
 
             // Craft / create buttons (ItemsTab.lua:296-304), shown with no display item.
             Widgets.Button {
+                objectName: "pob.items.btn_craft_item"
                 visible: !itemsView.display.shown
                 x: 0; y: 8
                 width: 120; height: 20
@@ -467,6 +487,7 @@ Item {
                 onClicked: craftNewPopup.openFresh()
             }
             Widgets.Button {
+                objectName: "pob.items.btn_create_custom"
                 visible: !itemsView.display.shown
                 x: 128; y: 8
                 width: 120; height: 20
@@ -484,19 +505,19 @@ Item {
                 width: Math.max(470, tipCol.width + 16)
                 height: parent.height - 8
                 readonly property var ed: itemsView.display.editor ? itemsView.display.editor : ({})
-                readonly property var variants: ed.variants && ed.variants.length !== undefined ? ed.variants : []
-                readonly property var sockets: ed.sockets && ed.sockets.length !== undefined ? ed.sockets : []
-                readonly property var socketList: ed.socketList && ed.socketList.length !== undefined ? ed.socketList : []
+                readonly property var variants: QmlBridge.toArray(ed ? ed.variants : null)
+                readonly property var sockets: QmlBridge.toArray(ed ? ed.sockets : null)
+                readonly property var socketList: QmlBridge.toArray(ed ? ed.socketList : null)
                 readonly property var influence: ed.influence ? ed.influence : ({})
                 readonly property var quality: ed.quality ? ed.quality : ({})
                 readonly property var catalyst: ed.catalyst ? ed.catalyst : ({})
                 readonly property var cluster: ed.cluster ? ed.cluster : ({})
                 readonly property var affix: ed.affix ? ed.affix : ({})
-                readonly property var affixRows: affix.rows && affix.rows.length !== undefined ? affix.rows : []
+                readonly property var affixRows: QmlBridge.toArray(affix ? affix.rows : null)
                 readonly property var custom: ed.custom ? ed.custom : ({})
-                readonly property var customRows: custom.rows && custom.rows.length !== undefined ? custom.rows : []
+                readonly property var customRows: QmlBridge.toArray(custom ? custom.rows : null)
                 readonly property var range: ed.range ? ed.range : ({})
-                readonly property var stackedRows: range.stacked && range.stacked.length !== undefined ? range.stacked : []
+                readonly property var stackedRows: QmlBridge.toArray(range ? range.stacked : null)
 
                 // Sliders send coalesced (Qt.callLater): every value re-crafts the
                 // item and rebuilds its tooltip, so one send per event-loop pass.
@@ -564,22 +585,26 @@ Item {
                 Row {
                     spacing: 8
                     Widgets.Button {
+                        objectName: "pob.items.btn_add_display"
                         width: 100; height: 20
                         label: itemsView.display.addLabel || "Add to build"
                         onClicked: itemsView.call("pob_itemsAddDisplayItem")
                     }
                     Widgets.Button {
+                        objectName: "pob.items.btn_edit_display"
                         width: 60; height: 20
                         label: "Edit..."
                         onClicked: textPopup.openFor(false)
                     }
                     Widgets.Button {
+                        objectName: "pob.items.btn_cancel_display"
                         width: 60; height: 20
                         label: "Cancel"
                         onClicked: itemsView.call("pob_itemsCloseDisplayItem")
                     }
                     // Buy similar is deferred to a future release (v1.1 trade integration).
                     Widgets.Button {
+                        objectName: "pob.items.btn_buy_similar"
                         width: 100; height: 20
                         label: "Buy similar"
                         controlEnabled: false
@@ -891,6 +916,7 @@ Item {
                         }
                         Widgets.Slider {
                             id: rangeSlider
+                            objectName: "pob.items.slider_range"
                             property bool pushing: false
                             property real pending: -1
                             visible: rangeSec.rg.sliderShown === true

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QC
 import "../components" as Widgets
+import "../components/QmlBridge.js" as QmlBridge
 
 // CONFIG view — Phase 7, ports src/Classes/ConfigTab.lua over the live
 // build.configTab via app/lua/pob_config.lua.
@@ -25,9 +26,9 @@ Item {
     property string searchQuery: ""
     property bool _pending: false
 
-    readonly property var sets: (st && st.sets && st.sets.length !== undefined) ? st.sets : []
-    readonly property var sections: (st && st.sections && st.sections.length !== undefined) ? st.sections : []
-    readonly property var customMods: (st && st.customMods && st.customMods.length !== undefined) ? st.customMods : []
+    readonly property var sets: QmlBridge.toArray(st ? st.sets : null)
+    readonly property var sections: QmlBridge.toArray(st ? st.sections : null)
+    readonly property var customMods: QmlBridge.toArray(st ? st.customMods : null)
     readonly property bool toggleConfigs: !!(st && st.toggleConfigs)
 
     // Compute number of 360px columns that fit in the viewport (legacy: (w - 10) / 370).
@@ -131,6 +132,7 @@ Item {
 
         Widgets.DropDownControl {
             id: setSelect
+            objectName: "pob.config.drop_set"
             x: 82
             y: 8
             width: 210
@@ -145,6 +147,7 @@ Item {
 
         Widgets.Button {
             id: manageBtn
+            objectName: "pob.config.btn_manage_set"
             x: 296
             y: 8
             width: 90
@@ -156,6 +159,7 @@ Item {
         // Row 2: Search + Show All Configurations toggle
         Widgets.EditControl {
             id: searchEdit
+            objectName: "pob.config.input_search"
             x: 10
             y: 34
             width: 360
@@ -181,6 +185,7 @@ Item {
 
         Widgets.Button {
             id: showAllBtn
+            objectName: "pob.config.btn_show_all"
             x: 380
             y: 34
             width: 210
@@ -199,7 +204,7 @@ Item {
         anchors.right: vScroll.left
         anchors.topMargin: 4
         contentWidth: Math.max(width, colRow.implicitWidth + 20)
-        contentHeight: colRow.implicitHeight + 28
+        contentHeight: Math.max(colRow.implicitHeight + 40, 100)
         boundsBehavior: Flickable.StopAtBounds
         clip: true
         onContentYChanged: if (Math.abs(vScroll.offset - contentY) > 1) vScroll.setOffset(contentY)
@@ -228,7 +233,7 @@ Item {
                             readonly property string secName: sec && sec.name ? String(sec.name) : ""
                             readonly property bool secCollapsed: !!(sec && sec.collapsed)
                             readonly property bool isCustom: !!(sec && sec.isCustomMods)
-                            readonly property var secItems: (sec && sec.items && sec.items.length !== undefined) ? sec.items : []
+                            readonly property var secItems: QmlBridge.toArray(sec ? sec.items : null)
 
                             width: 360
                             height: secCollapsed ? 22 : Math.max(36, secContent.implicitHeight + 22)
@@ -258,6 +263,7 @@ Item {
 
                                     // Custom Modifiers blocks
                                     Widgets.Button {
+                                        objectName: secWrapper.isCustom ? "pob.config.btn_add_custom_mod" : ""
                                         visible: secWrapper.isCustom
                                         x: 4
                                         width: 120
@@ -290,6 +296,7 @@ Item {
                                                 width: parent.width
 
                                                 Widgets.Button {
+                                                    objectName: "pob.config.btn_delete_mod_" + cmBlock.blkIdx
                                                     width: 20
                                                     height: 18
                                                     label: "^1X"
@@ -298,6 +305,7 @@ Item {
 
                                                 Widgets.EditControl {
                                                     id: cmTitle
+                                                    objectName: "pob.config.input_mod_title_" + cmBlock.blkIdx
                                                     width: 294
                                                     height: 18
                                                     size: 14
@@ -308,6 +316,7 @@ Item {
 
                                                 Widgets.CheckBox {
                                                     id: cmEnable
+                                                    objectName: "pob.config.check_mod_enable_" + cmBlock.blkIdx
                                                     width: 18
                                                     height: 18
                                                     onToggled: function(newState) {
@@ -332,6 +341,7 @@ Item {
 
                                                     QC.TextArea {
                                                         id: cmArea
+                                                        objectName: "pob.config.text_mod_body_" + cmBlock.blkIdx
                                                         color: theme.text
                                                         font.pixelSize: 13
                                                         wrapMode: TextEdit.Wrap
@@ -339,6 +349,11 @@ Item {
                                                         background: null
                                                         onActiveFocusChanged: {
                                                             if (!activeFocus && cmBlock.blk && text !== (cmBlock.blk.text || "")) {
+                                                                root.call("pob_configUpdateCustomMod", [cmBlock.blkIdx, null, null, text])
+                                                            }
+                                                        }
+                                                        Component.onDestruction: {
+                                                            if (cmBlock.blk && text !== (cmBlock.blk.text || "")) {
                                                                 root.call("pob_configUpdateCustomMod", [cmBlock.blkIdx, null, null, text])
                                                             }
                                                         }
@@ -352,6 +367,7 @@ Item {
 
                             // Collapse toggle '-' / '+' on top-right section border (ConfigTab.lua:285)
                             Widgets.Button {
+                                objectName: "pob.config.sec_collapse_" + secWrapper.secName
                                 anchors.top: parent.top
                                 anchors.right: parent.right
                                 anchors.topMargin: -7

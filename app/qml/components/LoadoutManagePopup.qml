@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "QmlBridge.js" as QmlBridge
 
 // LoadoutManagePopup — Phase 3 long-tail, ports BuildSetListControl.lua:
 // loadout list with (Current) marker, double-click activate, F2 rename,
@@ -17,17 +18,17 @@ PopupBase {
 
     property var rows: []
     property int selIndex: -1
-    readonly property int count: Array.isArray(rows) ? rows.length : 0
+    readonly property int count: QmlBridge.toArray(rows).length
     readonly property bool hasSel: selIndex >= 0 && selIndex < count
     property bool canDelete: false
     property var availableSets: ({ trees: [], skills: [], items: [], configs: [] })
     property var specNameLookup: ({})
     property string _nameMode: ""
 
-    readonly property var _trees: Array.isArray(availableSets.trees) ? availableSets.trees : []
-    readonly property var _skills: Array.isArray(availableSets.skills) ? availableSets.skills : []
-    readonly property var _items: Array.isArray(availableSets.items) ? availableSets.items : []
-    readonly property var _configs: Array.isArray(availableSets.configs) ? availableSets.configs : []
+    readonly property var _trees: QmlBridge.toArray(availableSets.trees)
+    readonly property var _skills: QmlBridge.toArray(availableSets.skills)
+    readonly property var _items: QmlBridge.toArray(availableSets.items)
+    readonly property var _configs: QmlBridge.toArray(availableSets.configs)
 
     function openFresh() {
         selIndex = -1
@@ -45,7 +46,7 @@ PopupBase {
             selIndex = -1
             return
         }
-        rows = Array.isArray(st.rows) ? st.rows : []
+        rows = QmlBridge.toArray(st.rows)
         canDelete = st.canDelete === true
         availableSets = st.availableSets || { trees: [], skills: [], items: [], configs: [] }
         specNameLookup = st.specNameLookup || {}
@@ -127,23 +128,27 @@ PopupBase {
         RowLayout {
             spacing: 4
             Button {
+                objectName: "pob.loadouts.newBtn"
                 implicitWidth: 54; implicitHeight: 18
                 label: "New"
                 onClicked: root._askName("new", "")
             }
             Button {
+                objectName: "pob.loadouts.renameBtn"
                 implicitWidth: 64; implicitHeight: 18
                 label: "Rename"
                 controlEnabled: root.hasSel
                 onClicked: root._askName("rename", root.rows[root.selIndex].title)
             }
             Button {
+                objectName: "pob.loadouts.copyBtn"
                 implicitWidth: 54; implicitHeight: 18
                 label: "Copy"
                 controlEnabled: root.hasSel
                 onClicked: root._askName("copy", root.rows[root.selIndex].title)
             }
             Button {
+                objectName: "pob.loadouts.deleteBtn"
                 implicitWidth: 60; implicitHeight: 18
                 label: "Delete"
                 controlEnabled: root.hasSel && root.canDelete && root.count > 1
@@ -151,6 +156,7 @@ PopupBase {
             }
             Item { Layout.fillWidth: true }
             Button {
+                objectName: "pob.loadouts.customBtn"
                 implicitWidth: 118; implicitHeight: 18
                 label: "New/Copy Custom"
                 onClicked: customPopup.openFresh()
@@ -167,6 +173,7 @@ PopupBase {
 
             ListView {
                 id: listView
+                objectName: "pob.loadouts.listView"
                 anchors.fill: parent
                 anchors.margins: 2
                 model: root.rows
@@ -184,6 +191,7 @@ PopupBase {
                         anchors.right: parent.right
                         anchors.rightMargin: 4
                         anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
                         label: modelData.display || modelData.title || ""
                         size: 14
                     }
@@ -212,6 +220,7 @@ PopupBase {
             Layout.alignment: Qt.AlignHCenter
             spacing: 10
             Button {
+                objectName: "pob.loadouts.upBtn"
                 implicitWidth: 44; implicitHeight: 20
                 label: "Up"
                 controlEnabled: root.hasSel && root.selIndex > 0
@@ -219,6 +228,7 @@ PopupBase {
                 onClicked: root._move(-1)
             }
             Button {
+                objectName: "pob.loadouts.downBtn"
                 implicitWidth: 50; implicitHeight: 20
                 label: "Down"
                 controlEnabled: root.hasSel && root.selIndex < root.count - 1
@@ -226,6 +236,7 @@ PopupBase {
                 onClicked: root._move(1)
             }
             Button {
+                objectName: "pob.loadouts.doneBtn"
                 implicitWidth: 90; implicitHeight: 20
                 label: "Done"
                 onClicked: root.accept()
@@ -360,6 +371,7 @@ PopupBase {
                 spacing: 10
 
                 Button {
+                    objectName: "pob.loadouts.customCreate"
                     implicitWidth: 80; implicitHeight: 24
                     label: "Create"
                     controlEnabled: customPopup.canCreate

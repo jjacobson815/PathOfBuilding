@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/qml">
         <file>main.qml</file>
+        <file>components/QmlBridge.js</file>
         <file>components/ColorText.qml</file>
         <file>components/Chrome.qml</file>
         <file>components/Arrow.qml</file>

@@ -6,6 +6,7 @@ import QtQuick
 // item as it would be after the action).
 Button {
     id: root
+    objectName: "pob.craftButton.root"
 
     property var craft: null
     property string name: ""
@@ -18,5 +19,5 @@ Button {
     controlEnabled: r.enabled !== false
     forceTooltip: tip
     tooltipFunc: tip ? function (tt) { if (craft) craft.fillTip(tt, name, 0) } : null
-    onClicked: if (craft) craft.click(name)
+    onClicked: if (root.controlEnabled && root.craft) root.craft.click(root.name)
 }

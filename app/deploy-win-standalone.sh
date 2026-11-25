@@ -37,6 +37,11 @@ cp -f "$BUILD/pob-qt.exe" "$DIST/pob-qt.exe"               # force-copy so dist 
 echo "[deploy] 2/4 windeployqt (Qt6 DLLs + qml modules + plugins, Fusion style)"
 windeployqt.exe --qmldir "$ROOT/app/qml" --no-translations "$DIST/pob-qt.exe" >/dev/null
 
+# libcurl (MSYS2 build) resolves its default CA bundle relative to libcurl-4.dll, which
+# is nonexistent once the DLL lives in dist/. Ship a CA bundle; TlsCa.h looks for it.
+mkdir -p "$DIST/certs"
+cp -f "$MINGW/etc/ssl/certs/ca-bundle.crt" "$DIST/certs/ca-bundle.crt"
+
 # Verify critical Qt6 plugins and runtime assets deployed cleanly; fail loudly if missing.
 # The 3_27+/3_28+ trees ship their ascendancy/bloodline art as .webp, which Qt can
 # only decode through the qtimageformats webp plugin -- a SEPARATE msys2 package
@@ -57,6 +62,7 @@ required_files=(
     "src/Launch.lua"
     "src/installed.cfg"
     "manifest.xml"
+    "certs/ca-bundle.crt"
 )
 for rel in "${required_files[@]}"; do
     if [ ! -f "$DIST/$rel" ]; then
@@ -129,5 +135,22 @@ else
     rm -rf "$DIST/src/_deploycheck"
     echo "[deploy] WARNING: clean-PATH smoke test FAILED — dist is not fully self-contained." >&2
     echo "[deploy] Re-run under an msys2 shell with MINGW pointing at your mingw64 root." >&2
+    exit 1
+fi
+
+# Clean-PATH HTTPS/CA probe: run the headless selftest (offline TLS handshake against a
+# plain-HTTP loopback server) using the deployed pob-qt.exe so applicationDirPath()
+# (certs/) and DLL lookup are dist-local, with no pob-selftest.exe build dependency.
+# CURLE_SSL_CACERT_BADFILE ("SSL CA cert") means the CA config is broken.
+echo "[deploy] verifying standalone HTTPS CA init (clean PATH)..."
+# Engine/Lua assets come from the repo (dist lacks files other selftest checks need).
+https_out="$( cd "$ROOT/src" && unset QML_IMPORT_PATH QT_PLUGIN_PATH CURL_CA_BUNDLE SSL_CERT_FILE; \
+    PATH="/c/Windows/System32:/c/Windows" QT_FORCE_STDERR_LOGGING=1 \
+    "$DIST/pob-qt.exe" --headless --src "$PWD" --runtime "$ROOT/runtime" --host "$ROOT/app/lua/pob_host.lua" 2>&1 || true )"
+if echo "$https_out" | grep -q "tlsCaInitOk=true"; then
+    echo "[deploy] OK — standalone HTTPS CA init works with no mingw on PATH."
+else
+    echo "[deploy] ERROR: standalone HTTPS CA probe FAILED (missing/invalid CA config):" >&2
+    echo "$https_out" | grep -iE "tlsCa|SSL CA cert" >&2 || true
     exit 1
 fi

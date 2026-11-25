@@ -8,6 +8,7 @@ import QtQuick
 // box, using the smaller of width/height as the square side.
 Canvas {
     id: root
+    objectName: "pob.checkmark.root"
 
     property color glyphColor: theme.text
 
@@ -17,6 +18,7 @@ Canvas {
     Component.onCompleted: requestPaint()
 
     onPaint: {
+        if (width <= 0 || height <= 0) return
         var ctx = getContext("2d")
         ctx.reset()
         var size = Math.min(width, height)

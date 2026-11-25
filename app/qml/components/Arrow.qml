@@ -6,6 +6,7 @@ import QtQuick
 // spanning the item's full width/height, apex pointing `direction`.
 Canvas {
     id: root
+    objectName: "pob.arrow.root"
 
     property string direction: "down" // "up" | "down" | "left" | "right"
     property color glyphColor: theme.text
@@ -17,6 +18,7 @@ Canvas {
     Component.onCompleted: requestPaint()
 
     onPaint: {
+        if (width <= 0 || height <= 0) return
         var ctx = getContext("2d")
         ctx.reset()
         ctx.fillStyle = glyphColor

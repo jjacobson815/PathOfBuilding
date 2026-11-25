@@ -47,6 +47,7 @@ PopupBase {
         spacing: 6
 
         Text {
+            objectName: "pob.conversion.infoText"
             text: "Info:"
             color: theme.info
             font.bold: true
@@ -71,6 +72,7 @@ PopupBase {
         Item { Layout.preferredHeight: 10 }
 
         Text {
+            objectName: "pob.conversion.warningText"
             text: "Warning:"
             color: theme.warning
             font.bold: true
@@ -97,6 +99,7 @@ PopupBase {
             spacing: 12
 
             PopupButton {
+                objectName: "pob.conversion.convertBtn"
                 label: "Convert to " + (root.liveDisplay.length > 0 ? root.liveDisplay : "current")
                 onClicked: {
                     var r = luaEngine.convertBuild()
@@ -114,6 +117,7 @@ PopupBase {
                 }
             }
             PopupButton {
+                objectName: "pob.conversion.cancelBtn"
                 label: "Cancel"
                 onClicked: {
                     root.close()

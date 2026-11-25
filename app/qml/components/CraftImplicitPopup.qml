@@ -15,18 +15,18 @@ CraftPopupBase {
         implicitHeight: root.frameH
 
         CraftLabel { craft: root; staticLabel: "^7Source:"; rx: 95; y: 20 }
-        CraftDrop { craft: root; name: "source"; x: 100; y: 20; width: 150; height: 18 }
+        CraftDrop { objectName: "pob.craftImplicit.source"; craft: root; name: "source"; x: 100; y: 20; width: 150; height: 18 }
         CraftLabel { craft: root; name: "sortLabel"; rx: 350; y: 20 }
-        CraftDrop { craft: root; name: "sort"; x: 355; y: 20; width: 240; height: 18 }
+        CraftDrop { objectName: "pob.craftImplicit.sort"; craft: root; name: "sort"; x: 355; y: 20; width: 240; height: 18 }
 
-        CraftLabel { craft: root; name: "modGroupSelectLabel"; rx: 95; y: 45 }
-        CraftDrop { craft: root; name: "modGroupSelect"; x: 100; y: 45; width: 600; height: 18 }
+        CraftLabel { craft: root; name: "modGroupSelectLabel"; rx: 95; y: 45; visible: !root.isCustom && root.rec("modGroupSelectLabel").shown === true }
+        CraftDrop { objectName: "pob.craftImplicit.groupDrop"; craft: root; name: "modGroupSelect"; x: 100; y: 45; width: 600; height: 18 }
 
         CraftLabel { craft: root; staticLabel: "^7Modifier:"; rx: 95; y: root.isCustom ? 45 : 70 }
-        CraftDrop { craft: root; name: "modSelect"; x: 100; y: 70; width: 600; height: 18 }
-        CraftEdit { craft: root; name: "custom"; quiet: true; x: 100; y: 45; width: 440; height: 18 }
+        CraftDrop { objectName: "pob.craftImplicit.modDrop"; craft: root; name: "modSelect"; visible: !root.isCustom; x: 100; y: 70; width: 600; height: 18 }
+        CraftEdit { objectName: "pob.craftImplicit.customEdit"; craft: root; name: "custom"; quiet: true; x: 100; y: 45; width: 440; height: 18 }
 
-        CraftButton { craft: root; name: "save"; tip: true; x: 710 / 2 - 45 - 40; y: 100; width: 80 }
-        CraftButton { craft: root; name: "close"; x: 710 / 2 + 45 - 40; y: 100; width: 80 }
+        CraftButton { objectName: "pob.craftImplicit.saveBtn"; craft: root; name: "save"; tip: true; x: 710 / 2 - 45 - 40; y: 100; width: 80 }
+        CraftButton { objectName: "pob.craftImplicit.closeBtn"; craft: root; name: "close"; x: 710 / 2 + 45 - 40; y: 100; width: 80 }
     }
 }

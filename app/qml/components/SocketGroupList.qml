@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import "QmlBridge.js" as QmlBridge
 
 // SocketGroupList — Phase 5 Part 5.1, ports SkillListControl.lua (a
 // ListControl, rows 16px, header "^7Socket Groups:", New / Delete All /
@@ -21,8 +22,9 @@ FocusScope {
     id: root
 
     property var groups: []
+    readonly property var _groups: QmlBridge.toArray(groups)
     property int selIndex: -1                      // 0-based; the detail group
-    readonly property int count: groups && groups.length !== undefined ? groups.length : 0
+    readonly property int count: _groups.length
     readonly property bool hasSel: selIndex >= 0 && selIndex < count
     readonly property int rowHeight: 16
 
@@ -46,7 +48,7 @@ FocusScope {
     // message for an item-provided one.
     function deleteAt(i) {
         if (i < 0 || i >= count) return
-        const g = groups[i]
+        const g = _groups[i]
         if (g.source) {
             messageRequested("Delete Socket Group", "This socket group cannot be deleted as it is created by an equipped item.")
         } else if (!g.hasGems) {
@@ -86,12 +88,12 @@ FocusScope {
         anchors.right: box.right
         y: 0
         spacing: 4
-        Button { width: 60; height: 18; label: "New"
+        Button { objectName: "pob.socketGroups.newBtn"; width: 60; height: 18; label: "New"
             onClicked: { root._call("pob_skillsNewGroup"); root.forceActiveFocus() } }
-        Button { width: 70; height: 18; label: "Delete All"; controlEnabled: root.count > 0
+        Button { objectName: "pob.socketGroups.delAllBtn"; width: 70; height: 18; label: "Delete All"; controlEnabled: root.count > 0
             onClicked: root.deleteAllRequested() }
-        Button { width: 60; height: 18; label: "Delete"
-            controlEnabled: root.hasSel && !root.groups[root.selIndex].source
+        Button { objectName: "pob.socketGroups.delBtn"; width: 60; height: 18; label: "Delete"
+            controlEnabled: root.hasSel && root._groups[root.selIndex] && !root._groups[root.selIndex].source
             onClicked: root.deleteAt(root.selIndex) }
     }
 
@@ -107,10 +109,11 @@ FocusScope {
 
         ListView {
             id: list
+            objectName: "pob.socketGroups.list"
             anchors.fill: parent
             anchors.margins: 2
             anchors.rightMargin: sb.visible ? 18 : 2
-            model: root.groups
+            model: root._groups
             interactive: false
             boundsBehavior: Flickable.StopAtBounds
             delegate: Rectangle {
@@ -125,11 +128,14 @@ FocusScope {
                     visible: modelData.icon !== ""
                     // Windows paths ("C:/...") need a third slash or "C" parses as the host.
                     source: modelData.icon === "" ? ""
-                          : (modelData.icon.charAt(0) === "/" ? "file://" : "file:///") + modelData.icon
+                          : (modelData.icon.charAt(0) === "/" ? "file://" : "file:///") + modelData.icon.replace(/\\/g, "/")
                     smooth: true
                 }
                 Label {
                     x: icon.visible ? 18 : 0
+                    width: parent.width - x
+                    clip: true
+                    elide: Text.ElideRight
                     anchors.verticalCenter: parent.verticalCenter
                     label: modelData.label
                     size: 14
@@ -140,6 +146,7 @@ FocusScope {
 
         // Drop marker for a drag reorder (ListControl draws a line at the gap).
         Rectangle {
+            objectName: "pob.socketGroups.dropLine"
             visible: ma.dragging
             x: 2
             width: list.width
@@ -150,6 +157,7 @@ FocusScope {
 
         ScrollBar {
             id: sb
+            objectName: "pob.socketGroups.scrollBar"
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: parent.bottom
@@ -164,6 +172,7 @@ FocusScope {
 
         MouseArea {
             id: ma
+            objectName: "pob.socketGroups.mouseOverlay"
             anchors.fill: list
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -174,6 +183,7 @@ FocusScope {
             property int dropIndex: 0                  // 0-based insertion gap
 
             function rowAt(y) {
+                if (y < 0 || y >= list.height || root.count <= 0) return -1
                 const i = Math.floor((y + list.contentY) / root.rowHeight)
                 return i >= 0 && i < root.count ? i : -1
             }
@@ -222,7 +232,7 @@ FocusScope {
     // SkillListControl:AddValueTooltip -> SkillsTab:AddSocketGroupTooltip.
     function _showTip() {
         const i = ma.hoverIndex
-        if (i < 0 || ma.dragging || !groups[i].hasTooltip) { tip.hide(); return }
+        if (i < 0 || i >= root.count || ma.dragging || !root._groups[i] || !root._groups[i].hasTooltip) { tip.hide(); return }
         const t = _call("pob_skillsGroupTooltip", [i + 1])
         tip.clear()
         if (!t || !t.lines || !t.lines.length) { tip.hide(); return }

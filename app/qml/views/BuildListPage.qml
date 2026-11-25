@@ -20,6 +20,7 @@ import "../components" as Widgets
 // not a widget-kit adoption.
 ColumnLayout {
     id: buildListPage
+    objectName: "pob.buildlist.root"
     Layout.fillWidth: true
     Layout.fillHeight: true
     spacing: theme.space2
@@ -59,12 +60,14 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: theme.space1
         Widgets.Button {
+            objectName: "pob.buildlist.btn_new"
             label: "New Build"
             implicitWidth: 82
             implicitHeight: 20
             onClicked: luaEngine.createBuild()
         }
         Widgets.Button {
+            objectName: "pob.buildlist.btn_open"
             label: "Open"
             implicitWidth: 56
             implicitHeight: 20
@@ -72,6 +75,7 @@ ColumnLayout {
             onClicked: buildListPage.openSelected()
         }
         Widgets.Button {
+            objectName: "pob.buildlist.btn_del"
             label: "Delete"
             implicitWidth: 64
             implicitHeight: 20
@@ -92,6 +96,7 @@ ColumnLayout {
             font.pixelSize: theme.fontSize
         }
         Widgets.Button {
+            objectName: "pob.buildlist.btn_mkdir"
             label: "New Folder"
             implicitWidth: 110
             implicitHeight: 20
@@ -114,6 +119,7 @@ ColumnLayout {
             font.pixelSize: theme.fontSize
         }
         Widgets.Button {
+            objectName: "pob.buildlist.btn_import"
             label: "Import URL"
             implicitWidth: 110
             implicitHeight: 20
@@ -129,6 +135,7 @@ ColumnLayout {
     // The build/folder list, bound to the BuildListModel.
     ListView {
         id: buildListView
+        objectName: "pob.buildlist.view"
         Layout.fillWidth: true
         Layout.fillHeight: true
         model: buildListModel

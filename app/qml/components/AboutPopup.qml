@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "QmlBridge.js" as QmlBridge
 
 // AboutPopup — Tier 1.4, ports main:OpenAboutPopup (Modules/Main.lua:1356):
 // version/fork header, a GitHub link, a Version-history/Help tab toggle, and
@@ -32,11 +33,15 @@ PopupBase {
         function onUpdateChanged() { root.refreshUpdateState() }
     }
 
-    readonly property var _list: showHelp ? ((content && content.helpList) || []) : ((content && content.changeList) || [])
-    readonly property var _sectionHeights: showHelp ? ((content && content.helpSectionHeights) || []) : ((content && content.changeVersionHeights) || [])
+    readonly property var _list: showHelp
+        ? QmlBridge.toArray(content ? content.helpList : null)
+        : QmlBridge.toArray(content ? content.changeList : null)
+    readonly property var _sectionHeights: showHelp
+        ? QmlBridge.toArray(content ? content.helpSectionHeights : null)
+        : QmlBridge.toArray(content ? content.changeVersionHeights : null)
 
-    width: 810
-    height: 628
+    width: Math.min(810, parent ? parent.width - 20 : 810)
+    height: Math.min(600, parent ? parent.height - 20 : 600)
     padding: 10
 
     // Called by main.qml's F1 handler / the About button. tabNameLower === ""
@@ -80,6 +85,7 @@ PopupBase {
                     defaultColor: theme.text
                 }
                 Button {
+                    objectName: "pob.about.githubBtn"
                     label: "GitHub: github.com/PathOfBuildingCommunity/PathOfBuilding"
                     Layout.preferredWidth: 440
                     Layout.preferredHeight: 20
@@ -88,6 +94,7 @@ PopupBase {
                 RowLayout {
                     spacing: 8
                     Button {
+                        objectName: "pob.about.checkUpdateBtn"
                         label: "Check for Updates"
                         Layout.preferredWidth: 130
                         Layout.preferredHeight: 20
@@ -95,6 +102,7 @@ PopupBase {
                         onClicked: luaEngine.invoke("pob_checkForUpdates", [{ force: true }])
                     }
                     Label {
+                        objectName: "pob.about.statusLabel"
                         size: theme.fontSize
                         label: {
                             var st = root.updateState || {}
@@ -106,6 +114,7 @@ PopupBase {
                         }
                     }
                     Button {
+                        objectName: "pob.about.openReleaseBtn"
                         visible: Boolean(root.updateState && root.updateState.status === "available")
                         label: "Open Release"
                         Layout.preferredWidth: 100
@@ -123,6 +132,7 @@ PopupBase {
             }
             Item { Layout.fillWidth: true }
             Button {
+                objectName: "pob.about.closeBtn"
                 label: "Close"
                 Layout.preferredWidth: 60
                 Layout.preferredHeight: 20
@@ -134,6 +144,7 @@ PopupBase {
             Layout.fillWidth: true
             spacing: 12
             Button {
+                objectName: "pob.about.historyTab"
                 label: "Version history"
                 Layout.preferredWidth: 120
                 Layout.preferredHeight: 20
@@ -141,6 +152,7 @@ PopupBase {
                 onClicked: root.showHelp = false
             }
             Button {
+                objectName: "pob.about.helpTab"
                 label: "Help"
                 Layout.preferredWidth: 60
                 Layout.preferredHeight: 20
@@ -151,6 +163,7 @@ PopupBase {
 
         TextListControl {
             id: list
+            objectName: "pob.about.list"
             Layout.fillWidth: true
             Layout.fillHeight: true
             columns: [ { x: 1, align: "LEFT" }, { x: 135, align: "LEFT" } ]

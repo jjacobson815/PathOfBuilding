@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QC
 import QtQuick.Layouts
 import "../components" as Widgets
+import "../components/QmlBridge.js" as QmlBridge
 
 // NOTES view — Phase 9, ports src/Classes/NotesTab.lua over the live notesTab
 // (bridge: app/lua/pob_notes_party.lua).
@@ -18,7 +19,7 @@ Item {
     clip: true
 
     property var st: ({})
-    property var colorButtons: st && st.colors && st.colors.length !== undefined ? st.colors : []
+    property var colorButtons: QmlBridge.toArray(st ? st.colors : null)
     property bool showColorCodes: !!(st && st.showColorCodes)
     property int editorFontSize: 16
     property bool showPreview: true
@@ -143,6 +144,7 @@ Item {
                     delegate: Widgets.Button {
                         required property int index
                         readonly property var btn: root.colorButtons[index]
+                        objectName: "pob.notes.btn_color_" + index
                         implicitWidth: 108
                         implicitHeight: 20
                         label: (btn.code || "^7") + (btn.label || "")
@@ -157,6 +159,7 @@ Item {
                 spacing: 4
                 Layout.alignment: Qt.AlignBottom
                 Widgets.Button {
+                    objectName: "pob.notes.btn_toggle_codes"
                     implicitWidth: 160
                     implicitHeight: 20
                     label: root.showColorCodes ? "Hide Color Codes" : "Show Color Codes"
@@ -171,6 +174,7 @@ Item {
                     }
                 }
                 Widgets.Button {
+                    objectName: "pob.notes.btn_toggle_preview"
                     implicitWidth: 160
                     implicitHeight: 20
                     label: root.showPreview ? "Hide Color Preview" : "Show Color Preview"
@@ -198,6 +202,7 @@ Item {
 
                     QC.TextArea {
                         id: notesEdit
+                        objectName: "pob.notes.text_editor"
                         color: theme.text
                         font.family: theme.fontVar
                         font.pixelSize: root.editorFontSize
@@ -256,6 +261,7 @@ Item {
                     anchors.margins: 6
 
                     Widgets.ColorText {
+                        objectName: "pob.notes.view_preview"
                         width: parent.width - 12
                         sourceText: notesEdit.text
                         font.pixelSize: root.editorFontSize

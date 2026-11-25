@@ -29,6 +29,7 @@ import QtQuick.Controls as QC
 //   ... on unhover: tt.hide()
 Rectangle {
     id: root
+    objectName: "pob.tooltip.root"
 
     readonly property int hPad: 12
     readonly property int vPad: 10
@@ -54,7 +55,9 @@ Rectangle {
     property var childTooltips: []
 
     function _fileUrl(p) {
-        return p ? (p.charAt(0) === "/" ? "file://" : "file:///") + p : ""
+        if (!p) return ""
+        var norm = String(p).replace(/\\/g, "/")
+        return (norm.charAt(0) === "/" ? "file://" : "file:///") + norm
     }
 
     function setItemMeta(t) {
@@ -271,6 +274,7 @@ Rectangle {
 
     // Rarity header art + influence icons behind title lines (Tooltip.lua:486-561).
     Item {
+        objectName: "pob.tooltip.header"
         visible: root.showHeaderArt && root.headerLeft !== "" && root.headerHeight > 0 && root.lines.length > 0
         x: 1; y: 1
         width: Math.max(0, root.width - 2)
@@ -309,6 +313,7 @@ Rectangle {
 
     Column {
         id: lineColumn
+        objectName: "pob.tooltip.lines"
         x: root.hPad / 2
         y: root.vPad / 2
         width: root.width - root.hPad

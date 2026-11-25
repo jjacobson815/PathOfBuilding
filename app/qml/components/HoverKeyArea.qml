@@ -18,11 +18,13 @@ import QtQuick
 // with nothing to integrate against yet.
 Item {
     id: root
+    objectName: "pob.hoverkey.root"
 
     readonly property bool hovered: hh.hovered
     property var onHoverKeyUp: function (key) {};
 
     HoverHandler {
         id: hh
+        objectName: "pob.hoverkey.hh"
     }
 }

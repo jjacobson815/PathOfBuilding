@@ -19,6 +19,7 @@ import QtQuick.Window
 //     tooltip to an overlay, same caveat as DragSource).
 Item {
     id: root
+    objectName: "pob.button.root"
 
     property string label: ""
     property url imageSource: ""
@@ -29,17 +30,26 @@ Item {
     property string tooltipText: ""
     property var tooltipFunc: null     // function(tooltip) { tooltip.addLine(...) }
     property var onHover: null         // function() {}
+    property int fontSize: 0           // 0 = auto (capped at theme.fontSize)
+    property int horizontalPadding: 10
 
     readonly property bool hovered: ma.containsMouse
     readonly property bool pressedLook: ma.pressed && ma.containsMouse
     readonly property bool isGlyph: label === "+" || label === "-" || label === "x"
+    readonly property int _labelSize: fontSize > 0
+        ? fontSize
+        : Math.max(8, Math.min(theme.fontSize, (root.height > 0 ? root.height : root.implicitHeight) - 4))
+    readonly property bool _hasTextLabel: root.label.length > 0 && !root.isGlyph && !img.visible
 
     signal clicked()
 
-    implicitWidth: 80
+    implicitWidth: _hasTextLabel
+        ? Math.max(24, Math.ceil(labelText.implicitWidth) + root.horizontalPadding * 2)
+        : 80
     implicitHeight: 24
 
     Chrome {
+        objectName: "pob.button.chrome"
         anchors.fill: parent
         hovered: root.hovered
         pressed: root.pressedLook
@@ -49,6 +59,7 @@ Item {
 
     Image {
         id: img
+        objectName: "pob.button.image"
         visible: root.imageSource.toString().length > 0
         anchors.fill: parent
         anchors.margins: 2
@@ -61,6 +72,7 @@ Item {
     // DrawImageQuad fractional coordinates exactly.
     Canvas {
         id: glyph
+        objectName: "pob.button.glyph"
         visible: root.isGlyph
         anchors.fill: parent
 
@@ -100,17 +112,25 @@ Item {
         }
     }
 
-    Label {
+    ColorText {
         id: labelText
-        visible: root.label.length > 0 && !root.isGlyph && !img.visible
-        anchors.centerIn: parent
-        label: root.label
-        size: Math.max(8, root.height - 4)
+        objectName: "pob.button.text"
+        visible: root._hasTextLabel
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: 3
+        anchors.rightMargin: 3
+        sourceText: root.label
+        font.pixelSize: root._labelSize
         defaultColor: root.controlEnabled ? theme.text : theme.muted
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
     }
 
     MouseArea {
         id: ma
+        objectName: "pob.button.ma"
         anchors.fill: parent
         hoverEnabled: true
         // Always enabled so hover (and thus a disabled-explains-why tooltip)
@@ -122,6 +142,7 @@ Item {
 
     Tooltip {
         id: tt
+        objectName: "pob.button.tt"
     }
 
     function _showTooltip() {
@@ -132,6 +153,7 @@ Item {
             tt.clear();
             if (root.tooltipFunc) root.tooltipFunc(tt);
             else if (root.tooltipText) tt.addLine(14, root.tooltipText);
+            else if (labelText.visible && labelText.truncated) tt.addLine(14, root.label);
             if (tt.lines.length > 0) {
                 var win = Window.window;
                 var origin = win ? root.mapToItem(win.contentItem, 0, 0) : Qt.point(0, 0);

@@ -1,4 +1,5 @@
 import QtQuick
+import "QmlBridge.js" as QmlBridge
 
 // CraftAnointPopup — ItemsTab:AnointDisplayItem (ItemsTab.lua:2597-2634),
 // "Anoint Item" 380 x 448: a NotableDBControl (sort, search + mode, the
@@ -11,7 +12,7 @@ CraftPopupBase {
     id: root
 
     readonly property var notables: rec("notableDB")
-    readonly property var rows: notables.rows && notables.rows.length !== undefined ? notables.rows : []
+    readonly property var rows: notables ? QmlBridge.toArray(notables.rows) : []
     property string _lastText: ""
 
     Timer {
@@ -31,12 +32,13 @@ CraftPopupBase {
         implicitWidth: 380
         implicitHeight: root.frameH
 
-        CraftDrop { craft: root; name: "notableDB.sort"; x: 10; y: 20; width: 360; height: 18 }
-        CraftEdit { craft: root; name: "notableDB.search"; x: 10; y: 40; width: 258; height: 18 }
-        CraftDrop { craft: root; name: "notableDB.searchMode"; x: 270; y: 40; width: 100; height: 18 }
+        CraftDrop { objectName: "pob.anoint.sort"; craft: root; name: "notableDB.sort"; x: 10; y: 20; width: 360; height: 18 }
+        CraftEdit { objectName: "pob.anoint.search"; craft: root; name: "notableDB.search"; x: 10; y: 40; width: 258; height: 18 }
+        CraftDrop { objectName: "pob.anoint.searchMode"; craft: root; name: "notableDB.searchMode"; x: 270; y: 40; width: 100; height: 18 }
 
         ItemListBox {
             id: list
+            objectName: "pob.anoint.notableList"
             x: 10; y: 60; width: 360; height: 360
             rows: root.rows
             defaultText: root.notables.text || ""
@@ -57,12 +59,13 @@ CraftPopupBase {
             y: root.frameH - 24
             spacing: 10
             CraftButton {
+                objectName: "pob.anoint.saveBtn"
                 craft: root; name: "save"
                 tip: true
                 // Qt paints wider than TextMetrics (invariant #8): leave headroom.
-                width: Math.max(80, textMetrics.width(16, "VAR", r.label || "") * 1.2 + 24)
+                width: Math.min(200, Math.max(80, textMetrics.width(16, "VAR", r.label || "") * 1.2 + 24))
             }
-            CraftButton { craft: root; name: "close"; width: 80 }
+            CraftButton { objectName: "pob.anoint.closeBtn"; craft: root; name: "close"; width: 80 }
         }
     }
 }

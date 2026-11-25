@@ -10,9 +10,10 @@ CraftPopupBase {
         implicitHeight: root.frameH
 
         CraftLabel { craft: root; staticLabel: "^7Skill:"; rx: 95; y: 20; visible: root.rec("skill").shown === true }
-        CraftDrop { craft: root; name: "skill"; x: 100; y: 20; width: 180; height: 18 }
+        CraftDrop { objectName: "pob.enchant.skill"; craft: root; name: "skill"; x: 100; y: 20; width: 180; height: 18 }
         CheckBox {
             id: allSkills
+            objectName: "pob.enchant.allSkills"
             visible: root.rec("allSkills").shown === true
             x: 350; y: 20; width: 18; height: 18
             label: "All skills:"
@@ -24,15 +25,15 @@ CraftPopupBase {
         }
 
         CraftLabel { craft: root; staticLabel: "^7Source:"; rx: 95; y: 45 }
-        CraftDrop { craft: root; name: "enchantmentSource"; x: 100; y: 45; width: 180; height: 18 }
+        CraftDrop { objectName: "pob.enchant.source"; craft: root; name: "enchantmentSource"; x: 100; y: 45; width: 180; height: 18 }
         CraftLabel { craft: root; staticLabel: "^7Sort by:"; rx: 350; y: 45 }
-        CraftDrop { craft: root; name: "sort"; x: 355; y: 45; width: 240; height: 18 }
+        CraftDrop { objectName: "pob.enchant.sort"; craft: root; name: "sort"; x: 355; y: 45; width: 240; height: 18 }
 
         CraftLabel { craft: root; staticLabel: "^7Enchantment:"; rx: 95; y: 70 }
-        CraftDrop { craft: root; name: "enchantment"; x: 100; y: 70; width: 495; height: 18 }
+        CraftDrop { objectName: "pob.enchant.enchantment"; craft: root; name: "enchantment"; x: 100; y: 70; width: 495; height: 18 }
 
-        CraftButton { craft: root; name: "save"; x: 605 / 2 - 88 - 40; y: 100; width: 80 }
-        CraftButton { craft: root; name: "remove"; x: 605 / 2 - 40; y: 100; width: 80 }
-        CraftButton { craft: root; name: "close"; x: 605 / 2 + 88 - 40; y: 100; width: 80 }
+        CraftButton { objectName: "pob.enchant.save"; craft: root; name: "save"; x: 605 / 2 - 88 - 40; y: 100; width: 80 }
+        CraftButton { objectName: "pob.enchant.remove"; craft: root; name: "remove"; x: 605 / 2 - 40; y: 100; width: 80 }
+        CraftButton { objectName: "pob.enchant.close"; craft: root; name: "close"; x: 605 / 2 + 88 - 40; y: 100; width: 80 }
     }
 }

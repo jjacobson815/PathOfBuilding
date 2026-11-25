@@ -1,5 +1,6 @@
 #include "SubScriptManager.h"
 #include "LuaEngine.h"
+#include "TlsCa.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -355,6 +356,8 @@ int l_worker_http(lua_State* L) {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, sslVerifypeer ? 1L : 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, sslVerifyhost ? 2L : 0L);
+    if (sslVerifypeer)
+        pob::configureTlsCa(curl);
     if (!proxy.empty())
         curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
     if (ipresolve == 1)

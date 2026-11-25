@@ -7,6 +7,7 @@ import QtQuick.Layouts
 // already returns the max line width across a multi-line string).
 PopupBase {
     id: root
+    objectName: "pob.message.root"
 
     property string message: ""
 
@@ -27,6 +28,7 @@ PopupBase {
         Item { Layout.preferredHeight: 8 } // spacer before the button row
 
         PopupButton {
+            objectName: "pob.message.btn_ok"
             label: "Ok"
             Layout.alignment: Qt.AlignHCenter
             onClicked: root.accept()

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QC
 import "StatDiff.js" as StatDiff
+import "QmlBridge.js" as QmlBridge
 
 // ItemTextPopup — Phase 6 Part 6.3: ItemsTab:EditDisplayItemText
 // (ItemsTab.lua:2225-2273). "Edit Item Text" for the display item (Edit...)
@@ -26,7 +27,7 @@ PopupBase {
         const init = luaEngine.invoke("pob_itemsEditTextInit", []) || {}
         title = init.title || ""
         saveBtn.label = init.saveLabel || "Save"
-        rarity.model = init.rarities && init.rarities.length !== undefined ? init.rarities : []
+        rarity.model = QmlBridge.toArray(init.rarities)
         rarity.currentIndex = (init.raritySel || 3) - 1
         area.text = init.text || ""
         _check()
@@ -41,6 +42,10 @@ PopupBase {
     }
 
     function _save() {
+        if (checkTimer.running) {
+            checkTimer.stop()
+            _check()
+        }
         if (!valid) return
         const r = luaEngine.invoke("pob_itemsEditTextSave", [area.text, rarity.currentIndex + 1, alsoAdd])
         if (r && r.ok) accept()
@@ -61,7 +66,8 @@ PopupBase {
             Label { label: "^7Rarity:"; size: 16 }
             DropDownControl {
                 id: rarity
-                Layout.preferredWidth: 100
+                objectName: "pob.itemText.rarity"
+                Layout.preferredWidth: 130
                 Layout.preferredHeight: 18
                 onSelected: function (i) { root._check() }
             }
@@ -78,6 +84,7 @@ PopupBase {
                 anchors.margins: 2
                 QC.TextArea {
                     id: area
+                    objectName: "pob.itemText.area"
                     color: theme.text
                     font.family: theme.fontFixed
                     font.pixelSize: 14
@@ -94,6 +101,7 @@ PopupBase {
             spacing: 10
             Button {
                 id: saveBtn
+                objectName: "pob.itemText.saveBtn"
                 implicitWidth: 80; implicitHeight: 20
                 label: "Save"
                 controlEnabled: root.valid
@@ -102,6 +110,7 @@ PopupBase {
                 onClicked: root._save()
             }
             Button {
+                objectName: "pob.itemText.cancelBtn"
                 implicitWidth: 80; implicitHeight: 20
                 label: "Cancel"
                 onClicked: root.reject()

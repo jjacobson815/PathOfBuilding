@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Window
 import "StatDiff.js" as StatDiff
+import "QmlBridge.js" as QmlBridge
 
 // SetManagePopup — the generic "set manager" (control-library Tier 4): one
 // component for SkillSetListControl now, and ItemSet/ConfigSet later. Ports
@@ -31,6 +32,7 @@ import "StatDiff.js" as StatDiff
 // same list move either way.
 PopupBase {
     id: root
+    objectName: "pob.setmanage.root"
 
     property var fn: ({})
     property var sharedFn: ({})
@@ -64,11 +66,11 @@ PopupBase {
 
     function refresh() {
         var st = _call("list")
-        sets = (st && st.sets && st.sets.length !== undefined) ? st.sets : []
+        sets = QmlBridge.toArray(st ? st.sets : null)
         if (selIndex >= count) selIndex = count - 1
         if (hasShared) {
             var sh = _callShared("list")
-            sharedSets = (sh && sh.sets && sh.sets.length !== undefined) ? sh.sets : []
+            sharedSets = QmlBridge.toArray(sh ? sh.sets : null)
             if (sharedSel >= sharedCount) sharedSel = sharedCount - 1
         }
     }
@@ -169,15 +171,15 @@ PopupBase {
 
             RowLayout {
                 spacing: 4
-                Button { implicitWidth: 60; implicitHeight: 18; label: "Copy"; controlEnabled: root.hasSel
+                Button { objectName: "pob.setmanage.btn_copy"; implicitWidth: 60; implicitHeight: 18; label: "Copy"; controlEnabled: root.hasSel
                     onClicked: root._askName("copy", root.sets[root.selIndex].rawTitle) }
-                Button { implicitWidth: 60; implicitHeight: 18; label: "Delete"
+                Button { objectName: "pob.setmanage.btn_delete"; implicitWidth: 60; implicitHeight: 18; label: "Delete"
                     controlEnabled: root.hasSel && root.count > 1
                     onClicked: deleteConfirm.openFor(root.selIndex) }
                 Item { Layout.fillWidth: true }
-                Button { implicitWidth: 60; implicitHeight: 18; label: "New"
+                Button { objectName: "pob.setmanage.btn_new"; implicitWidth: 60; implicitHeight: 18; label: "New"
                     onClicked: root._askName("new", "") }
-                Button { implicitWidth: 64; implicitHeight: 18; label: "Rename"; controlEnabled: root.hasSel
+                Button { objectName: "pob.setmanage.btn_rename"; implicitWidth: 64; implicitHeight: 18; label: "Rename"; controlEnabled: root.hasSel
                     onClicked: root._askName("rename", root.sets[root.selIndex].rawTitle) }
             }
 
@@ -204,7 +206,10 @@ PopupBase {
                         Label {
                             anchors.left: parent.left
                             anchors.leftMargin: 4
+                            anchors.right: parent.right
+                            anchors.rightMargin: 4
                             anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
                             label: modelData.listLabel
                             size: 14
                         }
@@ -248,11 +253,11 @@ PopupBase {
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 10
-                Button { implicitWidth: 44; implicitHeight: 20; label: "Up"
+                Button { objectName: "pob.setmanage.btn_up"; implicitWidth: 44; implicitHeight: 20; label: "Up"
                     controlEnabled: root.hasSel && root.selIndex > 0
                     tooltipText: "Move the selected " + root.noun + " up"
                     onClicked: root._move(-1) }
-                Button { implicitWidth: 50; implicitHeight: 20; label: "Down"
+                Button { objectName: "pob.setmanage.btn_down"; implicitWidth: 50; implicitHeight: 20; label: "Down"
                     controlEnabled: root.hasSel && root.selIndex < root.count - 1
                     tooltipText: "Move the selected " + root.noun + " down"
                     onClicked: root._move(1) }
@@ -314,7 +319,10 @@ PopupBase {
                         Label {
                             anchors.left: parent.left
                             anchors.leftMargin: 4
+                            anchors.right: parent.right
+                            anchors.rightMargin: 4
                             anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
                             label: "^7" + modelData.listLabel
                             size: 14
                         }

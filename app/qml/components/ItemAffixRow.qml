@@ -1,5 +1,6 @@
 import QtQuick
 import "StatDiff.js" as StatDiff
+import "QmlBridge.js" as QmlBridge
 
 // ItemAffixRow — one crafted-affix row of the display-item editor (Phase 6
 // Part 6.3 item 3; ItemsTab.lua:756-984): the "Prefix:" / "Suffix:" /
@@ -24,7 +25,7 @@ Item {
     // Imperative push: DropDownControl writes its own currentIndex on a pick,
     // and a bound Slider.value would break on the first drag.
     function push() {
-        const l = rec.list && rec.list.length !== undefined ? rec.list : []
+        const l = rec ? QmlBridge.toArray(rec.list) : []
         const m = []
         for (let i = 0; i < l.length; i++) m.push({ label: l[i], i: i + 1 })
         drop.model = m
@@ -43,7 +44,10 @@ Item {
     // {"RIGHT", control, "LEFT"}); Qt paints wider than TextMetrics, so each
     // gets a real box with Qt's own right alignment (invariant #8).
     Label {
-        x: 36 - width; y: 3
+        objectName: "pob.itemAffix.label"
+        anchors.right: drop.left
+        anchors.rightMargin: 4
+        y: 3
         width: 80
         horizontalAlignment: Text.AlignRight
         label: root.rec.label || ""
@@ -51,6 +55,7 @@ Item {
     }
     DropDownControl {
         id: drop
+        objectName: "pob.itemAffix.drop"
         x: 40
         width: 418; height: 20
         searchable: true
@@ -62,8 +67,11 @@ Item {
     }
 
     Label {
+        objectName: "pob.itemAffix.rollLabel"
         visible: root.rec.sliderShown === true
-        x: 36 - width; y: 24
+        anchors.right: slider.left
+        anchors.rightMargin: 4
+        y: 24
         width: 80
         horizontalAlignment: Text.AlignRight
         label: root.rec.rollLabel || ""
@@ -71,6 +79,7 @@ Item {
     }
     Slider {
         id: slider
+        objectName: "pob.itemAffix.slider"
         property bool pushing: false
         property real pending: -1
         visible: root.rec.sliderShown === true

@@ -9,6 +9,7 @@ import QtQuick
 // palette source changed.
 Item {
     id: root
+    objectName: "pob.section.root"
 
     property string label: ""
     default property alias content: body.data
@@ -34,6 +35,7 @@ Item {
     // content (legacy layer 0 vs the board's -10).
     Rectangle {
         id: labelPlate
+        objectName: "pob.section.plate"
         visible: root.label.length > 0
         x: 6
         y: -8
@@ -46,6 +48,7 @@ Item {
 
         Label {
             id: labelText
+            objectName: "pob.section.label"
             anchors.centerIn: parent
             label: root.label
             size: 14

@@ -17,6 +17,7 @@ import QtQuick
 // their own MouseAreas rather than manual coordinate math.
 Item {
     id: root
+    objectName: "pob.scrollbar.root"
 
     property string dir: "VERTICAL"       // "VERTICAL" | "HORIZONTAL"
     property real step: 40
@@ -82,6 +83,7 @@ Item {
     // --- Up/Left step button ------------------------------------------------
     Rectangle {
         id: upBtn
+        objectName: "pob.scrollbar.up"
         x: 0; y: 0
         width: root.horizontal ? root.shortDim : root.width
         height: root.horizontal ? root.height : root.shortDim
@@ -107,6 +109,7 @@ Item {
     // --- Down/Right step button ---------------------------------------------
     Rectangle {
         id: downBtn
+        objectName: "pob.scrollbar.down"
         x: root.horizontal ? root.width - root.shortDim : 0
         y: root.horizontal ? 0 : root.height - root.shortDim
         width: root.horizontal ? root.shortDim : root.width
@@ -153,6 +156,7 @@ Item {
 
         MouseArea {
             id: trackMa
+            objectName: "pob.scrollbar.track"
             anchors.fill: parent
             enabled: root.controlEnabled && root.active
             onPressed: (mouse) => {
@@ -165,6 +169,7 @@ Item {
 
         Rectangle {
             id: knob
+            objectName: "pob.scrollbar.knob"
             x: root.horizontal ? root.knobPosForOffset() : 0
             y: root.horizontal ? 0 : root.knobPosForOffset()
             width: root.horizontal ? root.knobDim : track.width

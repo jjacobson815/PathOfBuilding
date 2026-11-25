@@ -7,6 +7,7 @@ import QtQuick.Layouts
 // with PoEURL", Copy, and Done.
 PopupBase {
     id: root
+    objectName: "pob.treeexport.root"
 
     property string link: ""
     property string errMsg: ""
@@ -86,6 +87,7 @@ PopupBase {
             controlEnabled: true
             TextInput {
                 id: linkInput
+                objectName: "pob.treeexport.input"
                 anchors.fill: parent
                 anchors.leftMargin: 6
                 anchors.rightMargin: 6
@@ -110,18 +112,21 @@ PopupBase {
             Layout.alignment: Qt.AlignHCenter
             spacing: 10
             Button {
+                objectName: "pob.treeexport.shrink"
                 implicitWidth: 140; implicitHeight: 20
                 label: root.shrinking ? "Shrinking..." : (root.shrunk ? "Done" : "Shrink with PoEURL")
                 controlEnabled: root.link.length > 0 && !root.shrinking && !root.shrunk
                 onClicked: root.doShrink()
             }
             Button {
+                objectName: "pob.treeexport.copy"
                 implicitWidth: 80; implicitHeight: 20
                 label: "Copy"
                 controlEnabled: root.link.length > 0
                 onClicked: luaEngine.copyText(root.link)
             }
             Button {
+                objectName: "pob.treeexport.done"
                 implicitWidth: 80; implicitHeight: 20
                 label: "Done"
                 onClicked: {

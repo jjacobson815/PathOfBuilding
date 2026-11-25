@@ -1,7 +1,9 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls as QC
 import QtQuick.Layouts
 import "../components" as Widgets
+import "../components/QmlBridge.js" as QmlBridge
 
 // IMPORT / EXPORT view — Phase 11 (bridge: app/lua/pob_import.lua).
 //
@@ -29,7 +31,7 @@ Item {
     property string _confirmKind: ""
 
     function arr(v) {
-        return Array.isArray(v) ? v : []
+        return QmlBridge.toArray(v)
     }
 
     function refresh() {
@@ -165,6 +167,68 @@ Item {
     readonly property var _options: arr(st && st.options)
     readonly property bool _isOAuth: (st && st.authMethod) !== "account"
 
+    // Compact inline instruction/preview line: abbreviates constrained text
+    // with ElideRight ("...") and reveals the full text/instruction on hover.
+    component InlineHint: Item {
+        id: hintRoot
+        property string text: ""
+        property string hoverText: ""
+        property color defaultColor: theme.muted
+        property int maxLines: 1
+        property int fontSize: theme.fontSizeSm
+
+        implicitWidth: hintLabel.implicitWidth
+        implicitHeight: hintLabel.implicitHeight
+
+        Widgets.ColorText {
+            id: hintLabel
+            anchors.left: parent.left
+            anchors.right: parent.right
+            sourceText: hintRoot.text
+            defaultColor: hintRoot.defaultColor
+            font.pixelSize: hintRoot.fontSize
+            elide: Text.ElideRight
+            maximumLineCount: hintRoot.maxLines
+            wrapMode: hintRoot.maxLines > 1 ? Text.WordWrap : Text.NoWrap
+        }
+
+        MouseArea {
+            id: hintMa
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onContainsMouseChanged: hintRoot._updateTip()
+        }
+
+        Widgets.Tooltip {
+            id: hintTip
+        }
+
+        function _updateTip() {
+            const full = hintRoot.hoverText.length > 0 ? hintRoot.hoverText : hintRoot.text
+            if (!hintMa.containsMouse || !full || (!hintLabel.truncated && hintRoot.hoverText.length === 0)) {
+                hintTip.hide()
+                return
+            }
+            hintTip.clear()
+            hintTip.maxWidth = 360
+            hintTip.addLine(14, full)
+            if (hintTip.lines.length > 0) {
+                const win = Window.window
+                const origin = win ? hintRoot.mapToItem(win.contentItem, 0, 0) : Qt.point(0, 0)
+                const viewport = win
+                    ? Qt.rect(-origin.x, -origin.y, win.width, win.height)
+                    : Qt.rect(0, 0, hintRoot.width, hintRoot.height)
+                hintTip.showAt(0, 0, hintRoot.width, hintRoot.height, viewport)
+                return
+            }
+            hintTip.hide()
+        }
+
+        onTextChanged: if (hintMa.containsMouse) _updateTip()
+        onHoverTextChanged: if (hintMa.containsMouse) _updateTip()
+    }
+
     RowLayout {
         anchors.fill: parent
         anchors.margins: theme.space3
@@ -174,13 +238,15 @@ Item {
         // LEFT COLUMN — GUIDED CHARACTER IMPORT (Steps 1 -> 4)
         // =====================================================================
         QC.ScrollView {
+            id: leftScroll
             Layout.fillWidth: true
             Layout.preferredWidth: 12
             Layout.fillHeight: true
             clip: true
+            QC.ScrollBar.horizontal.policy: QC.ScrollBar.AlwaysOff
 
             ColumnLayout {
-                width: Math.max(360, parent.width - 14)
+                width: leftScroll.availableWidth
                 spacing: theme.space2
 
                 // Title
@@ -189,12 +255,11 @@ Item {
                     sourceText: "^7Import a Character"
                     font.pixelSize: theme.fontSize + 4
                     font.bold: true
+                    elide: Text.ElideRight
                 }
-                Widgets.ColorText {
+                InlineHint {
                     Layout.fillWidth: true
-                    sourceText: "Follow the steps below to bring a Path of Exile character into a new build (or update your current one)."
-                    defaultColor: theme.muted
-                    wrapMode: Text.WordWrap
+                    text: "Follow the steps below to bring a Path of Exile character into a new build (or update your current one)."
                 }
 
                 // -------------------------------------------------------------
@@ -214,38 +279,24 @@ Item {
                         anchors.margins: theme.space3
                         spacing: theme.space2
 
-                        Widgets.ColorText {
-                            sourceText: "^71. Connect your account"
-                            font.pixelSize: theme.fontSize + 1
-                            font.bold: true
-                        }
-
-                        // Auth method toggle + Realm selector
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: theme.space2
 
-                            Widgets.Button {
-                                label: "Sign in with Path of Exile"
-                                implicitWidth: 175
-                                implicitHeight: 24
-                                locked: root._isOAuth
-                                onClicked: root._invoke("pob_importSetAuthMethod", ["oauth"])
+                            Widgets.ColorText {
+                                Layout.fillWidth: true
+                                sourceText: "^71. Connect your account"
+                                font.pixelSize: theme.fontSize + 1
+                                font.bold: true
+                                elide: Text.ElideRight
                             }
-                            Widgets.Button {
-                                label: "Enter Account Name"
-                                implicitWidth: 145
-                                implicitHeight: 24
-                                locked: !root._isOAuth
-                                onClicked: root._invoke("pob_importSetAuthMethod", ["account"])
-                            }
-                            Item { Layout.fillWidth: true }
                             Widgets.ColorText {
                                 sourceText: "Realm:"
                                 defaultColor: theme.muted
                             }
                             Widgets.DropDownControl {
                                 id: realmDrop
+                                objectName: "pob.import.realm_drop"
                                 implicitWidth: 74
                                 implicitHeight: 24
                                 onSelected: (idx) => {
@@ -256,34 +307,56 @@ Item {
                             }
                         }
 
+                        // Auth method toggle
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: theme.space2
+
+                            Widgets.Button {
+                                objectName: "pob.import.auth_oauth"
+                                label: "Sign in with Path of Exile"
+                                width: Math.min(implicitWidth, parent.width)
+                                implicitHeight: 24
+                                locked: root._isOAuth
+                                onClicked: root._invoke("pob_importSetAuthMethod", ["oauth"])
+                            }
+                            Widgets.Button {
+                                label: "Enter Account Name"
+                                width: Math.min(implicitWidth, parent.width)
+                                implicitHeight: 24
+                                locked: !root._isOAuth
+                                onClicked: root._invoke("pob_importSetAuthMethod", ["account"])
+                            }
+                        }
+
                         // OAuth controls
                         ColumnLayout {
                             Layout.fillWidth: true
                             visible: root._isOAuth
                             spacing: theme.space1
 
-                            RowLayout {
+                            Flow {
                                 Layout.fillWidth: true
                                 spacing: theme.space2
 
                                 Widgets.Button {
                                     visible: !(root.st && root.st.oauthAuthorized) && !(root.st && root.st.oauthWaiting)
                                     label: "Authorize with Path of Exile"
-                                    implicitWidth: 195
+                                    width: Math.min(implicitWidth, parent.width)
                                     implicitHeight: 26
                                     onClicked: root._invoke("pob_importOAuthStart", [])
                                 }
                                 Widgets.Button {
                                     visible: !!(root.st && root.st.oauthWaiting)
                                     label: "Cancel Sign-In"
-                                    implicitWidth: 120
+                                    width: Math.min(implicitWidth, parent.width)
                                     implicitHeight: 26
                                     onClicked: root._invoke("pob_importOAuthCancel", [])
                                 }
                                 Widgets.Button {
                                     visible: !!(root.st && root.st.oauthAuthorized)
                                     label: "Fetch Characters"
-                                    implicitWidth: 135
+                                    width: Math.min(implicitWidth, parent.width)
                                     implicitHeight: 26
                                     controlEnabled: !!(root.st && root.st.canFetchCharacters)
                                     tooltipText: (root.st && root.st.fetchDisabledReason) || ""
@@ -292,19 +365,16 @@ Item {
                                 Widgets.Button {
                                     visible: !!(root.st && root.st.oauthAuthorized)
                                     label: "Sign Out"
-                                    implicitWidth: 85
+                                    width: Math.min(implicitWidth, parent.width)
                                     implicitHeight: 26
                                     onClicked: root._invoke("pob_importOAuthLogout", [])
                                 }
-                                Item { Layout.fillWidth: true }
                             }
 
-                            Widgets.ColorText {
+                            InlineHint {
                                 Layout.fillWidth: true
                                 visible: !!(root.st && root.st.oauthAuthorized && !root.st.canFetchCharacters && root.st.fetchDisabledReason)
-                                sourceText: (root.st && root.st.fetchDisabledReason) || ""
-                                defaultColor: theme.muted
-                                wrapMode: Text.WordWrap
+                                text: (root.st && root.st.fetchDisabledReason) || ""
                             }
                         }
 
@@ -321,6 +391,7 @@ Item {
                                 Widgets.EditControl {
                                     id: accountEdit
                                     Layout.fillWidth: true
+                                    Layout.minimumWidth: 110
                                     implicitHeight: 24
                                     placeholder: "AccountName#1234"
                                     onEdited: (txt) => {
@@ -332,7 +403,6 @@ Item {
                                 }
                                 Widgets.Button {
                                     label: "Fetch Characters"
-                                    implicitWidth: 130
                                     implicitHeight: 24
                                     controlEnabled: !!(root.st && root.st.canFetchCharacters)
                                     tooltipText: (root.st && root.st.fetchDisabledReason) || ""
@@ -347,12 +417,10 @@ Item {
                                 wrapMode: Text.WordWrap
                             }
 
-                            Widgets.ColorText {
+                            InlineHint {
                                 Layout.fillWidth: true
                                 visible: !!(root.st && !root.st.canFetchCharacters && root.st.fetchDisabledReason && !root.st.accountNameHint)
-                                sourceText: (root.st && root.st.fetchDisabledReason) || ""
-                                defaultColor: theme.muted
-                                wrapMode: Text.WordWrap
+                                text: (root.st && root.st.fetchDisabledReason) || ""
                             }
 
                             // Saved account history row
@@ -368,6 +436,7 @@ Item {
                                 Widgets.DropDownControl {
                                     id: historyDrop
                                     Layout.fillWidth: true
+                                    Layout.minimumWidth: 90
                                     implicitHeight: 22
                                     placeholder: "Select a recent account..."
                                     onSelected: (idx) => {
@@ -390,14 +459,11 @@ Item {
                             }
 
                             // Optional POESESSID fallback disclosure
-                            RowLayout {
-                                spacing: theme.space1
-                                Widgets.Button {
-                                    label: root.sessionIdExpanded ? "Hide Private Profile Session ID" : "Private profile? Use POESESSID (optional)"
-                                    implicitWidth: 240
-                                    implicitHeight: 22
-                                    onClicked: root.sessionIdExpanded = !root.sessionIdExpanded
-                                }
+                            Widgets.Button {
+                                label: root.sessionIdExpanded ? "Hide Private Profile Session ID" : "Private profile? Use POESESSID (optional)"
+                                Layout.maximumWidth: parent.width
+                                implicitHeight: 22
+                                onClicked: root.sessionIdExpanded = !root.sessionIdExpanded
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
@@ -417,11 +483,9 @@ Item {
                                         if (!root._syncing) root._invoke("pob_importSetSessionId", [txt])
                                     }
                                 }
-                                Widgets.ColorText {
+                                InlineHint {
                                     Layout.fillWidth: true
-                                    sourceText: "Only needed if your Path of Exile profile is private and you prefer not to use OAuth sign-in."
-                                    defaultColor: theme.muted
-                                    wrapMode: Text.WordWrap
+                                    text: "Only needed if your Path of Exile profile is private and you prefer not to use OAuth sign-in."
                                 }
                             }
                         }
@@ -446,9 +510,11 @@ Item {
                         spacing: theme.space2
 
                         Widgets.ColorText {
+                            Layout.fillWidth: true
                             sourceText: "^72. Pick a character"
                             font.pixelSize: theme.fontSize + 1
                             font.bold: true
+                            elide: Text.ElideRight
                         }
 
                         RowLayout {
@@ -461,7 +527,8 @@ Item {
                             }
                             Widgets.DropDownControl {
                                 id: leagueDrop
-                                implicitWidth: 160
+                                Layout.preferredWidth: 115
+                                Layout.minimumWidth: 80
                                 implicitHeight: 24
                                 controlEnabled: root.arr(root.st && root.st.characters).length > 0 || root.arr(root.st && root.st.leagues).length > 1
                                 onSelected: (idx) => {
@@ -476,7 +543,9 @@ Item {
                             }
                             Widgets.DropDownControl {
                                 id: charDrop
+                                objectName: "pob.import.char_drop"
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 100
                                 implicitHeight: 24
                                 searchable: true
                                 placeholder: "Fetch characters in Step 1 first..."
@@ -508,76 +577,84 @@ Item {
                         spacing: theme.space2
 
                         Widgets.ColorText {
+                            Layout.fillWidth: true
                             sourceText: "^73. Choose what to import"
                             font.pixelSize: theme.fontSize + 1
                             font.bold: true
+                            elide: Text.ElideRight
                         }
 
                         // What to bring in (both checked by default)
-                        RowLayout {
+                        Flow {
                             Layout.fillWidth: true
                             spacing: theme.space3
 
-                            RowLayout {
+                            Row {
                                 spacing: theme.space1
                                 Widgets.CheckBox {
+                                    anchors.verticalCenter: parent.verticalCenter
                                     state: !!(root.st && root.st.importTree)
                                     onToggled: (v) => root._invoke("pob_importSetOptions", [{ importTree: v }])
                                 }
-                                Widgets.ColorText { sourceText: "^7Passive Tree & Jewels" }
+                                Widgets.ColorText {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    sourceText: "^7Passive Tree & Jewels"
+                                }
                             }
 
-                            RowLayout {
+                            Row {
                                 spacing: theme.space1
                                 Widgets.CheckBox {
+                                    anchors.verticalCenter: parent.verticalCenter
                                     state: !!(root.st && root.st.importItems)
                                     onToggled: (v) => root._invoke("pob_importSetOptions", [{ importItems: v }])
                                 }
-                                Widgets.ColorText { sourceText: "^7Items & Skills" }
+                                Widgets.ColorText {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    sourceText: "^7Items & Skills"
+                                }
                             }
-                            Item { Layout.fillWidth: true }
                         }
 
                         // Target: new build (default) vs overwrite open build
-                        RowLayout {
+                        Flow {
                             Layout.fillWidth: true
                             spacing: theme.space2
 
                             Widgets.ColorText {
+                                height: 24
+                                verticalAlignment: Text.AlignVCenter
                                 sourceText: "Destination:"
                                 defaultColor: theme.muted
                             }
                             Widgets.Button {
                                 label: "New build (default)"
-                                implicitWidth: 145
+                                width: Math.min(implicitWidth, parent.width)
                                 implicitHeight: 24
                                 locked: (root.st && root.st.targetMode) !== "overwrite"
                                 onClicked: root._invoke("pob_importSetOptions", [{ targetMode: "new" }])
                             }
                             Widgets.Button {
                                 label: "Overwrite current build"
-                                implicitWidth: 165
+                                width: Math.min(implicitWidth, parent.width)
                                 implicitHeight: 24
                                 locked: (root.st && root.st.targetMode) === "overwrite"
                                 onClicked: root._invoke("pob_importSetOptions", [{ targetMode: "overwrite" }])
                             }
-                            Item { Layout.fillWidth: true }
                         }
 
-                        Widgets.ColorText {
+                        InlineHint {
                             Layout.fillWidth: true
-                            sourceText: (root.st && root.st.targetMode) === "overwrite"
+                            text: (root.st && root.st.targetMode) === "overwrite"
                                 ? ("^xF59E0BWill overwrite \"" + ((root.st && root.st.currentBuildName) || "Unnamed build") + "\" after confirmation.")
                                 : "Creates a new build named after the selected character so your current build stays untouched."
-                            defaultColor: theme.muted
-                            wrapMode: Text.WordWrap
                         }
 
                         // Collapsed Options disclosure
                         Widgets.Button {
                             label: root.optionsExpanded ? "Hide Options" : "Options (delete / weapon swap)"
-                            implicitWidth: 215
-                            implicitHeight: 22
+                            Layout.maximumWidth: parent.width
+                            implicitHeight: 24
                             onClicked: root.optionsExpanded = !root.optionsExpanded
                         }
 
@@ -606,13 +683,13 @@ Item {
                                         Layout.fillWidth: true
                                         spacing: 2
                                         Widgets.ColorText {
-                                            sourceText: "^7" + (modelData.label || "")
-                                        }
-                                        Widgets.ColorText {
                                             Layout.fillWidth: true
-                                            sourceText: modelData.description || ""
-                                            defaultColor: theme.muted
-                                            wrapMode: Text.WordWrap
+                                            sourceText: "^7" + (modelData.label || "")
+                                            elide: Text.ElideRight
+                                        }
+                                        InlineHint {
+                                            Layout.fillWidth: true
+                                            text: modelData.description || ""
                                         }
                                     }
                                 }
@@ -638,27 +715,20 @@ Item {
                         anchors.margins: theme.space3
                         spacing: theme.space2
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: theme.space2
-
-                            Widgets.Button {
-                                label: (root.st && root.st.importButtonLabel) || "Import as New Build"
-                                implicitWidth: 250
-                                implicitHeight: 30
-                                controlEnabled: !!(root.st && root.st.canImportCharacter)
-                                tooltipText: (root.st && root.st.importDisabledReason) || ""
-                                onClicked: root._triggerCharacterImport(false)
-                            }
-                            Item { Layout.fillWidth: true }
+                        Widgets.Button {
+                            objectName: "pob.import.btn_import"
+                            label: (root.st && root.st.importButtonLabel) || "Import as New Build"
+                            Layout.maximumWidth: parent.width
+                            implicitHeight: 28
+                            controlEnabled: !!(root.st && root.st.canImportCharacter)
+                            tooltipText: (root.st && root.st.importDisabledReason) || ""
+                            onClicked: root._triggerCharacterImport(false)
                         }
 
-                        Widgets.ColorText {
+                        InlineHint {
                             Layout.fillWidth: true
                             visible: !!(root.st && !root.st.canImportCharacter && root.st.importDisabledReason)
-                            sourceText: (root.st && root.st.importDisabledReason) || ""
-                            defaultColor: theme.muted
-                            wrapMode: Text.WordWrap
+                            text: (root.st && root.st.importDisabledReason) || ""
                         }
 
                         Widgets.ColorText {
@@ -685,13 +755,15 @@ Item {
         // RIGHT COLUMN — BUILD SHARING ("Share this build" & "Open a build")
         // =====================================================================
         QC.ScrollView {
+            id: rightScroll
             Layout.fillWidth: true
             Layout.preferredWidth: 10
             Layout.fillHeight: true
             clip: true
+            QC.ScrollBar.horizontal.policy: QC.ScrollBar.AlwaysOff
 
             ColumnLayout {
-                width: Math.max(320, parent.width - 14)
+                width: rightScroll.availableWidth
                 spacing: theme.space3
 
                 // -------------------------------------------------------------
@@ -712,36 +784,36 @@ Item {
                         spacing: theme.space2
 
                         Widgets.ColorText {
+                            Layout.fillWidth: true
                             sourceText: "^7Share this build"
                             font.pixelSize: theme.fontSize + 3
                             font.bold: true
+                            elide: Text.ElideRight
                         }
-                        Widgets.ColorText {
+                        InlineHint {
                             Layout.fillWidth: true
-                            sourceText: "Generate a build code to copy directly, or upload it to a build site to get a short link."
-                            defaultColor: theme.muted
-                            wrapMode: Text.WordWrap
+                            text: "Generate a build code to copy directly, or upload it to a build site to get a short link."
                         }
 
-                        RowLayout {
+                        Flow {
                             Layout.fillWidth: true
                             spacing: theme.space2
 
                             Widgets.Button {
+                                objectName: "pob.import.share_btn"
                                 label: "Generate Code"
-                                implicitWidth: 120
+                                width: Math.min(implicitWidth, parent.width)
                                 implicitHeight: 26
                                 onClicked: root._invoke("pob_importGenerateCode", [])
                             }
                             Widgets.Button {
                                 label: "Copy"
-                                implicitWidth: 74
+                                width: Math.min(implicitWidth, parent.width)
                                 implicitHeight: 26
                                 controlEnabled: !!root._share.canCopy
                                 tooltipText: root._share.copyDisabledReason || ""
                                 onClicked: root._invoke("pob_importCopyShareCode", [])
                             }
-                            Item { Layout.fillWidth: true }
                         }
 
                         Widgets.EditControl {
@@ -764,6 +836,7 @@ Item {
                             Widgets.DropDownControl {
                                 id: shareSiteDrop
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 80
                                 implicitHeight: 24
                                 onSelected: (idx) => {
                                     if (root._syncing) return
@@ -773,7 +846,6 @@ Item {
                             }
                             Widgets.Button {
                                 label: root._share.busy ? "Uploading..." : "Share Link"
-                                implicitWidth: 105
                                 implicitHeight: 24
                                 controlEnabled: !!root._share.canUpload
                                 tooltipText: root._share.uploadDisabledReason || ""
@@ -781,12 +853,10 @@ Item {
                             }
                         }
 
-                        Widgets.ColorText {
+                        InlineHint {
                             Layout.fillWidth: true
                             visible: !root._share.canUpload && !!(root._share.uploadDisabledReason)
-                            sourceText: root._share.uploadDisabledReason || ""
-                            defaultColor: theme.muted
-                            wrapMode: Text.WordWrap
+                            text: root._share.uploadDisabledReason || ""
                         }
 
                         // Export Support checkbox (feeds PartyTab)
@@ -802,12 +872,15 @@ Item {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 2
-                                Widgets.ColorText { sourceText: "^7Export Support (Party buffs)" }
                                 Widgets.ColorText {
                                     Layout.fillWidth: true
-                                    sourceText: root._share.exportPartyDescription || ""
-                                    defaultColor: theme.muted
-                                    wrapMode: Text.WordWrap
+                                    sourceText: "^7Export Support (Party buffs)"
+                                    elide: Text.ElideRight
+                                }
+                                InlineHint {
+                                    Layout.fillWidth: true
+                                    maxLines: 2
+                                    text: root._share.exportPartyDescription || ""
                                 }
                             }
                         }
@@ -845,15 +918,16 @@ Item {
                         spacing: theme.space2
 
                         Widgets.ColorText {
+                            Layout.fillWidth: true
                             sourceText: "^7Open a build from a link or code"
                             font.pixelSize: theme.fontSize + 3
                             font.bold: true
+                            elide: Text.ElideRight
                         }
-                        Widgets.ColorText {
+                        InlineHint {
                             Layout.fillWidth: true
-                            sourceText: "Paste a pobb.in, Maxroll, Pastebin, or poe.ninja link — or a raw build share code. Opens as a new build by default."
-                            defaultColor: theme.muted
-                            wrapMode: Text.WordWrap
+                            maxLines: 2
+                            text: "Paste a pobb.in, Maxroll, Pastebin, or poe.ninja link — or a raw build share code. Opens as a new build by default."
                         }
 
                         Widgets.EditControl {
@@ -884,6 +958,7 @@ Item {
                             Widgets.DropDownControl {
                                 id: openModeDrop
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 100
                                 implicitHeight: 26
                                 model: [
                                     "Open as a new build (default)",
@@ -898,8 +973,8 @@ Item {
                             }
 
                             Widgets.Button {
+                                objectName: "pob.import.open_btn"
                                 label: root._open.importButtonLabel || "Open as New Build"
-                                implicitWidth: 165
                                 implicitHeight: 26
                                 controlEnabled: !!root._open.canImport
                                 tooltipText: root._open.importDisabledReason || ""
@@ -907,12 +982,10 @@ Item {
                             }
                         }
 
-                        Widgets.ColorText {
+                        InlineHint {
                             Layout.fillWidth: true
                             visible: !root._open.canImport && !!(root._open.importDisabledReason)
-                            sourceText: root._open.importDisabledReason || ""
-                            defaultColor: theme.muted
-                            wrapMode: Text.WordWrap
+                            text: root._open.importDisabledReason || ""
                         }
 
                         Widgets.ColorText {
