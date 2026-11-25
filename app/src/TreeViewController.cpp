@@ -101,6 +101,33 @@ void TreeViewController::refresh(LuaEngine* engine) {
     if (!engine)
         return;
     m_engine = engine;
+
+    // Phase 15.2 fast path: when static tree topology is already loaded, query
+    // only the tiny dynamic allocation state first. If topologyKey still
+    // matches, skip building and QVariant-deep-copying ~8k static Lua tables.
+    if (m_loaded && !m_lastTopologyKey.isEmpty()) {
+        const QVariant dynVar = engine->callGlobal("pob_getTreeDynamicState", { m_lastTopologyKey });
+        if (dynVar.typeId() == QMetaType::QVariantMap) {
+            const QVariantMap dyn = dynVar.toMap();
+            if (!dyn.value("topologyChanged", true).toBool()) {
+                const QString revision = dyn.value("revision").toString();
+                if (!revision.isEmpty() && revision == m_lastRevision) {
+                    refreshOverlays();
+                    return;
+                }
+                m_lastRevision = revision;
+                m_allocatedIds.clear();
+                const QVariantList ids = dyn.value("allocatedIds").toList();
+                m_allocatedIds.reserve(ids.size());
+                for (const QVariant& v : ids)
+                    m_allocatedIds.insert(v.toInt());
+                emit allocationChanged();
+                refreshOverlays();
+                return;
+            }
+        }
+    }
+
     QVariant data = engine->getTreeData();
     if (data.typeId() != QMetaType::QVariantMap) {
         // Tree not ready yet. Do NOT poll: LuaEngine::treeChanged / modeChanged
@@ -118,14 +145,23 @@ void TreeViewController::refresh(LuaEngine* engine) {
     // serial into one opaque string. Empty means the host predates the field: fall
     // through and rebuild rather than throttle on a value we cannot trust.
     const QString revision = d.value("revision").toString();
-    if (m_loaded && !revision.isEmpty() && revision == m_lastRevision) {
+    const QString topologyKey = d.value("topologyKey").toString();
+    if (m_loaded && !revision.isEmpty() && revision == m_lastRevision
+        && topologyKey == m_lastTopologyKey) {
         refreshOverlays();
         return;
     }
     m_lastRevision = revision;
+    m_lastTopologyKey = topologyKey;
     m_loaded = true;
 
     const QVariantList nodeRows = d.value("nodes").toList();
+    m_allocatedIds.clear();
+    for (const QVariant& row : nodeRows) {
+        const QVariantMap node = row.toMap();
+        if (node.value("allocated").toBool())
+            m_allocatedIds.insert(node.value("id").toInt());
+    }
     if (m_nodes)
         m_nodes->setNodes(nodeRows);
     rebuildHitIndex(nodeRows);
@@ -187,14 +223,13 @@ int TreeViewController::hitTestTree(double treeX, double treeY) const {
     return bestId;
 }
 
-// Phase 4b: allocation toggles. Call the Lua bridge, then refresh the models so
-// the canvas reflects the new alloc state, and repaint via viewChanged().
+// Phase 4b / 15.2: allocation toggles. Call the Lua bridge, then refresh
+// (taking the incremental dynamic-state path when topology is unchanged).
 void TreeViewController::allocNode(int id) {
     if (!m_engine)
         return;
     m_engine->allocNode(id);
     refresh(m_engine);
-    emit viewChanged();
 }
 
 void TreeViewController::deallocNode(int id) {
@@ -202,7 +237,6 @@ void TreeViewController::deallocNode(int id) {
         return;
     m_engine->deallocNode(id);
     refresh(m_engine);
-    emit viewChanged();
 }
 
 void TreeViewController::toggleNode(int id) {
@@ -210,7 +244,6 @@ void TreeViewController::toggleNode(int id) {
         return;
     m_engine->toggleNode(id);
     refresh(m_engine);
-    emit viewChanged();
 }
 
 // Phase 4b: set the tree search string; store the matching id list and notify.

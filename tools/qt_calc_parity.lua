@@ -20,15 +20,27 @@
 -- smoke test + a same-engine Qt-vs-legacy diff aid, NOT a pass/fail gate against
 -- the stale snapshots. Hard-fails only if a build cannot be loaded/calculated.
 
-_POB_LUA_DIR = _SRC_DIR .. "/../app/lua"
+local srcDir = _SRC_DIR or "."
+_POB_LUA_DIR = srcDir .. "/../app/lua"
 dofile(_POB_LUA_DIR .. "/pob_host.lua")
 
-local OUT = (os.getenv("TEMP") or ".") .. "/pob_parity_report.txt"
+local outDir = os.getenv("TEMP") or os.getenv("TMPDIR") or "."
+local OUT = outDir .. "/pob_parity_report.txt"
 local out = io.open(OUT, "w")
-local function w(...) out:write(table.concat({ ... }, " ") .. "\n"); out:flush() end
+local function w(...)
+  local line = table.concat({ ... }, " ")
+  if out then
+    out:write(line .. "\n")
+    out:flush()
+  end
+  if io and io.stderr then
+    io.stderr:write("[parity] " .. line .. "\n")
+    io.stderr:flush()
+  end
+end
 local function round(x, p) local m = 10 ^ (p or 4); return math.floor(x * m + 0.5) / m end
 
-local testDir = _SRC_DIR .. "/../spec/TestBuilds/3.13"
+local testDir = srcDir .. "/../spec/TestBuilds/3.13"
 local builds = { "Dual Savior", "Dual Wield Cospris CoC", "Generals Perforate Zerker",
                  "Mirage Archer Toxic Rain", "OccVortex" }
 
@@ -37,11 +49,16 @@ local gKeys, gMatch = 0, 0
 for _, name in ipairs(builds) do
   local ok, tb = pcall(dofile, testDir .. "/" .. name .. ".lua")
   if not ok or type(tb) ~= "table" then anyLoadFail = true; w("LOAD-FAIL", name, tostring(tb)); goto continue end
-  local okLoad = pcall(pob_loadBuildXML, tb.xml, name)
-  local ct = main.modes.BUILD.calcsTab
+  local okLoad, loadRes = pcall(pob_loadBuildXML, tb.xml, name)
+  if pob_recalculate then pcall(pob_recalculate) end
+  local ct = main and main.modes and main.modes.BUILD and main.modes.BUILD.calcsTab
   if ct and not ct.mainOutput then pcall(function() ct:BuildOutput() end) end
   local mo = (ct and ct.mainOutput) or {}
-  if not okLoad or not (ct and ct.mainOutput) then anyLoadFail = true; w("CALC-FAIL", name); goto continue end
+  if not okLoad or loadRes == false or not (ct and ct.mainOutput) then
+    anyLoadFail = true
+    w("CALC-FAIL", name, tostring(loadRes))
+    goto continue
+  end
   local keys, match = 0, 0
   for key, expected in pairs(tb.output) do
     keys = keys + 1; gKeys = gKeys + 1
@@ -59,5 +76,5 @@ w(string.format("TOTAL snapshot-match %d/%d (%.0f%%); loads=%s",
    gMatch, gKeys, gKeys > 0 and gMatch / gKeys * 100 or 0, anyLoadFail and "SOME FAILED" or "ALL OK"))
 w(anyLoadFail and "RESULT: FAIL (a build failed to load/calc)"
               or "RESULT: OK (all builds loaded+calculated; snapshot drift is 3.13-vs-3.28 version, expected)")
-out:close()
+if out then out:close() end
 os.exit(anyLoadFail and 1 or 0)

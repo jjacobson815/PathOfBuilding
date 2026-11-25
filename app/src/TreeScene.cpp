@@ -50,6 +50,7 @@ void TreeScene::setController(TreeViewController* ctrl) {
     m_controller = ctrl;
     if (m_controller) {
         connect(m_controller, &TreeViewController::viewChanged, this, &TreeScene::onControllerViewChanged);
+        connect(m_controller, &TreeViewController::allocationChanged, this, &TreeScene::onControllerAllocationChanged);
         connect(m_controller, &TreeViewController::searchChanged, this, &TreeScene::onControllerSearchChanged);
         connect(m_controller, &TreeViewController::overlaysChanged, this, &TreeScene::onControllerOverlaysChanged);
     }
@@ -237,6 +238,20 @@ void TreeScene::onControllerViewChanged() {
     syncViewport();
 }
 
+void TreeScene::onControllerAllocationChanged() {
+    if (!m_controller || m_nodeRecs.isEmpty()
+        || m_builtTopologyKey.isEmpty()
+        || m_builtTopologyKey != m_controller->lastTopologyKey()) {
+        m_dirtyGeometry = true;
+        syncViewport();
+        return;
+    }
+    syncDynamicAllocations();
+    m_builtRevision = m_controller->lastRevision();
+    m_dirtyTint = true;
+    update();
+}
+
 void TreeScene::onControllerSearchChanged() {
     m_dirtyOverlay = true;
     emit searchChanged();
@@ -346,8 +361,9 @@ quint32 colorFromString(const QString& s) {
 }
 }
 
-// Parse the controller's QVariant payload into plain structs, once per tree
-// revision. Every later rebuild (hover, heat map, compare) reads these.
+// Parse the controller's QVariant payload into plain structs, once per static
+// topology. Dynamic allocation flips and hover/heat-map/compare rebuilds read
+// these directly without touching QVariantMaps again.
 void TreeScene::parseTreeData() {
     m_nodeRecs.clear();
     m_nodeIndex.clear();
@@ -373,10 +389,27 @@ void TreeScene::parseTreeData() {
             r.x = node.value("x").toFloat();
             r.y = node.value("y").toFloat();
             r.alloc = node.value("allocated").toBool();
-            r.icon = sprite(node.value("iconSprite"));
-            r.frame = sprite(node.value("frameSprite"));
-            r.framePath = sprite(node.value("framePathSprite"));
+            const Sprite curIcon = sprite(node.value("iconSprite"));
+            r.iconInactive = sprite(node.value("iconInactiveSprite"));
+            r.iconActive = sprite(node.value("iconActiveSprite"));
+            if (!r.iconInactive.valid())
+                r.iconInactive = curIcon;
+            if (!r.iconActive.valid())
+                r.iconActive = curIcon;
+
+            const Sprite curFrame = sprite(node.value("frameSprite"));
+            r.frameUnalloc = sprite(node.value("frameUnallocSprite"));
             r.frameAlloc = sprite(node.value("frameAllocSprite"));
+            r.framePath = sprite(node.value("framePathSprite"));
+            if (!r.frameUnalloc.valid() && !r.alloc)
+                r.frameUnalloc = curFrame;
+            if (!r.frameAlloc.valid() && r.alloc)
+                r.frameAlloc = curFrame;
+            if (!r.frameUnalloc.valid())
+                r.frameUnalloc = curFrame;
+            if (!r.frameAlloc.valid())
+                r.frameAlloc = curFrame;
+
             m_nodeIndex.insert(r.id, m_nodeRecs.size());
             m_nodeRecs.append(r);
         }
@@ -388,22 +421,58 @@ void TreeScene::parseTreeData() {
             ConnRec c;
             c.n1 = conn.value("nodeId1").toInt();
             c.n2 = conn.value("nodeId2").toInt();
-            c.atlas = conn.value("atlas").toString();
+            const QString state = conn.value("state").toString();
+            const QString curAtlas = conn.value("atlas").toString();
+            float curVert[8] = {};
             bool okV = false, okU = false;
-            readFloats(conn.value("vert"), c.vert, 8, okV);
+            readFloats(conn.value("vert"), curVert, 8, okV);
             readFloats(conn.value("uv"), c.uv, 8, okU);
-            if (c.atlas.isEmpty() || !okV || !okU)
+            if (curAtlas.isEmpty() || !okV || !okU)
                 continue;
-            bool ok = false;
+
+            bool okNorm = false;
+            c.atlasNormal = conn.value("atlasNormal").toString();
+            readFloats(conn.value("vertNormal"), c.vertNormal, 8, okNorm);
+            if (c.atlasNormal.isEmpty())
+                c.atlasNormal = curAtlas;
+            if (!okNorm)
+                std::memcpy(c.vertNormal, curVert, sizeof(curVert));
+
+            bool okInt = false;
             c.atlasIntermediate = conn.value("atlasIntermediate").toString();
-            readFloats(conn.value("vertIntermediate"), c.vertIntermediate, 8, ok);
-            c.hasIntermediate = ok && !c.atlasIntermediate.isEmpty();
+            readFloats(conn.value("vertIntermediate"), c.vertIntermediate, 8, okInt);
+            if (!c.atlasIntermediate.isEmpty()) {
+                if (!okInt)
+                    std::memcpy(c.vertIntermediate, c.vertNormal, sizeof(c.vertNormal));
+                c.hasIntermediate = true;
+            }
+
+            bool okAct = false;
             c.atlasActive = conn.value("atlasActive").toString();
-            readFloats(conn.value("vertActive"), c.vertActive, 8, ok);
-            c.hasActive = ok && !c.atlasActive.isEmpty();
+            readFloats(conn.value("vertActive"), c.vertActive, 8, okAct);
+            if (state == QLatin1String("Active")) {
+                if (c.atlasActive.isEmpty())
+                    c.atlasActive = curAtlas;
+                if (!okAct)
+                    std::memcpy(c.vertActive, curVert, sizeof(curVert));
+                c.hasActive = true;
+            } else if (!c.atlasActive.isEmpty()) {
+                if (!okAct)
+                    std::memcpy(c.vertActive, c.vertNormal, sizeof(c.vertNormal));
+                c.hasActive = true;
+            }
+
             m_connRecs.append(c);
         }
     }
+}
+
+void TreeScene::syncDynamicAllocations() {
+    if (!m_controller)
+        return;
+    const QSet<int>& allocIds = m_controller->allocatedIds();
+    for (NodeRec& r : m_nodeRecs)
+        r.alloc = allocIds.contains(r.id);
 }
 
 void TreeScene::addSpriteQuad(QVector<QuadBatch>& batches, QHash<QString, int>& index,
@@ -495,10 +564,11 @@ void TreeScene::buildTintedBatches() {
     QHash<QString, int> connIdx;
     for (const ConnRec& c : m_connRecs) {
         const bool a1 = allocOf(c.n1), a2 = allocOf(c.n2);
-        const float* vert = c.vert;
-        QString atlas = c.atlas;
+        const bool bothAlloc = a1 && a2;
+        const float* vert = (bothAlloc && c.hasActive) ? c.vertActive : c.vertNormal;
+        QString atlas = (bothAlloc && c.hasActive) ? c.atlasActive : c.atlasNormal;
         quint32 tint = kWhite;
-        if (!(a1 && a2) && hasPath && c.hasIntermediate
+        if (!bothAlloc && hasPath && c.hasIntermediate
             && (a1 || c.n1 == hover || m_hoverPath.contains(c.n1))
             && (a2 || c.n2 == hover || m_hoverPath.contains(c.n2))) {
             vert = c.vertIntermediate;
@@ -506,10 +576,10 @@ void TreeScene::buildTintedBatches() {
         }
         if (compareOn) {
             const bool cBoth = m_controller->compareAlloc(c.n1) && m_controller->compareAlloc(c.n2);
-            if (cBoth && !(a1 && a2)) {
+            if (cBoth && !bothAlloc) {
                 if (c.hasActive) { vert = c.vertActive; atlas = c.atlasActive; }
                 tint = kGreen;
-            } else if ((a1 && a2) && !cBoth) {
+            } else if (bothAlloc && !cBoth) {
                 tint = kRed;
             }
         }
@@ -528,10 +598,14 @@ void TreeScene::buildTintedBatches() {
             if (h != 0)
                 base = h;
         }
-        addSpriteQuad(m_nodeIconBatches, iconIdx, n.icon, n.x, n.y, base);
+        const Sprite& icon = (n.alloc && n.iconActive.valid()) ? n.iconActive
+                           : (n.iconInactive.valid() ? n.iconInactive : n.iconActive);
+        addSpriteQuad(m_nodeIconBatches, iconIdx, icon, n.x, n.y, base);
 
         // Frame state (PassiveTreeView.lua:788-797).
-        const Sprite* frame = &n.frame;
+        const Sprite* frame = n.alloc
+            ? (n.frameAlloc.valid() ? &n.frameAlloc : &n.frameUnalloc)
+            : &n.frameUnalloc;
         if (!n.alloc) {
             if ((heatOn || n.id == hover || compareShowsAlloc) && n.frameAlloc.valid())
                 frame = &n.frameAlloc;
@@ -754,10 +828,16 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
     mat.scale(static_cast<float>(scale), static_cast<float>(scale), 1.0f);
     transformNode->setMatrix(mat);
 
-    // 3. Tree data: re-parse only when the tree revision changes.
+    // 3. Tree data: re-parse static topology only when topologyKey changes;
+    // when only allocation state changed, sync NodeRec::alloc in-place and
+    // rebuild only tinted batches (skipping group batches and QVariant parsing).
     const QString currentRev = m_controller ? m_controller->lastRevision() : QString();
-    if (m_dirtyGeometry || m_builtRevision.isEmpty() || m_builtRevision != currentRev) {
+    const QString currentTopoKey = m_controller ? m_controller->lastTopologyKey() : QString();
+    const bool topologyMismatch = m_builtTopologyKey.isEmpty() || currentTopoKey.isEmpty()
+                                  || m_builtTopologyKey != currentTopoKey;
+    if (m_dirtyGeometry || topologyMismatch) {
         m_dirtyGeometry = false;
+        m_builtTopologyKey = currentTopoKey;
         m_builtRevision = currentRev;
         parseTreeData();
         buildGroupBatches();
@@ -765,6 +845,10 @@ QSGNode* TreeScene::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
         populateTinted(groupContainer, m_groupBatches, window());
         m_dirtyTint = true;
         m_dirtyOverlay = true;
+    } else if (m_builtRevision != currentRev) {
+        m_builtRevision = currentRev;
+        syncDynamicAllocations();
+        m_dirtyTint = true;
     }
 
     // 4. Art state + tints (hover preview, heat map, compare).

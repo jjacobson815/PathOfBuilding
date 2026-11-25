@@ -48,6 +48,9 @@ public:
     TreeConnectorModel* connectorsModel() const { return m_connectors; }
     LuaEngine* engine() const { return m_engine; }
     QString lastRevision() const { return m_lastRevision; }
+    QString lastTopologyKey() const { return m_lastTopologyKey; }
+    const QSet<int>& allocatedIds() const { return m_allocatedIds; }
+    bool isNodeAllocated(int id) const { return m_allocatedIds.contains(id); }
 
     QVariantMap bounds() const { return m_bounds; }
     double boundsSize() const { return m_bounds.value("size").toDouble(); }
@@ -94,9 +97,10 @@ public:
     Q_INVOKABLE void setTreeSearch(const QString& str);
 
 signals:
-    void viewChanged();       // data/allocation changed -> views must rebuild
+    void viewChanged();           // full topology/data changed -> views must re-parse
+    void allocationChanged();     // dynamic allocation changed (same topology) -> update art/tints only
     void searchChanged();
-    void boundsValidChanged();   // bounds + assets became valid (fires once)
+    void boundsValidChanged();    // bounds + assets became valid (fires once)
     void assetsInitialized();     // asset metadata ready (fires once)
     void overlaysChanged();       // heat map / compare overlay data changed
 
@@ -127,6 +131,8 @@ private:
     QHash<qint64, QVector<int>> m_hitCells;
     QHash<int, QPair<double, double>> m_nodePos;
     QString m_lastRevision;
+    QString m_lastTopologyKey;
+    QSet<int> m_allocatedIds;
     bool m_heatOn = false;
     QHash<int, quint32> m_heat;
     bool m_compareActive = false;

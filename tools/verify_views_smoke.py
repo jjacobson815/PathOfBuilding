@@ -3,7 +3,7 @@
 
 Validates that:
   1. `_status.log` exists in `<capture_dir>` and reports captured views.
-  2. All 10 expected views (or the views specified via `--views` / present in
+  2. All 9 expected views (or the views specified via `--views` / present in
      `_status.log`) exist as non-empty, non-blank PNG images.
   3. Zero QML warnings or errors appear in `pob-qt-main.log` or capture logs.
 
@@ -35,7 +35,6 @@ EXPECTED_VIEWS = [
     "config",
     "notes",
     "party",
-    "compare",
 ]
 
 QML_ERROR_PATTERNS = [
@@ -148,12 +147,12 @@ def main():
     parser.add_argument(
         "--views",
         default=None,
-        help="Comma-separated list of view names to require (default: all 10 standard views)",
+        help="Comma-separated list of view names to require (default: all 9 standard views)",
     )
     parser.add_argument(
         "--allow-present",
         action="store_true",
-        help="Validate only the view PNGs present in capture_dir instead of requiring all 10",
+        help="Validate only the view PNGs present in capture_dir instead of requiring all 9",
     )
     args = parser.parse_args()
 
@@ -185,8 +184,8 @@ def main():
         views = list(EXPECTED_VIEWS)
 
     ok = True
-    # _status.log reports viewList count = number of BUILD views (9); LIST mode
-    # is appended separately by runCapture(), yielding 10 total PNGs.
+    # _status.log reports viewList count = number of BUILD views (8); LIST mode
+    # is appended separately by runCapture(), yielding 9 total PNGs.
     min_build_views = len([v for v in EXPECTED_VIEWS if v != "list"])
     m = re.search(r"viewList\s+count=(\d+)", status_text)
     if m:

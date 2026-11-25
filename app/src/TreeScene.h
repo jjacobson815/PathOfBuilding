@@ -136,12 +136,13 @@ private:
         int id = -1;
         float x = 0, y = 0;
         bool alloc = false;
-        Sprite icon, frame, framePath, frameAlloc;
+        Sprite iconInactive, iconActive;
+        Sprite frameUnalloc, framePath, frameAlloc;
     };
     struct ConnRec {
         int n1 = -1, n2 = -1;
-        QString atlas, atlasIntermediate, atlasActive;
-        float vert[8] = {};
+        QString atlasNormal, atlasIntermediate, atlasActive;
+        float vertNormal[8] = {};
         float vertIntermediate[8] = {};
         float vertActive[8] = {};
         float uv[8] = {};
@@ -149,6 +150,7 @@ private:
     };
 
     void onControllerViewChanged();
+    void onControllerAllocationChanged();
     void onControllerSearchChanged();
     void onControllerOverlaysChanged();
     // Push the controller's tree extent + our size into m_view and re-apply a
@@ -158,6 +160,7 @@ private:
     void viewMoved();
 
     void parseTreeData();
+    void syncDynamicAllocations();
     void buildGroupBatches();
     void buildTintedBatches();
     void buildOverlayBatches();
@@ -182,6 +185,7 @@ private:
     bool m_dirtyOverlay = true;    // search / radius / zoom changed: rebuild overlay
     bool m_dirtyTransform = true;
     QString m_builtRevision;
+    QString m_builtTopologyKey;
     QString m_backgroundPath;
 
     QVector<NodeRec> m_nodeRecs;

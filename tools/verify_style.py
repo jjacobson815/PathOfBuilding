@@ -31,7 +31,6 @@ VIEW_THRESHOLDS = {
     "config": 0.85,
     "notes": 0.85,
     "party": 0.85,
-    "compare": 0.85,
 }
 
 

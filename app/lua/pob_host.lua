@@ -2423,18 +2423,161 @@ local function sheetInfo(ver, base)
     return nil
 end
 
-function pob_getTreeData()
-local bm = main and main.modes and main.modes.BUILD
--- Phase 4: the BUILD'S OWN SPEC TREE FIRST, global latest only as the no-build
--- fallback. This order used to be reversed, and because main.tree[latestTreeVersion]
--- is essentially always present the spec branch was dead code -- so a build sitting
--- on, say, a 3_25 spec rendered 3_28 GEOMETRY with that spec's allocation ids
--- painted over it. Every path below reads tree.treeVersion (the tree object's own
--- version), not this local, so correcting the selection is all that is needed.
-local tree = (bm and bm.spec and bm.spec.tree)
-             or (main and main.tree and latestTreeVersion and main.tree[latestTreeVersion])
+-- Phase 15.2: static tree topology cache metadata (key + renderable nodeCount).
+-- Lets pob_getTreeDynamicState(lastTopologyKey) and pob_getTreeData(lastTopologyKey)
+-- return a tiny allocation-only payload on node clicks without rebuilding ~8k
+-- static node/group/connector tables or QVariant-deep-copying them across C++.
+local _treeTopologyCache = nil
+
+local function resolveActiveTreeAndSpec()
+    local bm = main and main.modes and main.modes.BUILD
+    -- Phase 4: the BUILD'S OWN SPEC TREE FIRST, global latest only as the no-build
+    -- fallback. This order used to be reversed, and because main.tree[latestTreeVersion]
+    -- is essentially always present the spec branch was dead code -- so a build sitting
+    -- on, say, a 3_25 spec rendered 3_28 GEOMETRY with that spec's allocation ids
+    -- painted over it. Every path below reads tree.treeVersion (the tree object's own
+    -- version), not this local, so correcting the selection is all that is needed.
+    local tree = (bm and bm.spec and bm.spec.tree)
+                 or (main and main.tree and latestTreeVersion and main.tree[latestTreeVersion])
+    if not tree then return nil, nil end
+    local spec = (bm and bm.spec) or { nodes = { } }
+    return tree, spec
+end
+
+-- Invalidation key for static tree topology. Changes whenever tree version,
+-- spec identity, explicit spec serial, cluster jewel subgraphs, hashOverrides
+-- (tattoos / runegrafts / timeless), or class/ascendancy selection changes.
+local function computeTreeTopologyKey(tree, spec)
+    local subCount, subHash = 0, 0
+    if spec and spec.subGraphs then
+        for sgId, sg in pairs(spec.subGraphs) do
+            subCount = subCount + 1
+            subHash = foldAllocId(subHash, tonumber(sgId) or 0)
+            if type(sg) == "table" then
+                if sg.nodes then
+                    for nid in pairs(sg.nodes) do
+                        subHash = foldAllocId(subHash, nid)
+                    end
+                end
+                if sg.connectors then
+                    subHash = foldAllocId(subHash, #sg.connectors)
+                end
+            end
+        end
+    end
+    local ovCount, ovHash = 0, 0
+    if spec and spec.hashOverrides then
+        for nid, ov in pairs(spec.hashOverrides) do
+            ovCount = ovCount + 1
+            ovHash = foldAllocId(ovHash, nid)
+            if type(ov) == "table" and type(ov.dn) == "string" then
+                ovHash = foldAllocId(ovHash, #ov.dn)
+            end
+        end
+    end
+    return table.concat({
+        tostring(tree.treeVersion or ""),
+        tostring(spec),
+        tostring(_treeSpecSerial),
+        tostring(subCount),
+        string.format("%.0f", subHash),
+        tostring(ovCount),
+        string.format("%.0f", ovHash),
+        tostring(spec and spec.curClassId or 0),
+        tostring(spec and spec.curAscendClassId or 0),
+        tostring(spec and spec.curSecondaryAscendClassId or 0),
+    }, "|")
+end
+
+local function buildTreeRevision(treeVersion, nodeCount, allocCount, allocSum)
+    -- Opaque revision for the renderer's rebuild throttle. Folds every input that
+    -- changes what the canvas should draw: the tree version (a spec switch can move
+    -- geometry wholesale), the node/alloc counts, the allocated-id checksum (catches
+    -- same-count swaps) and the search/spec serials. A ':'-joined string rather than a
+    -- packed integer so no component can overflow into another's bits.
+    return table.concat({
+        tostring(treeVersion),
+        tostring(nodeCount),
+        tostring(allocCount),
+        string.format("%.0f", allocSum),
+        tostring(_treeSearchSerial),
+        tostring(_treeSpecSerial),
+    }, ":")
+end
+
+-- Collect ONLY the currently allocated renderable node IDs + allocCount + allocSum.
+-- Visits spec.allocNodes (~1-130 entries) instead of scanning all ~3.2k tree.nodes.
+local function collectTreeDynamicAlloc(tree, spec)
+    local allocatedIds = { }
+    local allocCount = 0
+    local allocSum = 0
+    local allocNodes = spec and spec.allocNodes
+    if type(allocNodes) == "table" then
+        for id, snode in pairs(allocNodes) do
+            if snode and snode.alloc then
+                local tn = tree.nodes and tree.nodes[id]
+                if tn and tn.group and tn.rsq and not tn.isProxy and not tn.group.isProxy then
+                    allocCount = allocCount + 1
+                    allocSum = foldAllocId(allocSum, id)
+                    allocatedIds[#allocatedIds + 1] = id
+                end
+            end
+        end
+    elseif spec and type(spec.nodes) == "table" then
+        for id, snode in pairs(spec.nodes) do
+            if snode and snode.alloc then
+                local tn = tree.nodes and tree.nodes[id]
+                if tn and tn.group and tn.rsq and not tn.isProxy and not tn.group.isProxy then
+                    allocCount = allocCount + 1
+                    allocSum = foldAllocId(allocSum, id)
+                    allocatedIds[#allocatedIds + 1] = id
+                end
+            end
+        end
+    end
+    return allocatedIds, allocCount, allocSum
+end
+
+-- Phase 15.2: fast incremental tree dynamic-state query.
+-- When lastTopologyKey matches the current static topology, returns only the
+-- allocated node IDs and updated revision (O(allocated) instead of O(tree)).
+-- When topology changed, returns { topologyChanged = true, topologyKey = ... }
+-- so TreeViewController falls back to a full pob_getTreeData() load.
+function pob_getTreeDynamicState(lastTopologyKey)
+    local tree, spec = resolveActiveTreeAndSpec()
+    if not tree then return nil end
+    local topologyKey = computeTreeTopologyKey(tree, spec)
+    if not lastTopologyKey or lastTopologyKey == ""
+        or lastTopologyKey ~= topologyKey
+        or not _treeTopologyCache
+        or _treeTopologyCache.key ~= topologyKey then
+        return {
+            topologyChanged = true,
+            topologyKey = topologyKey,
+        }
+    end
+    local allocatedIds, allocCount, allocSum = collectTreeDynamicAlloc(tree, spec)
+    local nodeCount = _treeTopologyCache.nodeCount
+    return {
+        topologyChanged = false,
+        incremental = true,
+        topologyKey = topologyKey,
+        revision = buildTreeRevision(tree.treeVersion, nodeCount, allocCount, allocSum),
+        allocCount = allocCount,
+        nodeCount = nodeCount,
+        allocatedIds = allocatedIds,
+    }
+end
+
+function pob_getTreeData(lastTopologyKey)
+local tree, spec = resolveActiveTreeAndSpec()
 if not tree then return nil end
-local spec = (bm and bm.spec) or { nodes = { } }
+local topologyKey = computeTreeTopologyKey(tree, spec)
+if lastTopologyKey and lastTopologyKey ~= ""
+    and lastTopologyKey == topologyKey
+    and _treeTopologyCache and _treeTopologyCache.key == topologyKey then
+    return pob_getTreeDynamicState(lastTopologyKey)
+end
 
 -- (`resolveAsset` and `firstRect` lived here and are gone: both were dead --
 -- resolveAsset had zero callers and read tree.assets, which is STALE on 3_20+
@@ -2749,6 +2892,11 @@ for id, node in pairs(tree.nodes) do
         end
         local sd = node.sd
         if type(sd) ~= "table" then sd = { } end
+        local iconInactive = nodeSprite(node, false)
+        local iconActive = nodeSprite(node, true)
+        local frameUnalloc = nodeFrame(node, "unalloc")
+        local frameAlloc = nodeFrame(node, "alloc")
+        local framePath = nodeFrame(node, "path")
         nodes[#nodes + 1] = {
             id = id,
             x = node.x,
@@ -2766,13 +2914,16 @@ for id, node in pairs(tree.nodes) do
             isProxy = node.isProxy or false,
             hasGroup = node.group ~= nil,
             groupIsProxy = node.group.isProxy or false,
-            iconSprite = nodeSprite(node, alloc),
-            frameSprite = nodeFrame(node, alloc),
-            -- Part 4.3: the frame art for the two other legacy states, so the
-            -- renderer can show the hover path ("path") and heat map ("alloc")
-            -- without a round trip. Only unallocated nodes ever need them.
-            framePathSprite = (not alloc) and nodeFrame(node, "path") or nil,
-            frameAllocSprite = (not alloc) and nodeFrame(node, "alloc") or nil,
+            iconSprite = alloc and iconActive or iconInactive,
+            iconInactiveSprite = iconInactive,
+            iconActiveSprite = iconActive,
+            frameSprite = alloc and frameAlloc or frameUnalloc,
+            frameUnallocSprite = frameUnalloc,
+            -- Part 4.3 / Phase 15.2: cache all three legacy frame states statically
+            -- so hover preview ("path"), heat map ("alloc"), and incremental alloc
+            -- flips ("alloc" <-> "unalloc") work in C++ without re-querying Lua.
+            framePathSprite = framePath,
+            frameAllocSprite = frameAlloc,
             sd = sd,
         }
     end
@@ -2863,6 +3014,8 @@ local function addConnectorRecord(c)
             vert = vertArr,
             uv = uvArr,
             atlas = resolveConnectorAtlas(c.type, state),
+            vertNormal = stateVert("Normal"),
+            atlasNormal = state ~= "Normal" and resolveConnectorAtlas(c.type, "Normal") or nil,
             vertIntermediate = stateVert("Intermediate"),
             atlasIntermediate = state ~= "Intermediate" and resolveConnectorAtlas(c.type, "Intermediate") or nil,
             vertActive = stateVert("Active"),
@@ -2904,9 +3057,11 @@ for name, asset in pairs(tree.assets) do
 end
 
 
--- TEMP DEBUG (verify_style): dump tree sizes to a file so the headless
--- self-test can confirm the full node set without qDebug visibility.
+_treeTopologyCache = { key = topologyKey, nodeCount = #nodes }
+
 return {
+    topologyChanged = true,
+    topologyKey = topologyKey,
     nodes = nodes,
     groups = groups,
     connectors = connectors,
@@ -2916,19 +3071,7 @@ return {
     backgroundUrl = "file:///" .. (_SRC_DIR .. "/TreeData/" .. tree.treeVersion .. "/background-3.png"):gsub("\\", "/"),
     allocCount = allocCount,
     nodeCount = #nodes,
-    -- Opaque revision for the renderer's rebuild throttle. Folds every input that
-    -- changes what the canvas should draw: the tree version (a spec switch can move
-    -- geometry wholesale), the node/alloc counts, the allocated-id checksum (catches
-    -- same-count swaps) and the search serial. A ':'-joined string rather than a
-    -- packed integer so no component can overflow into another's bits.
-    revision = table.concat({
-        tostring(tree.treeVersion),
-        tostring(#nodes),
-        tostring(allocCount),
-        string.format("%.0f", allocSum),
-        tostring(_treeSearchSerial),
-        tostring(_treeSpecSerial),
-    }, ":"),
+    revision = buildTreeRevision(tree.treeVersion, #nodes, allocCount, allocSum),
 }
 end
 
@@ -6680,5 +6823,158 @@ function pob_selftestTreeVersionArt()
     end
     res.restored = #tt.specList == origCount and tt.activeSpec == origActive
     res.ok = allOk and res.restored
+    return res
+end
+
+-- Phase 15.2: Tree static/dynamic payload split performance & cache-coherence selftest.
+-- Measures full pob_getTreeData() vs incremental pob_getTreeDynamicState(topologyKey)
+-- across an alloc -> dealloc cycle, verifies topology cache hit, payload reduction,
+-- allocation state parity, stale-key invalidation, and clean tree state restoration.
+function pob_selftestTreePerf()
+    local res = { ok = false }
+    local bm = main and main.modes and main.modes.BUILD
+    local spec = bm and bm.spec
+    if not spec then res.error = "no spec"; return res end
+
+    local fid = pob_frontierNode and pob_frontierNode(spec) or nil
+    if not fid then
+        for id, n in pairs(spec.nodes) do
+            if not n.alloc and n.path and #n.path > 0 and n.type == "Normal" then
+                fid = id
+                break
+            end
+        end
+    end
+    if not fid then res.error = "no frontier node"; return res end
+
+    local before = spec:CreateUndoState()
+    local function restore()
+        spec:RestoreUndoState(before)
+        bm.buildFlag = true
+        pob_recalculate()
+        spec:ResetUndo()
+    end
+
+    local function hasId(list, target)
+        if type(list) ~= "table" then return false end
+        for i = 1, #list do
+            if list[i] == target then return true end
+        end
+        return false
+    end
+
+    local t0 = GetTime()
+    local full = pob_getTreeData()
+    local fullMs = GetTime() - t0
+    if not full or not full.topologyKey or not full.nodes then
+        restore()
+        res.error = "full payload missing"
+        return res
+    end
+    local topoKey = full.topologyKey
+    res.fullMs = fullMs
+    res.fullNodes = #full.nodes
+    res.initialAllocCount = full.allocCount
+
+    -- Allocate frontier node and measure incremental dynamic state query.
+    local allocRes = pob_allocNode(fid)
+    local t1 = GetTime()
+    local dynAlloc = pob_getTreeDynamicState(topoKey)
+    local dynAllocMs = GetTime() - t1
+
+    -- Also verify pob_getTreeData(topoKey) takes the incremental path on cache hit.
+    local dynViaGet = pob_getTreeData(topoKey)
+
+    res.dynAllocMs = dynAllocMs
+    res.dynAllocIds = (dynAlloc and dynAlloc.allocatedIds) and #dynAlloc.allocatedIds or -1
+    res.allocEngineOk = (allocRes ~= nil and allocRes.ok == true and spec.nodes[fid].alloc == true)
+    res.cacheHitAllocOk = (dynAlloc ~= nil and dynAlloc.topologyChanged == false
+        and dynAlloc.nodes == nil and dynAlloc.groups == nil and dynAlloc.connectors == nil
+        and dynAlloc.revision ~= full.revision
+        and dynAlloc.allocCount > full.allocCount
+        and hasId(dynAlloc.allocatedIds, fid))
+    res.getTreeDataIncrementalOk = (dynViaGet ~= nil and dynViaGet.topologyChanged == false
+        and dynViaGet.revision == dynAlloc.revision)
+    res.payloadSmallerOk = (res.dynAllocIds >= 0 and res.dynAllocIds < res.fullNodes)
+
+    -- Deallocate frontier node and verify revision + allocation return to baseline.
+    local deallocRes = pob_deallocNode(fid)
+    local t2 = GetTime()
+    local dynDealloc = pob_getTreeDynamicState(topoKey)
+    local dynDeallocMs = GetTime() - t2
+
+    res.dynDeallocMs = dynDeallocMs
+    res.deallocEngineOk = (deallocRes ~= nil and deallocRes.ok == true and not spec.nodes[fid].alloc)
+    res.cacheHitDeallocOk = (dynDealloc ~= nil and dynDealloc.topologyChanged == false
+        and dynDealloc.revision == full.revision
+        and dynDealloc.allocCount == full.allocCount
+        and not hasId(dynDealloc.allocatedIds, fid))
+
+    -- Stale topology key must force a full topology reload.
+    local stale = pob_getTreeDynamicState("__stale_topology_key__")
+    res.invalidationOk = (stale ~= nil and stale.topologyChanged == true)
+
+    restore()
+    res.stateRestoredOk = (not spec.nodes[fid].alloc)
+    res.ok = res.allocEngineOk and res.cacheHitAllocOk and res.getTreeDataIncrementalOk
+        and res.payloadSmallerOk and res.deallocEngineOk and res.cacheHitDeallocOk
+        and res.invalidationOk and res.stateRestoredOk
+    return res
+end
+
+-- Phase 15.2: LuaJIT GC64 & bounded-heap recalc stability selftest.
+-- Verifies 64-bit LuaJIT GC64 runtime and ensures repeated recalculation cycles
+-- do not exhibit unbounded Lua heap growth after full GC cycles.
+function pob_selftestMemoryGC64()
+    local res = { ok = false }
+    local bm = main and main.modes and main.modes.BUILD
+    if not bm then res.error = "no build"; return res end
+
+    local hasJit = (type(jit) == "table")
+    local jitArch = hasJit and tostring(jit.arch or "") or ""
+    local ptrBytes = 0
+    local okFfi, ffi = pcall(require, "ffi")
+    if okFfi and ffi and ffi.sizeof then
+        local okSz, sz = pcall(ffi.sizeof, "void*")
+        if okSz and type(sz) == "number" then ptrBytes = sz end
+    end
+    local tblPtrHex = tostring({}):match("0x(%x+)") or ""
+    local gc64Ok = hasJit and (ptrBytes == 8 or #tblPtrHex > 8 or jitArch == "x64" or jitArch == "arm64")
+
+    -- Warm up 2 recalc cycles so one-time lazy tables are already populated.
+    for _ = 1, 2 do
+        bm.buildFlag = true
+        pob_recalculate()
+    end
+    collectgarbage("collect")
+    collectgarbage("collect")
+    local memBeforeKB = collectgarbage("count")
+
+    local cycles = 20
+    local recalcAllOk = true
+    for _ = 1, cycles do
+        bm.buildFlag = true
+        local r = pob_recalculate()
+        if not (type(r) == "table" and r.ok) then
+            recalcAllOk = false
+        end
+    end
+    collectgarbage("collect")
+    collectgarbage("collect")
+    local memAfterKB = collectgarbage("count")
+    local deltaKB = memAfterKB - memBeforeKB
+    local maxDeltaKB = 65536 -- 64 MiB ceiling catches runaway leaks without GC jitter flakes
+
+    res.hasJit = hasJit
+    res.jitArch = jitArch
+    res.ptrBytes = ptrBytes
+    res.gc64Ok = gc64Ok
+    res.cycles = cycles
+    res.recalcAllOk = recalcAllOk
+    res.memBeforeKB = math.floor(memBeforeKB + 0.5)
+    res.memAfterKB = math.floor(memAfterKB + 0.5)
+    res.deltaKB = math.floor(deltaKB + 0.5)
+    res.heapBoundedOk = (memBeforeKB > 0 and memAfterKB > 0 and deltaKB < maxDeltaKB)
+    res.ok = res.gc64Ok and res.recalcAllOk and res.heapBoundedOk
     return res
 end
