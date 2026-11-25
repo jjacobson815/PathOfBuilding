@@ -13,6 +13,7 @@ PopupBase {
 
     title: "Spectre Library"
     padding: 12
+    acceptOnEnter: false
 
     signal spectresSaved()
 
@@ -217,6 +218,7 @@ PopupBase {
                 }
 
                 Rectangle {
+                    id: buildListBox
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     color: "transparent"
@@ -263,6 +265,7 @@ PopupBase {
                                     root.buildSel = index
                                     root.availSel = -1
                                     root._selectMinion(modelData.id)
+                                    buildListBox.forceActiveFocus()
                                 }
                                 onContainsMouseChanged: {
                                     if (!containsMouse) { buildTip.hide(); return }

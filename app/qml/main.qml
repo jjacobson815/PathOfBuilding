@@ -232,8 +232,7 @@ Window {
                         visible: root.activeView !== "TREE" && root.activeView !== "ITEMS"
                                  && root.activeView !== "SKILLS" && root.activeView !== "CALCS"
                                  && root.activeView !== "CONFIG" && root.activeView !== "NOTES"
-                                 && root.activeView !== "IMPORT" && root.activeView !== "COMPARE"
-                                 && root.activeView !== "PARTY"
+                                 && root.activeView !== "IMPORT" && root.activeView !== "PARTY"
                     }
 
                     SkillsView  { visible: root.activeView === "SKILLS" }
@@ -242,7 +241,6 @@ Window {
                     ConfigView  { visible: root.activeView === "CONFIG" }
                     NotesView   { visible: root.activeView === "NOTES" }
                     ImportView  { visible: root.activeView === "IMPORT" }
-                    CompareView { visible: root.activeView === "COMPARE" }
                     PartyView   { visible: root.activeView === "PARTY" }
                 }
             }
@@ -255,6 +253,8 @@ Window {
                 }
             }
         }
+
+        // Coordinator will mount UpdateBanner here post-merge.
 
         // --- Bottom bar: Options / About / (inert) Check for Update + version ---
         Rectangle {
@@ -421,10 +421,11 @@ Window {
     }
 
     // ===== Phase 3: hotkeys ================================================
-    // Ports the Ctrl-key block of buildMode:OnFrame (Build.lua:1173-1204).
+    // Ports the Ctrl-key block of buildMode:OnFrame (Build.lua:1362-1383).
     // That block ran per frame off inputEvents; with no frame loop these are
-    // real QML Shortcuts instead. Ctrl+1..9 come from the viewList registry's
-    // own `key` field, so the bindings stay correct if the registry changes.
+    // real QML Shortcuts instead. Ctrl+1..8 come from the viewList registry's
+    // own `key` field (8 BUILD views), so the bindings stay correct if the
+    // registry changes.
     Instantiator {
         model: root.allViews
         delegate: Shortcut {
@@ -432,6 +433,12 @@ Window {
             enabled: root.activeMode === "BUILD"
             onActivated: luaEngine.setActiveView(modelData.id)
         }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+I"
+        enabled: root.activeMode === "BUILD"
+        onActivated: luaEngine.setActiveView("IMPORT")
     }
 
     Shortcut {

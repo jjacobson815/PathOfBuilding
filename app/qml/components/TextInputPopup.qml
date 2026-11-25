@@ -19,12 +19,9 @@ PopupBase {
     property bool confirmEnabled: text.match(/\S/) !== null
 
     padding: 16
-
-    // Override PopupBase's unconditional Keys.onReturnPressed: Enter
-    // shouldn't accept while the field is blank, mirroring legacy's
-    // disabled Create button (NewFolderPopup's `buf:match("%S")` check).
-    Keys.onReturnPressed: if (confirmEnabled) root.accept()
-    Keys.onEnterPressed: if (confirmEnabled) root.accept()
+    // PopupBase's contentScope handles Return/Enter when acceptOnEnter is true.
+    acceptOnEnter: confirmEnabled
+    onOpened: input.forceActiveFocus()
 
     ColumnLayout {
         implicitWidth: 280

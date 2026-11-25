@@ -27,6 +27,8 @@ PopupBase {
 
     title: "Manage Passive Trees"
     padding: 12
+    acceptOnEnter: false
+    onOpened: mainCol.forceActiveFocus()
 
     function refresh() {
         var st = luaEngine.invoke("pob_getSpecList", [])
@@ -74,19 +76,21 @@ PopupBase {
         if (r && r.ok) selIndex = to
     }
 
-    Keys.onPressed: function (event) {
-        if (event.key === Qt.Key_F2 && hasSel) {
-            _askName("rename", specs[selIndex].title, "Rename Tree")
-            event.accepted = true
-        } else if (event.key === Qt.Key_Delete && hasSel && count > 1) {
-            deleteConfirm.open()
-            event.accepted = true
-        }
-    }
-
     ColumnLayout {
+        id: mainCol
         width: 400
         spacing: 8
+        focus: true
+
+        Keys.onPressed: function (event) {
+            if (event.key === Qt.Key_F2 && root.hasSel) {
+                root._askName("rename", root.specs[root.selIndex].title, "Rename Tree")
+                event.accepted = true
+            } else if ((event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) && root.hasSel && root.count > 1) {
+                deleteConfirm.open()
+                event.accepted = true
+            }
+        }
 
         RowLayout {
             spacing: 6
@@ -140,7 +144,7 @@ PopupBase {
                         id: rowMa
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: root.selIndex = index
+                        onClicked: { root.selIndex = index; mainCol.forceActiveFocus() }
                         onDoubleClicked: {
                             root.selIndex = index
                             if (!modelData.isActive) root._run("pob_setActiveSpec", [index + 1])

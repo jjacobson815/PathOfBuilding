@@ -32,6 +32,32 @@ Dialog {
     focus: true
     anchors.centerIn: parent
     closePolicy: Popup.CloseOnEscape
+    property bool acceptOnEnter: true
+
+    // Dialog is a Popup (not an Item), so Keys cannot be attached to root.
+    // Host children inside a focusable FocusScope so Return/Enter bubble up
+    // to accept() and Escape closes via closePolicy.
+    contentItem: FocusScope {
+        id: contentScope
+        implicitWidth: childrenRect.width
+        implicitHeight: childrenRect.height
+        focus: true
+
+        Keys.onReturnPressed: (event) => {
+            if (root.acceptOnEnter) {
+                root.accept()
+                event.accepted = true
+            }
+        }
+        Keys.onEnterPressed: (event) => {
+            if (root.acceptOnEnter) {
+                root.accept()
+                event.accepted = true
+            }
+        }
+    }
+
+    onOpened: contentScope.forceActiveFocus()
 
     background: Rectangle {
         color: theme.background
@@ -68,9 +94,4 @@ Dialog {
             }
         }
     }
-
-    // RETURN/ENTER -> accept() (the legacy `enterControl` click); ESCAPE is
-    // already handled by closePolicy above (-> reject(), Dialog default).
-    Keys.onReturnPressed: root.accept()
-    Keys.onEnterPressed: root.accept()
 }

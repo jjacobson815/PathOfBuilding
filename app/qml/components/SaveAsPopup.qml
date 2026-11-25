@@ -26,8 +26,8 @@ PopupBase {
     property var _check: ({ valid: false, exists: false, fullPath: "" })
     readonly property bool canSave: _check.valid === true && _check.exists !== true
 
-    Keys.onReturnPressed: if (canSave) accept()
-    Keys.onEnterPressed: if (canSave) accept()
+    acceptOnEnter: canSave
+    onOpened: nameEdit.forceActiveFocus()
 
     function openForCurrentBuild() {
         var st = luaEngine.invoke("pob_saveAsGetState", [])
@@ -140,6 +140,7 @@ PopupBase {
         }
 
         Rectangle {
+            id: folderBox
             Layout.fillWidth: true
             Layout.preferredHeight: 220
             color: "transparent"
@@ -189,7 +190,10 @@ PopupBase {
                         id: folderMa
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: root.selFolderIndex = index
+                        onClicked: {
+                            root.selFolderIndex = index
+                            folderBox.forceActiveFocus()
+                        }
                         onDoubleClicked: root._refreshFolders(modelData.subPath, root.sortMode)
                     }
                 }

@@ -19,6 +19,8 @@ PopupBase {
 
     title: "Import Tree"
     padding: 16
+    acceptOnEnter: false
+    onOpened: nameInput.forceActiveFocus()
 
     function cancelPending() {
         if (pendingReqId > 0) {
@@ -80,12 +82,12 @@ PopupBase {
         }
     }
 
-    Keys.onReturnPressed: doImport()
-    Keys.onEnterPressed: doImport()
-
     ColumnLayout {
         width: 540
         spacing: 8
+        focus: true
+        Keys.onReturnPressed: (event) => { root.doImport(); event.accepted = true }
+        Keys.onEnterPressed: (event) => { root.doImport(); event.accepted = true }
 
         GridLayout {
             columns: 2

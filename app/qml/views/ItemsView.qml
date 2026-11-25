@@ -578,12 +578,12 @@ Item {
                         label: "Cancel"
                         onClicked: itemsView.call("pob_itemsCloseDisplayItem")
                     }
-                    // Buy similar opens the trade site (CompareBuySimilar): Phase 12.
+                    // Buy similar is deferred to a future release (v1.1 trade integration).
                     Widgets.Button {
                         width: 100; height: 20
                         label: "Buy similar"
                         controlEnabled: false
-                        tooltipText: "Trade search arrives with the trader (Phase 12)."
+                        tooltipText: "Coming in a future release."
                     }
                 }
 

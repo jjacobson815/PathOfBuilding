@@ -52,6 +52,8 @@ PopupBase {
     property bool _sharedFocus: false        // F2 / Delete act on the pane clicked last
 
     padding: 12
+    acceptOnEnter: false
+    onOpened: mainCol.forceActiveFocus()
 
     function _call(name, args) {
         return luaEngine.invoke(fn[name], args || [])
@@ -144,6 +146,7 @@ PopupBase {
 
         // A Dialog is not an Item, so the key handler lives on the content.
         ColumnLayout {
+            id: mainCol
             implicitWidth: root.hasShared ? 300 : 346
             spacing: 4
             focus: true
@@ -216,7 +219,7 @@ PopupBase {
                                 root._dragMove(rowMa, mouse, { kind: "set", index: index }, modelData.listLabel)
                             }
                             onReleased: if (ghost.active) ghost.finish()
-                            onClicked: { root.selIndex = index; root._sharedFocus = false }
+                            onClicked: { root.selIndex = index; root._sharedFocus = false; mainCol.forceActiveFocus() }
                             onDoubleClicked: {
                                 root.selIndex = index
                                 if (!modelData.isActive) root._run("setActive", [index + 1])
@@ -326,7 +329,7 @@ PopupBase {
                                 root._dragMove(sharedMa, mouse, { kind: "sharedSet", index: index }, modelData.listLabel)
                             }
                             onReleased: if (ghost.active) ghost.finish()
-                            onClicked: { root.sharedSel = index; root._sharedFocus = true }
+                            onClicked: { root.sharedSel = index; root._sharedFocus = true; mainCol.forceActiveFocus() }
                             onContainsMouseChanged: {
                                 if (!containsMouse || ghost.active) { sharedTip.hide(); return }
                                 sharedTip.clear()
