@@ -1,8 +1,8 @@
 # Phase 14 — Packaging, Update & Distribution
 
-**Status:** PARTIAL — Parts 14.1 (non-signing) & 14.3 DONE (2026-11-24, Wave 1). **Wave 2 v1 decisions locked (2026-11-24):**
-- **Part 14.2 (Auto-Update — IN SCOPE FOR WAVE 2):** Lightweight async GitHub Releases notifier querying `jjacobson815/PathOfBuilding` (build-time/env overridable) on startup / manual click, showing a non-intrusive in-app banner opening the GitHub Release page; keep legacy `Update.exe` / `UpdateCheck` paths inert; expose `POB_DEV_MODE=1` / `--dev` replacing `manifest.xml`/`installed.cfg` devMode selection.
-- **Release artifacts (v1):** Unsigned Windows NSIS installer + portable ZIP (document SmartScreen warning in release notes). Windows Authenticode code signing and Linux AppImage/Flatpak are **DEFERRED to post-v1**.
+**Status:** DONE (v1 scope — Parts 14.1 non-signing & 14.3 DONE in Wave 1; Part 14.2 DONE in Wave 2 on 2026-11-24).
+- **Part 14.2 (Auto-Update — DONE):** Lightweight async GitHub Releases notifier (`app/lua/pob_update.lua`, `UpdateBanner.qml`, `AboutPopup.qml`) querying `POB_UPDATE_REPO` (default `jjacobson815/PathOfBuilding`) on startup / manual click and opening the GitHub Release page via `Qt.openUrlExternally`; legacy `launch.CheckForUpdate`/`ApplyUpdate`/`Update.exe` paths kept inert; `--dev` / `POB_DEV_MODE=1` wired into `launch.devMode`.
+- **Release artifacts (v1):** Unsigned Windows NSIS installer + portable ZIP (document SmartScreen warning in release notes). Windows Authenticode code signing and Linux AppImage/Flatpak remain **DEFERRED to post-v1**.
 **Goal:** Turn the built app into a shippable, self-updating product on Windows
 (and optionally Linux): a real installer, a replacement for the legacy auto-update
 system, a full CI matrix, and the visual/parity gates run automatically.
@@ -27,17 +27,17 @@ size decision).
 
 ## Part 14.2 — Replace the auto-update system
 
-- [ ] The legacy updater (`UpdateCheck`/`UpdateApply`/`LaunchInstall` + `manifest.xml`
+- [x] The legacy updater (`UpdateCheck`/`UpdateApply`/`LaunchInstall` + `manifest.xml`
   + `Update.exe` + `SpawnProcess`/`Restart`, sha1-diff against a remote manifest,
-  zip bundles via `lzip`) is Windows/SimpleGraphic-specific. **Replace it** with an
-  installer-native updater (Qt IFW / Sparkle-alike / GitHub-release check). (M-L)
-- [ ] Keep the engine-side update UI inert but non-crashing: `launch.updateAvailable`/
-  `updateProgress` still drive Main.lua buttons/toasts and the `CanExit("UPDATE")`
-  path — stub them so they degrade cleanly. Decide what replaces the `first.run`/
-  `installed.cfg`/`manifest.xml`-derived devMode + userPath selection. (M)
-- [ ] If you keep manifest.xml for versioning, keep `update_manifest.py` working
-  (regenerate on release); the dist layout differs from legacy parts (default/
-  runtime/program/tree). (S)
+  zip bundles via `lzip`) is Windows/SimpleGraphic-specific. **Replaced** with a
+  lightweight async GitHub Releases notifier (`app/lua/pob_update.lua`,
+  `UpdateBanner.qml`, `AboutPopup.qml`) opening the GitHub Release page. (M-L)
+- [x] Keep the engine-side update UI inert but non-crashing: `launch.CheckForUpdate`
+  and `launch.ApplyUpdate` are overridden to inert no-ops in `pob_host.lua` before
+  `OnInit`; `POB_DEV_MODE=1` / `--dev` replaces `first.run`/`manifest.xml`-only
+  devMode selection (`pob_selftestDevMode`). (M)
+- [x] Manifest versioning preserved via `app/pack-manifest.cmake` stamping
+  `branch`+`platform` onto dist builds while keeping `installed.cfg`. (S)
 
 ## Part 14.3 — CI matrix & gates
 
@@ -80,3 +80,9 @@ size decision).
 - Completed Parts 14.1 (non-signing) & 14.3: hardened `app/deploy-win-standalone.sh` + `app/pack-manifest.cmake`, codified `CMAKE_INSTALL_ALWAYS ON` in `app/CMakeLists.txt`, added NSIS installer (`app/installer/pob-qt.nsi`, `app/installer/build-installer.sh` verifying `>=39` TreeData dirs + `pob://` registry hooks), updated 6 `.github/workflows/*.yml` files, fixed `tools/screenshot_diff.py` & `tools/verify_style.py`, and added `tools/verify_views_smoke.py` (with pure-stdlib PNG fallback).
 - Verified: `bash -n` exit 0 on both scripts, `py_compile` exit 0, YAML load OK on all workflows, and live `pob-qt.exe --capture` + `verify_views_smoke.py` PASSED across all 10 views with 0 QML warnings/errors.
 - Deferred to Wave 2/3: Part 14.2 (auto-update replacement), Windows code signing, optional Linux AppImage/Flatpak.
+
+## Session log — 2026-11-24 (Wave 2, Windows, branch `wave-2-v1-hardening`)
+
+- Completed Part 14.2: added `app/lua/pob_update.lua` (async GitHub Releases notifier over Phase 10 `SubScriptManager`/`pob.http`, semver compare, `pob_checkForUpdates`, `pob_getUpdateState`, `pob_dismissUpdate`, loopback `pob_selftestUpdate`, `pob_selftestDevMode`), `app/qml/components/UpdateBanner.qml`, manual `"Check for Updates"` in `app/qml/components/AboutPopup.qml`, startup trigger in `app/qml/main.qml` (suppressed in `--capture` mode via `pobCaptureMode`), `LuaEngine::updateChanged()` + `POB_UPDATE_REPO` (default `jjacobson815/PathOfBuilding`) + `--dev`/`POB_DEV_MODE=1`, and inert `launch.CheckForUpdate`/`ApplyUpdate` overrides in `pob_host.lua`.
+- Verified: `update-notifier ok = true (asyncLoopbackOk=true, dismissOk=true, semverOk=true)`, `dev-mode ok = true (devModeLaunchOk=true, devModeTypeOk=true, legacyInertOk=true, updateRepoOk=true)`, `bash -n` exit 0 on `app/deploy-win-standalone.sh` and `app/installer/build-installer.sh` (`makensis` not installed locally).
+- Post-v1 deferred: Windows Authenticode code signing, Linux AppImage/Flatpak.

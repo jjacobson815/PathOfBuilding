@@ -90,6 +90,34 @@ Every `.lua` file under `src/` must parse cleanly with stock `luajit -bl`.
   Loaded via guarded `pcall(require, ...)` in `pob_host.lua` so missing modules
   do not block boot while real load errors are logged via `pob.log`.
 
+## Wave 2 Host Bridge Seams (`app/lua/` + `app/src/`)
+
+- **Compare Tab Filter (`LuaEngine::viewList()` / `LuaEngine::setActiveView()`):**
+  Filters `id == "COMPARE"` out of `main.modes.BUILD.viewList` in C++ (returning
+  8 BUILD views: `TREE`, `SKILLS`, `ITEMS`, `CALCS`, `CONFIG`, `NOTES`, `IMPORT`,
+  `PARTY`) so Phase 13 stays dropped with zero `src/Modules/Build.lua` edits.
+- **Dev Mode & Update Repo Globals (`LuaEngine::init()` / `app/src/main.cpp`):**
+  - `--dev` CLI flag or `POB_DEV_MODE=1` env sets `_POB_DEV_MODE` (boolean),
+    wired into `launch.devMode` in `pob_host.lua` prior to `Modules/Main` init
+    (for ModCache regen / engine dev checks). UI-only dev controls (`~~temp~~.xml`
+    autosave, JSON import, `devModeAlt`) are dropped for v1.
+  - `POB_UPDATE_REPO` env (or compile-time macro, default
+    `"jjacobson815/PathOfBuilding"`) configures the Phase 14.2 GitHub Releases
+    notifier target.
+- **Phase 14.2 Update Notifier (`app/lua/pob_update.lua`):**
+  Loaded via guarded `pcall(require, "pob_update")` in `pob_host.lua`; uses
+  `SubScriptManager`/`pob.http` and emits `LuaEngine::updateChanged()` via
+  `"update"` in `pob.emitSignal` / `invoke()` `_emit`. Legacy
+  `launch.CheckForUpdate` and `launch.ApplyUpdate` are overridden to inert
+  no-ops in `pob_host.lua` before `OnInit`.
+- **Phase 15.2 Split Tree Payload (`pob_getTreeData` / `pob_getTreeDynamicState`):**
+  Splits static tree topology (keyed by `topologyKey` covering tree version,
+  spec, `_treeSpecSerial`, cluster `subGraphs`, `hashOverrides`, and
+  class/ascendancy) from dynamic allocation state so `TreeViewController` +
+  `TreeScene` perform in-place allocation updates without re-marshalling the
+  full static tree on every click. `pob_getTreeData()` (no-arg) remains
+  backwards-compatible.
+
 ## Upstream-Sync Procedure (Ongoing Per-League Cadence — Phase 15.4)
 
 `src/` drifts from maintained upstream each league. The coupled unit is

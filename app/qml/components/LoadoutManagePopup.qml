@@ -276,9 +276,7 @@ PopupBase {
 
         readonly property bool canCreate:
             customNameEdit.text.match(/\S/) !== null && !root._isDuplicateName(customNameEdit.text)
-
-        Keys.onReturnPressed: if (canCreate) accept()
-        Keys.onEnterPressed: if (canCreate) accept()
+        acceptOnEnter: canCreate
 
         function openFresh() {
             treeDrop.currentIndex = 0

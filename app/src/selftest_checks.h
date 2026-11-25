@@ -68,6 +68,20 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
         qCritical() << "viewList is not a list:" << viewList.typeName();
         return false;
     }
+    // Wave 2 (Phase 13): C++ viewList() must filter out dropped COMPARE tab.
+    {
+        const QVariantList filtered = engine.viewList().toList();
+        bool hasCompare = false;
+        for (const QVariant& e : filtered) {
+            if (e.toMap().value("id").toString() == QLatin1String("COMPARE"))
+                hasCompare = true;
+        }
+        qDebug() << "filtered viewList entries:" << filtered.size() << "hasCompare=" << hasCompare;
+        if (filtered.size() != 8 || hasCompare) {
+            qCritical() << "filtered viewList check FAILED (want 8 entries without COMPARE)";
+            return false;
+        }
+    }
 
     // Build:Init runs calcsTab:BuildOutput() during OnInit/OnFrame, so output exists.
     // Read only the scalar values we check via a Lua helper to avoid converting the
@@ -1049,6 +1063,12 @@ inline bool pob_run_all_selftests(LuaEngine& engine) {
     if (!pob_run_lua_check(engine, "pob_selftestImportShare", "import-share")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestImportPipeline", "import-pipeline")) return false;
     if (!pob_run_lua_check(engine, "pob_selftestImportAccountFlow", "import-account")) return false;
+    // Wave 2 (Phase 14.2 & 15.2/15.3): GitHub Releases update notifier, devMode seam,
+    // split static/dynamic tree perf, and LuaJIT GC64 / repeated-recalc memory check.
+    if (!pob_run_lua_check(engine, "pob_selftestUpdate", "update-notifier")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestDevMode", "dev-mode")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestTreePerf", "tree-perf")) return false;
+    if (!pob_run_lua_check(engine, "pob_selftestMemoryGC64", "memory-gc64")) return false;
 
     qDebug() << "SELFTEST PASSED";
     return true;

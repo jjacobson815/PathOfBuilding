@@ -41,6 +41,7 @@
         <file>components/Toast.qml</file>
         <file>components/ToastStack.qml</file>
         <file>components/BottomBar.qml</file>
+        <file>components/UpdateBanner.qml</file>
         <file>components/AboutPopup.qml</file>
         <file>components/TreeViewer.qml</file>
         <file>components/StatDiff.js</file>
@@ -83,7 +84,6 @@
         <file>views/ConfigView.qml</file>
         <file>views/NotesView.qml</file>
         <file>views/ImportView.qml</file>
-        <file>views/CompareView.qml</file>
         <file>views/PartyView.qml</file>
         <file>views/PlaceholderView.qml</file>
         <file>views/BuildListPage.qml</file>

@@ -365,6 +365,7 @@ int main(int argc, char** argv) {
     QQmlApplicationEngine qml;
     qmlRegisterType<TreeScene>("PathOfBuilding", 1, 0, "TreeScene");
     qml.rootContext()->setContextProperty("luaEngine", &engine);
+    qml.rootContext()->setContextProperty("pobCaptureMode", capture);
 
     // Phase 1b: expose the engine's UITheme as a QML theme singleton (context
     // property "theme"). Must be initialised AFTER engine.init() so the Lua

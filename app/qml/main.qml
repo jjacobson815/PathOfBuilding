@@ -88,6 +88,12 @@ Window {
             }
         }
 
+        // Phase 14.2: non-intrusive dismissible GitHub Releases update banner.
+        Widgets.UpdateBanner {
+            id: updateBanner
+            Layout.fillWidth: true
+        }
+
         // --- Body: swaps between BUILD page and LIST page by mode ---
         StackLayout {
             Layout.fillWidth: true
@@ -254,8 +260,6 @@ Window {
             }
         }
 
-        // Coordinator will mount UpdateBanner here post-merge.
-
         // --- Bottom bar: Options / About / (inert) Check for Update + version ---
         Rectangle {
             id: bottomBarRow
@@ -418,6 +422,9 @@ Window {
         var shell = luaEngine.getShellState()
         if (shell) root.sideBarCollapsed = shell.sideBarCollapsed || false
         checkConversion()
+        if (!pobCaptureMode) {
+            Qt.callLater(function() { luaEngine.invoke("pob_checkForUpdates") })
+        }
     }
 
     // ===== Phase 3: hotkeys ================================================
