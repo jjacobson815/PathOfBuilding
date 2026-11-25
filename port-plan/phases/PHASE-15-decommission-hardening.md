@@ -1,6 +1,8 @@
 # Phase 15 — SimpleGraphic Decommission & Final Hardening
 
-**Status:** PARTIAL — Parts 15.1 & 15.4 DONE (2026-11-24, Wave 1); Parts 15.2 & 15.3 DEFERRED to Wave 2/3
+**Status:** PARTIAL — Parts 15.1 & 15.4 DONE (2026-11-24, Wave 1). **Wave 2 v1 scope locked (2026-11-24 — Targeted v1 Hardening):**
+- **Part 15.2 (IN SCOPE FOR WAVE 2):** Split static tree topology from dynamic allocation state in `pob_getTreeData` (memoization/caching; `sheetInfo` already memoized in Phase 4, `pob_getActiveSkills` already uncalled in live QML) + long-session memory / LuaJIT GC64 verification.
+- **Part 15.3 (IN SCOPE FOR WAVE 2):** Fix `PopupBase` `Keys` dialog bug (Enter/F2/Delete), core keyboard shortcut audit, `busted` + `TestBuilds` calc-parity verification, refresh 9-view Windows capture baselines (removing `compare.png`) at Wave 2 close. **Dev-mode decision:** expose `POB_DEV_MODE=1` / `--dev` for engine `devMode`/ModCache regen; document UI-only dev controls (`~~temp~~.xml` autosave, JSON import, `devModeAlt`) as dropped for v1. **Deferred post-v1:** responsive portrait layouts, pixel-sampled legacy visual diffing, RELIC foil shader, multi-column tooltip overflow, and OneDrive error popups.
 **Goal:** Close out the port: formally retire the SimpleGraphic host contract,
 remove any dead legacy-update code, do the final performance and parity passes, and
 establish the ongoing upstream-sync procedure so the fork doesn't rot each league.

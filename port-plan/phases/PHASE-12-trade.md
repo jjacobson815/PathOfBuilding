@@ -1,7 +1,6 @@
 # Phase 12 — Trade (PoB Trader)
 
-**Status:** NOT STARTED — SCOPE: confirm with user (large, network-heavy, optional
-for a first shippable release).
+**Status:** DEFERRED TO POST-V1 (v1.1) — Decision locked 2026-11-24. For v1, hide or add a clear `"Coming in a future release"` tooltip to disabled Items-tab trade / `"Buy similar"` controls; full PoB Trader, TradeQueryGenerator, rate limiter, and Buy Similar wait for v1.1.
 **Goal:** Port the in-app trade tooling: the PoB Trader popup (per-slot weighted
 trade searches with result import + evaluation), the TradeQueryGenerator (weighted
 pseudo-stat query builder), rate limiting, and poe.ninja currency conversion.

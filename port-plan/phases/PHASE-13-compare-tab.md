@@ -1,6 +1,6 @@
 # Phase 13 — Compare Tab
 
-**Status:** NOT STARTED — SCOPE: **confirm with user before starting.**
+**Status:** DROPPED PERMANENTLY (2026-11-24) — Fork-specific (`CompareTab.lua`, 4986 lines, session-only, not in upstream PoB Community). Remove the placeholder Compare tab (`CompareView.qml`, sidebar/`viewList`, `compare.png`) during Wave 2 so the Qt port stays cleanly aligned with upstream PoB Community.
 **Goal:** Port the Compare tab — side-by-side comparison of the current build
 against one or more other builds across six sub-views, with a category-attribution
 power report.

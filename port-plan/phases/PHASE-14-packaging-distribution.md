@@ -1,6 +1,8 @@
 # Phase 14 — Packaging, Update & Distribution
 
-**Status:** PARTIAL — Parts 14.1 (non-signing) & 14.3 DONE (2026-11-24, Wave 1); Part 14.2 (auto-update) & Windows code signing DEFERRED to Wave 2/3
+**Status:** PARTIAL — Parts 14.1 (non-signing) & 14.3 DONE (2026-11-24, Wave 1). **Wave 2 v1 decisions locked (2026-11-24):**
+- **Part 14.2 (Auto-Update — IN SCOPE FOR WAVE 2):** Lightweight async GitHub Releases notifier querying `jjacobson815/PathOfBuilding` (build-time/env overridable) on startup / manual click, showing a non-intrusive in-app banner opening the GitHub Release page; keep legacy `Update.exe` / `UpdateCheck` paths inert; expose `POB_DEV_MODE=1` / `--dev` replacing `manifest.xml`/`installed.cfg` devMode selection.
+- **Release artifacts (v1):** Unsigned Windows NSIS installer + portable ZIP (document SmartScreen warning in release notes). Windows Authenticode code signing and Linux AppImage/Flatpak are **DEFERRED to post-v1**.
 **Goal:** Turn the built app into a shippable, self-updating product on Windows
 (and optionally Linux): a real installer, a replacement for the legacy auto-update
 system, a full CI matrix, and the visual/parity gates run automatically.

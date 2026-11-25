@@ -9,8 +9,13 @@ only when the active phase tells you to. See `README.md` for the full protocol.
 
 ## ▶ ACTIVE PHASE
 
-**ACTIVE: Wave 2/3 Scope-Gated Work — Phase 12 (Trade Tooling) / Phase 13 (Compare Tab) / Phase 14.2 (Auto-Update) / Phase 15.2–15.3 (Perf & Parity QA).**
-Work order is set below (🗺 "PHASE ORDER"): 4 → 5 → 6 → 7 → ~~Phase 3 long tail~~ (DONE) → ~~8~~ (DONE) → ~~10~~ (DONE) → ~~11~~ (DONE) → ~~9~~ (DONE) → **12** → 13 → 14 *(14.1 non-signing & 14.3 DONE; 14.2 & code signing deferred)* → 15 *(15.1 & 15.4 DONE; 15.2–15.3 deferred)*.
+**ACTIVE: Wave 2 — v1 Hardening & Release Readiness (branch `wave-2-v1-hardening` off `phases-7-8-9`).**
+Scope locked via 2026-11-24 decision review targeting a **shippable v1 release via GitHub Releases** (`jjacobson815/PathOfBuilding`):
+- **Phase 12 (Trade Tooling):** DEFERRED to post-v1 (v1.1); hide or add a clear `"Coming in a future release"` tooltip to disabled Items-tab trade / `"Buy similar"` controls.
+- **Phase 13 (Compare Tab):** DROPPED permanently (fork-specific, not in upstream PoB Community); remove placeholder tab from Qt sidebar & `viewList`.
+- **Phase 14.2 (Auto-Update):** Lightweight async GitHub Releases notifier (`jjacobson815/PathOfBuilding`, build-time/env overridable) opening the GitHub Release page; keep legacy `Update.exe` paths inert. Ship unsigned Windows NSIS installer + portable ZIP for v1 (defer Authenticode signing & Linux AppImage/Flatpak to post-v1).
+- **Phase 15.2–15.3 (Targeted v1 Hardening):** Split static vs dynamic tree payload in `pob_getTreeData` + long-session memory / LuaJIT GC64 check; fix `PopupBase` `Keys` dialog bug; core keyboard shortcut audit; `busted` + `TestBuilds` calc-parity run; expose `POB_DEV_MODE=1` / `--dev` for engine `devMode`/ModCache regen (drop UI-only dev controls); refresh 9-view Windows capture baselines (removing `compare.png`) at Wave 2 close.
+Work order: 4 → 5 → 6 → 7 → ~~Phase 3 long tail~~ (DONE) → ~~8~~ (DONE) → ~~10~~ (DONE) → ~~11~~ (DONE) → ~~9~~ (DONE) → ~~12~~ *(DEFERRED post-v1)* → ~~13~~ *(DROPPED)* → **14.2** *(14.1 non-signing & 14.3 DONE)* → **15.2–15.3** *(15.1 & 15.4 DONE)*.
 *(Wave 1 landed on 2026-11-24: Phases 10, 11, 14.1/14.3, and 15.1/15.4 are complete and gated.)*
 
 **Wave 1 — Phases 10, 11, 14 (14.1 non-signing & 14.3), 15 (15.1 & 15.4) — DONE (2026-11-24, Windows session, branch `phases-7-8-9`).**
@@ -357,33 +362,12 @@ Full detail in `reference/00-architecture.md`. The short list:
   `OnSubFinished`, and `OnSubError` via `Qt::QueuedConnection`, with off-UI-thread
   `pob.http` and a `QTcpServer`-backed Lua `socket` shim for `src/LaunchServer.lua`.
   Covers all 6 engine sites with zero `src/` edits.
-- **Compare tab** (Phase 13) — in scope? It's fork-specific, session-only, 4986
-  lines. Confirm before porting; if dropped, also drop "import as comparison".
-- **Trade tooling** (Phase 12) — port now or defer past first shippable release?
-  The offline planner (Phases 0–11) is already the core product.
-- **Auto-update** (Phase 14) — distribution channel + updater mechanism (installer
-  framework / GitHub releases / own server). Determines the replacement for the
-  legacy Windows updater.
-- **User-data policy** (Phase 1) — **RESOLVED 2026-07-24: SHARE.** Use the legacy
-  `Documents/Path of Building` dir (lossless round-trip + zero migration). This is
-  already the implemented behavior (`LuaEngine::init` → `QStandardPaths`
-  Documents). The SHARE risks (concurrent-run clobber, engine-version-lockstep key
-  stripping, port-bug blast radius on the user's only copy) are all
-  **out-of-scope for this project**: it's a solo hobby fork / proof-of-concept to
-  show upstream, with no shipped audience, no side-by-side production installs, and
-  no independent update cadence — every risk requires a second shipped/concurrent
-  consumer that doesn't exist here (see [[solo-hobby-fork-poc-scope]] framing).
-  Revisit ONLY if upstream adopts the port and it heads toward real distribution —
-  at which point SEPARATE-with-migration becomes the likely answer. The temp-dir
-  path bug was fixed in Phase 0 regardless. (Part 1.4's cloud-robustness code —
-  errorReadingSettings latch, GetCloudProvider, error popups — is still TODO
-  independent of this decision.)
-- **Fontin font licensing** (Phase 1) — **DECIDED 2026-07-23: DEFER.** Build the
-  TextMetrics + color-code subsystem now against the VAR/FIXED fonts (Liberation
-  Sans / mono); stub `fontFontinSC`/`fontFontin` → the VAR face. Revisit the real
-  licensing choice (bundle Fontin TTFs w/ exljbris Extended License, reuse the
-  already-bundled bitmap atlases [legal Q], or substitute an OFL small-caps face)
-  before shipping. 104 item/gem/tree sites will use VAR until then.
+- **Target milestone** (Wave 2 / v1) — **RESOLVED 2026-11-24: Shippable v1 release via GitHub Releases** (`jjacobson815/PathOfBuilding`, build-time/env overridable), executed on branch `wave-2-v1-hardening` off `phases-7-8-9`. Ship unsigned Windows NSIS installer + portable ZIP (document SmartScreen prompt in release notes); defer Windows Authenticode code signing and Linux AppImage/Flatpak to post-v1.
+- **Compare tab** (Phase 13) — **RESOLVED 2026-11-24: DROPPED permanently.** Fork-specific (`src/Classes/CompareTab.lua`, 4986 lines, session-only, not in upstream PoB Community). Remove the placeholder Compare tab (`CompareView.qml`, sidebar/`viewList`, `compare.png`) so the Qt port stays aligned with upstream PoB Community.
+- **Trade tooling** (Phase 12) — **RESOLVED 2026-11-24: DEFERRED to post-v1 (v1.1).** Hide or add a clear `"Coming in a future release"` tooltip to disabled Items-tab trade / `"Buy similar"` controls in v1.
+- **Auto-update** (Phase 14.2) — **RESOLVED 2026-11-24: Lightweight GitHub Releases notifier.** Async check against `jjacobson815/PathOfBuilding` (build-time/env overridable) on startup / manual click; show a non-intrusive in-app update banner opening the GitHub Release page in the browser. Keep legacy `Update.exe` / `UpdateCheck` paths inert.
+- **User-data policy** (Phase 1, re-confirmed for v1 2026-11-24) — **RESOLVED: SHARE (`Documents/Path of Building`).** Zero migration friction for testers opening real builds; document in v1 release notes not to run legacy PoB simultaneously. (Part 1.4 OneDrive `errorReadingSettings` / cloud error popups deferred post-v1.)
+- **Fontin font licensing** (Phase 1, re-confirmed for v1 2026-11-24) — **RESOLVED (v1): Keep Liberation Sans (`VAR`) fallback.** Zero licensing risk and zero font-metric regressions prior to locking v1 capture baselines; revisit OFL small-caps substitution or licensing post-v1.
 - **Parity baseline snapshot** (Phase 0) — Qt repo has 18 System specs, legacy 26;
   pick one as the calc-parity reference.
 - **Ease of use over 1:1 layout** (owner, 2026-10-16; app-wide, Phase 11 first)
@@ -391,9 +375,9 @@ Full detail in `reference/00-architecture.md`. The short list:
   Import/Export tab is the known worst case, see `phases/PHASE-11-import-export.md`
   "Usability requirements"), a clearer layout is allowed; logic stays legacy's,
   and each layout change is a documented difference.
-- **OAuth token storage** (Phase 11) — **RESOLVED 2026-11-24 (v1): keep legacy
-  `Settings.xml` plaintext** (`PoEAPI:UpdateMain()`) to preserve `src/` immutability;
-  OS-keychain migration logged as a post-v1 security follow-up.
+- **OAuth token storage** (Phase 11, re-confirmed for v1 2026-11-24) — **RESOLVED (v1): Keep legacy `Settings.xml` plaintext** (`PoEAPI:UpdateMain()`) to preserve `src/` immutability and shared `Settings.xml` compatibility; OS-keychain migration remains a post-v1 security follow-up.
+- **Phase 15.2–15.3 hardening & dev-mode behaviors** — **RESOLVED 2026-11-24: Targeted v1 pass.** Optimize `pob_getTreeData` (split static topology vs dynamic alloc state) + long-session memory / LuaJIT GC64 check; fix `PopupBase` `Keys` dialog bug; core keyboard shortcut audit; run `busted` + `TestBuilds` calc parity; expose `POB_DEV_MODE=1` / `--dev` for engine `devMode`/ModCache regen while documenting UI-only dev controls (`~~temp~~.xml` autosave, JSON import, `devModeAlt`) as dropped for v1. Defer responsive portrait layouts, RELIC foil shader, multi-column tooltip overflow, and OneDrive error popups to post-v1.
+- **Capture baselines** — **RESOLVED 2026-11-24: Refresh once at Wave 2 close** (delete `compare.png`, update `verify_views_smoke.py` for 8 BUILD views + LIST = 9 PNGs, lock final v1 baselines).
 
 ---
 
