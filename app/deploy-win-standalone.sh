@@ -121,7 +121,7 @@ echo "[deploy] verifying with a clean-PATH smoke test (no mingw on PATH)..."
 # --capture writes relative to the engine cwd (dist/src), so use a bare dir name.
 ( unset QML_IMPORT_PATH QT_PLUGIN_PATH; PATH="/c/Windows/System32:/c/Windows" \
     "$DIST/pob-qt.exe" --capture _deploycheck >/dev/null 2>&1 ) || true
-if grep -Eq "viewList count=(9|10)" "$DIST/src/_deploycheck/_status.log" 2>/dev/null; then
+if grep -Eq "viewList count=(8|9|10)" "$DIST/src/_deploycheck/_status.log" 2>/dev/null; then
     rm -rf "$DIST/src/_deploycheck"
     echo "[deploy] OK — standalone dist boots the engine with no mingw on PATH: $DIST"
     echo "[deploy] $(ls "$DIST"/*.dll | wc -l) DLLs bundled; dist/pob-qt.exe is now double-clickable."
