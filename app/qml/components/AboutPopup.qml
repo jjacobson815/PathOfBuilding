@@ -15,6 +15,22 @@ PopupBase {
     // re-parsing changelog.txt/help.txt on every open).
     property var content: null
     property bool showHelp: false
+    property var updateState: ({})
+
+    function refreshUpdateState() {
+        var st = luaEngine.invoke("pob_getUpdateState")
+        if (st) {
+            updateState = st
+        }
+    }
+
+    Component.onCompleted: refreshUpdateState()
+    onOpened: refreshUpdateState()
+
+    Connections {
+        target: luaEngine
+        function onUpdateChanged() { root.refreshUpdateState() }
+    }
 
     readonly property var _list: showHelp ? ((content && content.helpList) || []) : ((content && content.changeList) || [])
     readonly property var _sectionHeights: showHelp ? ((content && content.helpSectionHeights) || []) : ((content && content.changeVersionHeights) || [])
@@ -68,6 +84,41 @@ PopupBase {
                     Layout.preferredWidth: 440
                     Layout.preferredHeight: 20
                     onClicked: luaEngine.openURL("https://github.com/PathOfBuildingCommunity/PathOfBuilding")
+                }
+                RowLayout {
+                    spacing: 8
+                    Button {
+                        label: "Check for Updates"
+                        Layout.preferredWidth: 130
+                        Layout.preferredHeight: 20
+                        controlEnabled: !(root.updateState && root.updateState.checking)
+                        onClicked: luaEngine.invoke("pob_checkForUpdates", [{ force: true }])
+                    }
+                    Label {
+                        size: theme.fontSize
+                        label: {
+                            var st = root.updateState || {}
+                            if (st.checking || st.status === "checking") return "^7Checking..."
+                            if (st.status === "available") return "^2Update available: " + (st.latestVersion || "")
+                            if (st.status === "up_to_date") return "^7Up to date"
+                            if (st.status === "error") return "^1" + (st.error || "Update check failed")
+                            return ""
+                        }
+                    }
+                    Button {
+                        visible: Boolean(root.updateState && root.updateState.status === "available")
+                        label: "Open Release"
+                        Layout.preferredWidth: 100
+                        Layout.preferredHeight: 20
+                        onClicked: {
+                            var url = (root.updateState && root.updateState.releaseUrl) ? root.updateState.releaseUrl : ""
+                            if (!url || url.length === 0) {
+                                var repo = (root.updateState && root.updateState.repo) ? root.updateState.repo : "jjacobson815/PathOfBuilding"
+                                url = "https://github.com/" + repo + "/releases/latest"
+                            }
+                            Qt.openUrlExternally(url)
+                        }
+                    }
                 }
             }
             Item { Layout.fillWidth: true }
