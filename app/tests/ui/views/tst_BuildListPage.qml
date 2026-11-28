@@ -41,6 +41,8 @@ Item {
             var btnMkdir = Oracle.findRequired(tc, uiTest, page, "pob.buildlist.btn_mkdir")
             var btnImport = Oracle.findRequired(tc, uiTest, page, "pob.buildlist.btn_import")
             var listView = Oracle.findRequired(tc, uiTest, page, "pob.buildlist.view")
+            var folderInput = Oracle.findRequired(tc, uiTest, page, "pob.buildlist.input_folder")
+            var urlInput = Oracle.findRequired(tc, uiTest, page, "pob.buildlist.input_import_url")
 
             // AC-01: Initial state
             verify(btnNew.controlEnabled)
@@ -61,12 +63,24 @@ Item {
             page.listSelectedIsFolder = true
             compare(btnOpen.controlEnabled, false)
             verify(btnDel.controlEnabled)
+            page.openSelected() // folder open must be a no-op
 
-            // AC-04: Clicking New Build switches mode to BUILD
+            // AC-04: Typing into folder & URL inputs enables buttons
+            folderInput.text = "TestFolder"
+            compare(btnMkdir.controlEnabled, true)
+            folderInput.text = ""
+            compare(btnMkdir.controlEnabled, false)
+
+            urlInput.text = "https://pobb.in/test123"
+            compare(btnImport.controlEnabled, true)
+            urlInput.text = ""
+            compare(btnImport.controlEnabled, false)
+
+            // Clicking New Build switches mode to BUILD
             mouseClick(btnNew)
             tryCompare(luaEngine, "currentMode", "BUILD")
 
-            Oracle.assertMultiResLayout(tc, container, page, uiTest, "BuildListPage")
+            Oracle.assertMultiResLayout(tc, container, page, uiTest, "BuildListPage", 1100, 720, { strict: true, checkSiblingOverlap: false })
             Oracle.assertZeroWarnings(tc, uiTest, "BuildListPage")
         }
     }

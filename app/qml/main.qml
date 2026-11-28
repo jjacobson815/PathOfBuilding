@@ -122,6 +122,14 @@ Window {
                     color: theme.sideBarBg
                     clip: true
 
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
+                        width: 1
+                        color: theme.sideBarLine
+                    }
+
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.leftMargin: theme.space2
@@ -246,7 +254,10 @@ Window {
 
                     SkillsView  { visible: root.activeView === "SKILLS" }
                     ItemsView   { visible: root.activeView === "ITEMS" }
-                    CalcsView   { visible: root.activeView === "CALCS" }
+                    CalcsView   {
+                        visible: root.activeView === "CALCS"
+                        onManageSpectresRequested: spectreLibraryPopup.openFresh()
+                    }
                     ConfigView  { visible: root.activeView === "CONFIG" }
                     NotesView   { visible: root.activeView === "NOTES" }
                     ImportView  { visible: root.activeView === "IMPORT" }
@@ -263,12 +274,20 @@ Window {
             }
         }
 
-        // --- Bottom bar: Options / About / (inert) Check for Update + version ---
+        // --- Bottom bar: Options / About / Check for Update + version ---
         Rectangle {
             id: bottomBarRow
+            objectName: "pob.shell.bottombar"
             Layout.fillWidth: true
-            Layout.preferredHeight: 28
+            Layout.preferredHeight: 34
             color: theme.titleBar
+            Rectangle {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: theme.border
+            }
             Widgets.BottomBar {
                 id: bottomBar
                 anchors.fill: parent

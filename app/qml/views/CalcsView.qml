@@ -23,6 +23,8 @@ Item {
     anchors.fill: parent
     clip: true
 
+    signal manageSpectresRequested()
+
     property var gridData: null
     property var skillSelect: null
     property var searchMatches: ({})
@@ -252,6 +254,14 @@ Item {
             color: theme.sideBarBg
             border.width: 0
 
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: theme.border
+            }
+
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 6
@@ -313,19 +323,21 @@ Item {
 
             Flickable {
                 id: gridFlick
+                objectName: "pob.calcs.gridFlick"
                 anchors.fill: parent
+                anchors.rightMargin: 16
+                anchors.bottomMargin: 14
                 contentWidth: Math.max(width, calcsView.layoutInfo.contentW)
                 contentHeight: Math.max(height, calcsView.layoutInfo.contentH)
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-
-                QC.ScrollBar.vertical: QC.ScrollBar {
-                    policy: QC.ScrollBar.AsNeeded
-                    width: 16
-                }
-                QC.ScrollBar.horizontal: QC.ScrollBar {
-                    policy: QC.ScrollBar.AsNeeded
-                    height: 14
+                contentX: calcsHScroll.offset
+                contentY: calcsVScroll.offset
+                WheelHandler {
+                    onWheel: (event) => {
+                        if (event.modifiers & Qt.ShiftModifier) calcsHScroll.handleWheel(event.angleDelta.y)
+                        else calcsVScroll.handleWheel(event.angleDelta.y)
+                    }
                 }
 
                 // Background click-away closes a pinned breakdown (CalcBreakdownControl.lua:775).
@@ -372,9 +384,37 @@ Item {
                             luaEngine.invoke("pob_calcsSetInput", [name, value])
                             calcsView.refresh()
                         }
-                        onManageSpectresRequested: spectreNotice.open()
+                        onManageSpectresRequested: calcsView.manageSpectresRequested()
                     }
                 }
+            }
+
+            Widgets.ScrollBar {
+                id: calcsVScroll
+                objectName: "pob.calcs.vscroll"
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 14
+                width: 16
+                dir: "VERTICAL"
+                autoHide: true
+                contentDim: gridFlick.contentHeight
+                viewDim: gridFlick.height
+            }
+
+            Widgets.ScrollBar {
+                id: calcsHScroll
+                objectName: "pob.calcs.hscroll"
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.rightMargin: 16
+                anchors.bottom: parent.bottom
+                height: 14
+                dir: "HORIZONTAL"
+                autoHide: true
+                contentDim: gridFlick.contentWidth
+                viewDim: gridFlick.width
             }
 
             // Click-away interceptor when pinned so clicking anywhere outside closes it.

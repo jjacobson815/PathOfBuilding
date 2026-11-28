@@ -55,6 +55,7 @@ def check_static_rules(qml_files: list[Path]) -> list[str]:
     errors: list[str] = []
     array_is_array_re = re.compile(r"\bArray\.isArray\s*\(")
     popup_root_keys_re = re.compile(r"^\s*PopupBase\s*\{", re.MULTILINE)
+    data_shadow_re = re.compile(r"^\s*(?:default\s+|readonly\s+)?property\s+\S+\s+data\b")
 
     for path in qml_files:
         rel = path.relative_to(ROOT).as_posix()
@@ -65,6 +66,10 @@ def check_static_rules(qml_files: list[Path]) -> list[str]:
                 if array_is_array_re.search(line):
                     errors.append(
                         f"{rel}:{idx}: raw Array.isArray() is forbidden on Lua bridge values; use QmlBridge.toArray()"
+                    )
+                if data_shadow_re.search(line):
+                    errors.append(
+                        f"{rel}:{idx}: 'property ... data' shadows Item.data default property; rename to e.g. 'payload' or 'itemData'"
                     )
 
         if popup_root_keys_re.search(text):

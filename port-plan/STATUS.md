@@ -28,6 +28,10 @@ Work order: 4 → 5 → 6 → 7 → ~~Phase 3 long tail~~ (DONE) → ~~8~~ (DONE
 ### Open Bugs
 - None logged.
 
+**Wave 2.1 — Shared AppBootstrap & Full UI Test Coverage — DONE (2026-11-27, Windows session, branch `wave-2-v1-hardening`).**
+- **Shared `AppBootstrap` (`app/src/AppBootstrap.{h,cpp}`):** Unified `pob-qt` and `pob-ui-test` initialization, QML engine setup, and host wiring.
+- **Full UI Spec & QuickTest Coverage:** `86/86` QML files and `418` ACs documented in `docs/ui-specs/COVERAGE.md` and enforced via `tools/check_ui_coverage.py`; added `app/tests/ui/views/tst_PlaywrightJourney.qml` E2E journey test, CTest + CI/Linux gate wiring, and 4 async layout/incubation fixes (`PowerReportPanel`, `StatPanel`, `SpectreLibraryPopup`, `tst_MainSkillPanel`/`tst_ToastStack`) verified at `297/297` passing on Windows.
+
 **Wave 2 — v1 Hardening & Release Readiness — DONE (2026-11-24, Windows session, branch `wave-2-v1-hardening`).**
 - **Pre-flight & Post-merge C++/Shell Seams:** `LuaEngine::viewList()` filters out `id == "COMPARE"` (8 BUILD views); added `LuaEngine::updateChanged()` + `"update"` signal dispatch; exposed `--dev`/`POB_DEV_MODE=1` (`_POB_DEV_MODE` -> `launch.devMode` pre-`Main:Init`) and `POB_UPDATE_REPO` (default `jjacobson815/PathOfBuilding`); kept legacy `launch.CheckForUpdate`/`ApplyUpdate` inert; mounted `UpdateBanner.qml` in `main.qml` with async startup check guarded by `!pobCaptureMode`; registered 4 Wave 2 selftests (`update-notifier`, `dev-mode`, `tree-perf`, `memory-gc64`) plus `filtered viewList entries == 8` assertion in `selftest_checks.h`.
 - **UI Cleanup, PopupBase Keys Fix & Shortcuts:** Deleted `CompareView.qml`, removed `"COMPARE"` from `main.qml` & `qml.qrc`, updated disabled `"Buy similar"` tooltip in `ItemsView.qml`, added `Ctrl+I` shortcut and audited `Ctrl+1..8`/`S`/`W`/`Z`/`Y`/`F`/`F1`, and moved `Keys` handlers off `Dialog`/`PopupBase` onto focusable `FocusScope`/`Item` children across `PopupBase`, `SaveAsPopup`, `TextInputPopup`, `TreeImportPopup`, `SetManagePopup`, `SpecManagePopup`, `SpectreLibraryPopup`, and `LoadoutManagePopup` (eliminating all runtime `Could not attach Keys property` warnings).

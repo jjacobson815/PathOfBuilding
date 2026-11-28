@@ -182,12 +182,12 @@ Item {
         }
 
         // --------------------------------------------------------------
-        // Part 6.1 — column 1 (legacy: slotAnchor at x 96)
+        // Part 6.1 — column 1 (legacy: slotAnchor at x 110)
         // --------------------------------------------------------------
         Item {
             id: leftCol
             x: 0; y: 0
-            width: 424
+            width: 392
             height: hflick.height
 
             // Item set row (ItemsTab.lua:96-112)
@@ -197,13 +197,13 @@ Item {
                 anchors.verticalCenter: setSelect.verticalCenter
                 horizontalAlignment: Text.AlignRight
                 label: "^7Item set:"
-                size: 16
+                size: theme.fontSize
             }
             Widgets.DropDownControl {
                 id: setSelect
                 objectName: "pob.items.drop_set"
-                x: 96; y: 8
-                width: 216; height: 20
+                x: 110; y: 8
+                width: 180; height: 20
                 controlEnabled: itemsView.sets.length > 1
                 labelFor: function (x) { return x.title }
                 tooltipForItem: function (item, tt) {
@@ -224,9 +224,9 @@ Item {
 
             // "Equipped items:" header + Weapon Set I / II (ItemsTab.lua:221-266)
             Widgets.Label {
-                x: 96; y: 44
+                x: 110; y: 44
                 label: "^7Equipped items:"
-                size: 16
+                size: theme.fontSize
             }
             Widgets.Label {
                 anchors.right: ws1.left
@@ -239,7 +239,7 @@ Item {
             Widgets.Button {
                 id: ws1
                 objectName: "pob.items.btn_weapon_set_1"
-                x: 96 + 310 - 20 - 18; y: 42
+                x: 110 + 274 - 20 - 18; y: 42
                 width: 18; height: 18
                 label: "I"
                 locked: !(itemsView.st.useSecondWeaponSet)
@@ -248,7 +248,7 @@ Item {
             Widgets.Button {
                 id: ws2
                 objectName: "pob.items.btn_weapon_set_2"
-                x: 96 + 310 - 18; y: 42
+                x: 110 + 274 - 18; y: 42
                 width: 18; height: 18
                 label: "II"
                 locked: !!itemsView.st.useSecondWeaponSet
@@ -270,7 +270,7 @@ Item {
                 Column {
                     id: slotCol
                     x: 0
-                    width: 96 + 310
+                    width: 110 + 274
                     spacing: 2
 
                     Repeater {
@@ -304,7 +304,7 @@ Item {
                                 anchors.verticalCenter: dd.verticalCenter
                                 horizontalAlignment: Text.AlignRight
                                 label: "^7" + (rec ? rec.label : "") + ":"
-                                size: 16
+                                size: theme.fontSize
                             }
                             Widgets.CheckBox {
                                 id: activeBox
@@ -321,7 +321,7 @@ Item {
                             Widgets.DropDownControl {
                                 id: dd
                                 objectName: "pob.items.drop_slot"
-                                x: 96; width: 310; height: 20
+                                x: 110; width: 274; height: 20
                                 controlEnabled: !!(rec && rec.options.length > 1)
                                 tooltipFunc: function (tt) {
                                     if (!rec || rec.selItemId === 0) return
@@ -375,19 +375,19 @@ Item {
                             anchors.verticalCenter: specSelect.verticalCenter
                             horizontalAlignment: Text.AlignRight
                             label: "^7Passive tree:"
-                            size: 16
+                            size: theme.fontSize
                         }
                         Widgets.DropDownControl {
                             id: specSelect
                             objectName: "pob.items.drop_spec"
-                            x: 96; y: 8
-                            width: 216; height: 20
+                            x: 110; y: 8
+                            width: 180; height: 20
                             controlEnabled: (specSelect.model ? specSelect.model.length : 0) > 1
                             onSelected: function (i) { itemsView.call("pob_setActiveSpec", [i + 1]) }
                         }
                         Widgets.Button {
                             objectName: "pob.items.btn_manage_spec"
-                            x: 96 + 216 + 4; y: 8
+                            x: 110 + 180 + 4; y: 8
                             width: 90; height: 20
                             label: "Manage..."
                             onClicked: specManage.openFresh()
@@ -403,8 +403,8 @@ Item {
         Widgets.ItemListBox {
             id: itemList
             objectName: "pob.items.list_all_items"
-            x: 430; y: 8
-            width: 360; height: 20 + 308
+            x: 400; y: 8
+            width: 376; height: 20 + 308
             title: "^7All items:"
             defaultText: "^x7F7F7FThis is the list of items that have been added to this build.\nYou can add items to this list by dragging them from\none of the other lists, or by clicking 'Add to build' when\nviewing an item."
             rows: itemsView.itemRows
@@ -426,21 +426,21 @@ Item {
             anchors.right: itemList.right
             y: itemList.y
             spacing: 4
-            Widgets.Button { objectName: "pob.items.btn_sort"; width: 60; height: 18; label: "Sort"
+            Widgets.Button { objectName: "pob.items.btn_sort"; width: 46; height: 18; label: "Sort"
                 onClicked: itemsView.call("pob_itemsSortList") }
-            Widgets.Button { objectName: "pob.items.btn_delete_unused"; width: 100; height: 18; label: "Delete Unused"; controlEnabled: itemList.count > 0
+            Widgets.Button { objectName: "pob.items.btn_delete_unused"; width: 92; height: 18; label: "Delete Unused"; controlEnabled: itemList.count > 0
                 onClicked: itemsView.call("pob_itemsDeleteUnused") }
-            Widgets.Button { objectName: "pob.items.btn_delete_all"; width: 70; height: 18; label: "Delete All"; controlEnabled: itemList.count > 0
+            Widgets.Button { objectName: "pob.items.btn_delete_all"; width: 66; height: 18; label: "Delete All"; controlEnabled: itemList.count > 0
                 onClicked: deleteAllConfirm.open() }
-            Widgets.Button { objectName: "pob.items.btn_delete_item"; width: 60; height: 18; label: "Delete"; controlEnabled: itemList.hasSel
+            Widgets.Button { objectName: "pob.items.btn_delete_item"; width: 52; height: 18; label: "Delete"; controlEnabled: itemList.hasSel
                 onClicked: itemsView.askDelete(itemsView.itemRows[itemList.selIndex].key) }
         }
 
         Widgets.ItemDBPanel {
             id: dbPanel
             objectName: "pob.items.panel_db"
-            x: 430; y: itemList.y + itemList.height + 14
-            width: 360
+            x: 400; y: itemList.y + itemList.height + 14
+            width: 376
             height: hflick.height - y - 14
             onRequestEdit: itemsView.snapRight()
         }

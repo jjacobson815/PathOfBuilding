@@ -156,6 +156,7 @@ Item {
 
     // 1-second tick for OAuth login & rate-limit countdowns
     Timer {
+        objectName: "pob.import.countdown_timer"
         interval: 1000
         repeat: true
         running: root.visible && (!!(root.st && root.st.oauthWaiting) || ((root.st && root.st.rateLimitSecondsLeft) || 0) > 0)
@@ -527,6 +528,7 @@ Item {
                             }
                             Widgets.DropDownControl {
                                 id: leagueDrop
+                                objectName: "pob.import.league_drop"
                                 Layout.preferredWidth: 115
                                 Layout.minimumWidth: 80
                                 implicitHeight: 24
@@ -932,6 +934,7 @@ Item {
 
                         Widgets.EditControl {
                             id: openCodeEdit
+                            objectName: "pob.import.open_edit"
                             Layout.fillWidth: true
                             implicitHeight: 26
                             useFixedFont: true
@@ -1011,6 +1014,7 @@ Item {
     // Overwrite confirmation dialog
     Widgets.ConfirmPopup {
         id: confirmPopup
+        objectName: "pob.import.confirm_popup"
         onAccepted: {
             if (root._confirmKind === "character") {
                 root._triggerCharacterImport(true)

@@ -28,6 +28,7 @@ Item {
             panel.refresh()
             spectreSpy.clear()
             wait(15)
+            waitForRendering(panel)
         }
 
         function test_all_ac() {
@@ -56,6 +57,7 @@ Item {
                 minionSkill: { shown: true, enabled: true, index: 1, list: ["Beam"] }
             }
             wait(15)
+            waitForRendering(panel)
             verify(skl.visible)
             verify(prt.visible)
             verify(stg.visible)
@@ -72,6 +74,7 @@ Item {
             panel.suffix = "Calcs"
             panel.refresh()
             wait(15)
+            waitForRendering(panel)
 
             panel.suffix = ""
             panel.refresh()

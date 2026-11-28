@@ -20,6 +20,8 @@ pkg_check_modules(CURL REQUIRED libcurl)
 # --- GUI application (QML shell) -------------------------------------------
 add_executable(pob-qt
     src/main.cpp
+    src/AppBootstrap.cpp
+    src/AppBootstrap.h
     src/LuaEngine.cpp
     src/SubScriptManager.cpp
     src/TextMetrics.cpp
@@ -99,6 +101,8 @@ add_executable(pob-ui-test
     tests/ui/main.cpp
     tests/ui/UiTestHelper.cpp
     tests/ui/UiTestHelper.h
+    src/AppBootstrap.cpp
+    src/AppBootstrap.h
     src/LuaEngine.cpp
     src/SubScriptManager.cpp
     src/TextMetrics.cpp
@@ -143,6 +147,12 @@ target_link_libraries(pob-ui-test PRIVATE
 target_compile_definitions(pob-ui-test PRIVATE
     POB_LUA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/lua"
     POB_UI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/ui"
+)
+enable_testing()
+add_test(
+    NAME pob-ui-test
+    COMMAND pob-ui-test -input ${CMAKE_CURRENT_SOURCE_DIR}/tests/ui
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
 
 # --- Phase 6c: self-contained distribution layout -------------------------

@@ -86,7 +86,7 @@ FocusScope {
         y: 2
         visible: root.title !== ""
         label: root.title
-        size: 16
+        size: theme.fontSize
     }
 
     Rectangle {
@@ -106,14 +106,18 @@ FocusScope {
             objectName: "pob.itemList.emptyText"
             visible: root.count === 0 && root.defaultText !== ""
             x: 6; y: 4
-            // Label is one line; legacy defaultText has "\n"s. A later line
-            // inherits no colour, so repeat the first line's leading code.
+            width: box.width - 12
+            spacing: 2
+            // ColorText with WordWrap so empty-state instructions never clip horizontally.
             Repeater {
                 model: root.defaultText.split("\n")
-                delegate: Label {
+                delegate: ColorText {
                     readonly property string lead: (root.defaultText.match(/^\^(x[0-9A-Fa-f]{6}|[0-9])/) || [""])[0]
-                    label: (index > 0 ? lead : "") + modelData
-                    size: 14
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    sourceText: (index > 0 ? lead : "") + modelData
+                    defaultColor: theme.muted
+                    font.pixelSize: 14
                 }
             }
         }

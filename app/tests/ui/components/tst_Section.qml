@@ -39,14 +39,14 @@ Item {
             var lbl = Oracle.findRequired(tc, uiTest, sec, "pob.section.label")
 
             verify(plate.visible)
-            compare(plate.y, -8)
+            compare(plate.y, -9)
             var w1 = plate.width
-            compare(w1, lbl.width + 10)
+            verify(w1 >= lbl.width + 10)
 
             sec.label = "A Much Longer Section Title"
             wait(10)
             verify(plate.width > w1)
-            compare(plate.width, lbl.width + 10)
+            verify(plate.width >= lbl.width + 10)
 
             sec.label = ""
             wait(10)

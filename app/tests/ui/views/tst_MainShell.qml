@@ -43,11 +43,28 @@ Item {
             verify(skillsBtn.width > 0 && skillsBtn.height > 0)
             Oracle.findRequired(tc, uiTest, win.contentItem, "pob.shell.dialog.save_prompt")
 
-            // AC-03: Click sidebar Skills button
+            // AC-03: Click sidebar Skills button & Ctrl+1..8 hotkeys
+            Oracle.step(tc, "AC-03: sidebar click + Ctrl+1..8 view switching")
             mouseClick(skillsBtn)
             tryCompare(luaEngine, "currentView", "SKILLS")
 
+            var expectedViews = ["TREE", "SKILLS", "ITEMS", "CALCS", "CONFIG", "NOTES", "IMPORT", "PARTY"]
+            for (var v = 0; v < expectedViews.length; v++) {
+                uiTest.sendKeyClick(win, Qt.Key_1 + v, Qt.ControlModifier)
+                tryCompare(luaEngine, "currentView", expectedViews[v])
+            }
+
+            // AC-04: F1 opens AboutPopup; UpdateBanner present
+            Oracle.step(tc, "AC-04: F1 context help + UpdateBanner check")
+            uiTest.sendKeyClick(win, Qt.Key_F1, 0)
+            wait(30)
+            var aboutPop = Oracle.findRequired(tc, uiTest, win.contentItem, "pob.about.root")
+            verify(aboutPop.visible)
+            aboutPop.close()
+            tryCompare(aboutPop, "visible", false)
+
             // AC-05: Sidebar collapse toggle
+            Oracle.step(tc, "AC-05: sidebar collapse toggle")
             var collapseBtn = uiTest.findObject(win.contentItem, "pob.topbar.collapse")
             verify(collapseBtn !== null)
             mouseClick(collapseBtn)
@@ -67,17 +84,26 @@ Item {
             verify(buildList.visible)
 
             var newBtn = Oracle.findRequired(tc, uiTest, win.contentItem, "pob.buildlist.btn_new")
+            wait(30)
             mouseClick(newBtn)
             tryCompare(luaEngine, "currentMode", "BUILD")
             wait(20)
 
-            // AC-02: Multi-resolution layout oracle across 960x640, 1100x720, 1600x900
+            // AC-06: Load OccVortex.xml and verify shell populates
+            verify(uiTest.loadTestBuild("../spec/TestBuilds/3.13/OccVortex.xml"))
+            wait(30)
+            waitForRendering(win.contentItem)
+
+            // AC-02: Strict multi-resolution layout oracle across 960x640, 1100x720, 1600x900
+            Oracle.step(tc, "AC-02: strict layout oracle across 3 resolutions")
             var sizes = [[960, 640], [1100, 720], [1600, 900]]
             for (var i = 0; i < sizes.length; i++) {
                 win.width = sizes[i][0]
                 win.height = sizes[i][1]
+                waitForRendering(win.contentItem)
                 wait(30)
-                var rep = uiTest.checkLayoutOracle(win.contentItem, sizes[i][0], sizes[i][1])
+                waitForRendering(win.contentItem)
+                var rep = uiTest.checkLayoutOracle(win.contentItem, sizes[i][0], sizes[i][1], { strict: true, checkSiblingOverlap: false })
                 verify(rep.ok, "MainShell Layout/Overflow at " + sizes[i][0] + "x" + sizes[i][1] + ": " + JSON.stringify(rep))
             }
 

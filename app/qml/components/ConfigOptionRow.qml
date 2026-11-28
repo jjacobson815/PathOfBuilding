@@ -74,16 +74,18 @@ Item {
         height: 18
         clip: true
 
-        Label {
+        ColorText {
             id: optLabel
             objectName: "pob.configRow.label"
-            anchors.right: root.isText ? undefined : parent.right
-            anchors.left: root.isText ? parent.left : undefined
-            anchors.verticalCenter: parent.verticalCenter
-            label: root.option && root.option.displayLabel ? String(root.option.displayLabel) : ""
-            size: {
+            anchors.fill: parent
+            verticalAlignment: Text.AlignVCenter
+            horizontalAlignment: root.isText ? Text.AlignLeft : Text.AlignRight
+            elide: Text.ElideRight
+            sourceText: root.option && root.option.displayLabel ? String(root.option.displayLabel) : ""
+            defaultColor: theme.text
+            font.pixelSize: {
                 var raw = root.option && root.option.label ? String(root.option.label) : ""
-                return textMetrics.width(14, "VAR", raw) > 220 ? 12 : 14
+                return textMetrics.width(14, "VAR", raw) > 200 ? 12 : 14
             }
         }
 

@@ -108,10 +108,13 @@ ColumnLayout {
 
         Repeater {
             model: root.summaryText.trim().length > 0 ? root.summaryText.split("\n") : []
-            delegate: Widgets.Label {
+            delegate: Widgets.ColorText {
                 required property string modelData
-                label: modelData
-                size: 14
+                width: parent.width
+                wrapMode: Text.WordWrap
+                sourceText: modelData
+                defaultColor: theme.text
+                font.pixelSize: 14
             }
         }
     }

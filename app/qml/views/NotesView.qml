@@ -115,16 +115,19 @@ Item {
         anchors.margins: 8
         spacing: 6
 
-        // Instruction lines (single-line Label splitting)
+        // Instruction lines (word-wrapped inside available width)
         Column {
             Layout.fillWidth: true
             spacing: 2
             Repeater {
                 model: root._descLines
-                delegate: Widgets.Label {
+                delegate: Widgets.ColorText {
                     required property string modelData
-                    label: modelData
-                    size: 14
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    sourceText: modelData
+                    defaultColor: theme.text
+                    font.pixelSize: 14
                 }
             }
         }
@@ -136,7 +139,7 @@ Item {
 
             GridLayout {
                 columns: 4
-                columnSpacing: 16
+                columnSpacing: 10
                 rowSpacing: 4
 
                 Repeater {
@@ -145,7 +148,7 @@ Item {
                         required property int index
                         readonly property var btn: root.colorButtons[index]
                         objectName: "pob.notes.btn_color_" + index
-                        implicitWidth: 108
+                        implicitWidth: 116
                         implicitHeight: 20
                         label: (btn.code || "^7") + (btn.label || "")
                         onClicked: root._insertColor(btn)
@@ -157,7 +160,7 @@ Item {
 
             ColumnLayout {
                 spacing: 4
-                Layout.alignment: Qt.AlignBottom
+                Layout.alignment: Qt.AlignTop
                 Widgets.Button {
                     objectName: "pob.notes.btn_toggle_codes"
                     implicitWidth: 160
@@ -196,14 +199,37 @@ Item {
                 border.width: 1
                 border.color: notesEdit.activeFocus ? theme.text : theme.border
 
+                Rectangle {
+                    id: editorHeader
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 20
+                    color: theme.titleBar
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Notes Editor"
+                        color: theme.muted
+                        font.pixelSize: theme.fontSizeSm
+                        font.bold: true
+                    }
+                }
+
                 QC.ScrollView {
-                    anchors.fill: parent
+                    anchors.top: editorHeader.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
                     anchors.margins: 4
 
                     QC.TextArea {
                         id: notesEdit
                         objectName: "pob.notes.text_editor"
                         color: theme.text
+                        placeholderText: "Type build notes here..."
+                        placeholderTextColor: theme.muted
                         font.family: theme.fontVar
                         font.pixelSize: root.editorFontSize
                         wrapMode: TextEdit.Wrap
@@ -250,20 +276,42 @@ Item {
 
             Rectangle {
                 visible: root.showPreview
-                Layout.preferredWidth: Math.max(260, parent.width * 0.38)
+                Layout.preferredWidth: Math.max(240, parent.width * 0.38)
                 Layout.fillHeight: true
                 color: theme.background
                 border.width: 1
                 border.color: theme.border
 
+                Rectangle {
+                    id: previewHeader
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 20
+                    color: theme.titleBar
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Live Color Preview"
+                        color: theme.muted
+                        font.pixelSize: theme.fontSizeSm
+                        font.bold: true
+                    }
+                }
+
                 QC.ScrollView {
-                    anchors.fill: parent
+                    id: previewScroll
+                    anchors.top: previewHeader.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
                     anchors.margins: 6
 
                     Widgets.ColorText {
                         objectName: "pob.notes.view_preview"
-                        width: parent.width - 12
-                        sourceText: notesEdit.text
+                        width: Math.max(100, previewScroll.availableWidth - 4)
+                        sourceText: notesEdit.text.replace(/\^_([0-9]|x[0-9A-Fa-f]{6})/g, "^$1")
                         font.pixelSize: root.editorFontSize
                         wrapMode: Text.Wrap
                     }

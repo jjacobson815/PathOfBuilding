@@ -245,6 +245,7 @@ PopupBase {
                         objectName: "pob.spectres.buildList"
                         anchors.fill: parent
                         anchors.margins: 2
+                        cacheBuffer: 0
                         model: root.spectreList
                         boundsBehavior: Flickable.StopAtBounds
 
@@ -433,6 +434,7 @@ PopupBase {
                         objectName: "pob.spectres.availList"
                         anchors.fill: parent
                         anchors.margins: 2
+                        cacheBuffer: 0
                         model: root.available
                         boundsBehavior: Flickable.StopAtBounds
 
@@ -605,6 +607,7 @@ PopupBase {
                                 id: spawnListView
                                 anchors.fill: parent
                                 anchors.margins: 2
+                                cacheBuffer: 0
                                 model: root.spawnLocations
                                 boundsBehavior: Flickable.StopAtBounds
 

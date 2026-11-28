@@ -61,6 +61,7 @@ Rectangle {
         y: 2
         width: root.width - 4
         spacing: 0
+        clip: true
 
         Repeater {
             model: root._subs.length
@@ -160,12 +161,12 @@ Rectangle {
                         width: subCol.width
                         height: root.isSpecial && rowCells.length > 0 && rowCells[0].control ? 22 : 18
 
-                        // Left 130px label cell
+                        // Left 126px label cell (fits 126 + 6*96 = 702 === cardCol.width on 3-col cards)
                         Rectangle {
                             id: labelBg
                             x: 0
                             y: 0
-                            width: 132
+                            width: 126
                             height: parent.height
                             color: (rowBox.rowObj.label && rowBox.rowObj.label.length > 0) ? rowBox.rowBg : "transparent"
 
@@ -188,7 +189,7 @@ Rectangle {
 
                         // Value / control cells
                         Row {
-                            x: 132
+                            x: 126
                             y: 0
                             height: parent.height
                             spacing: 0
@@ -197,11 +198,13 @@ Rectangle {
                                 model: rowBox.rowCells.length
                                 delegate: Item {
                                     id: cellWrap
+                                    objectName: "pob.calcsCard.cellWrap"
                                     readonly property var cellObj: rowBox.rowCells[index] || ({})
                                     readonly property bool isActive: cellObj.key !== undefined && cellObj.key === root.activeCellKey
                                     readonly property bool isInteractive: !!(cellObj && cellObj.breakdown)
                                     readonly property string ctrlName: (cellObj && cellObj.control) ? String(cellObj.control) : ""
-                                    width: Math.min(cellObj.width || (rowBox.width - 132), Math.max(24, rowBox.width - 132))
+                                    width: Math.min(cellObj.width || (rowBox.width - 126),
+                                                    Math.max(24, Math.floor((rowBox.width - 126) / Math.max(1, rowBox.rowCells.length))))
                                     height: rowBox.height
 
                                     // 2px vertical separator (section.colour)
@@ -289,7 +292,9 @@ Rectangle {
         id: ctrlGroupComp
         DropDownControl {
             id: dd
+            objectName: "pob.calcsCard.activeSkillDrop"
             width: 300; height: 18; size: theme.fontSize - 1
+            placeholder: "<None>"
             property bool _syncing: false
             labelFor: (g) => g ? (g.label || "") : ""
             tooltipForItem: (g, tip) => {
@@ -321,7 +326,9 @@ Rectangle {
         id: ctrlSkillComp
         DropDownControl {
             id: dd
+            objectName: "pob.calcsCard.activeSkillDrop"
             width: 300; height: 18; size: theme.fontSize - 1
+            placeholder: "<None>"
             property bool _syncing: false
             labelFor: (s) => s ? (s.label || "") : ""
             function sync() {
@@ -347,6 +354,7 @@ Rectangle {
         id: ctrlPartComp
         DropDownControl {
             id: dd
+            objectName: "pob.calcs.drop_skill_part"
             width: 250; height: 18; size: theme.fontSize - 1
             property bool _syncing: false
             labelFor: (p) => p ? (p.label || "") : ""

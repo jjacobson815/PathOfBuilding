@@ -10,6 +10,7 @@ import "QmlBridge.js" as QmlBridge
 // algorithm verbatim — see pob_host.lua).
 PopupBase {
     id: root
+    objectName: "pob.about.root"
     title: " About "
 
     // Set by the parent (BottomBar already fetched it once — avoids

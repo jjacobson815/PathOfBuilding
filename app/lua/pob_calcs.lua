@@ -159,14 +159,15 @@ function M.resolveSection(section, si, actor, player, colWidth)
             rowEnabled[ui][ri] = en
             if en then
                 enabled = true
-                height = height + 18
-                tempHeight = tempHeight + 18
+                local rowH = (section.id == "SkillSelect" and rowData[1] and rowData[1].control) and 22 or 18
+                height = height + rowH
+                tempHeight = tempHeight + rowH
             end
         end
         if enabled and not subSec.collapsed then
-            height = height + 22
+            height = height + 22 + (ui > 1 and 2 or 0)
         else
-            height = height - tempHeight + 20
+            height = height - tempHeight + 20 + (ui > 1 and 2 or 0)
         end
     end
     if not enabled then

@@ -37,8 +37,8 @@ Item {
             var ver = Oracle.findRequired(tc, uiTest, bar, "pob.bottombar.version")
             Oracle.findRequired(tc, uiTest, bar, "pob.bottombar.devMode")
 
-            compare(bar.implicitHeight, 24)
-            verify(!upd.controlEnabled)
+            compare(bar.implicitHeight, 34)
+            verify(upd.controlEnabled)
             verify(ver.sourceText.indexOf("Version:") >= 0 || ver.sourceText.indexOf("Beta:") >= 0)
 
             mouseClick(opt)

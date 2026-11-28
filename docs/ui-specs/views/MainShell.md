@@ -103,22 +103,22 @@ flowchart TD
 
 |Control (objectName)|Type|Default State|Interactive Behavior|Edge States (Disabled / Empty / Loading / Error / Long Text)|
 |:--|:--|:--|:--|:--|
-|`pob.shell.topbar.btn_collapse`|Button|Enabled, label `<<`|Toggles sidebar collapsed state (`!root.collapsed`), persists via `luaEngine.setSideBarCollapsed`|Hidden in `LIST` mode (`visible: root.hasBuild`). Label switches to `>>` when collapsed.|
-|`pob.shell.topbar.btn_back`|Button|Enabled, label `<< Back`|Returns to build list. If unsaved changes exist, opens `savePrompt` ("LIST" mode), else calls `luaEngine.closeBuild()`|Hidden in `LIST` mode. Disabled if `hasBuild` is false.|
-|`pob.shell.topbar.btn_save`|Button|Enabled, label `Save`|Saves build to current `dbFileName`. If unnamed, opens `saveAsPopup`. Signals `onSaveFailed` on error|Disabled if `root.shell.canSave === false`. Shows error popup on save failure.|
-|`pob.shell.topbar.btn_save_as`|Button|Enabled, label `Save As`|Opens `saveAsPopup` for exporting/saving build under a new filename|Disabled if `hasBuild` is false.|
-|`pob.shell.topbar.label_build_name`|Text (in Item)|Read-only, `displayName`|Displays active build name. Hover triggers `nameTip` displaying full file subpath|Max width 260px; truncates with `Text.ElideRight`. Appends `*` in `theme.warning` color if `unsaved`. Displays "Unnamed build" if empty.|
-|`pob.shell.topbar.plate_points`|Rectangle|Read-only Label|Displays allocated/total passive and ascendancy points. Hover triggers `pointsTip` breakdown|Bounded width. Border highlights on hover (`theme.borderStrong`).|
-|`pob.shell.topbar.btn_level_mode`|Button|"Auto" or "Manual"|Toggles level calculation mode via `luaEngine.setLevelAutoMode`|Reflects `root.shell.levelAutoMode`. Dynamic tooltip explains calculation mode.|
-|`pob.shell.topbar.input_level`|EditControl|Numeric (1-100)|Commits character level via `luaEngine.setCharacterLevel`. Switches mode to "Manual"|Clamped between 1 and 100. Disallows non-numeric characters. Reverts on Esc or blur.|
-|`pob.shell.topbar.drop_class`|DropDownControl|Cur class selected|Selects character class. If tree requires reset, opens `classConfirm` modal|Width 95px. Shows placeholder if empty. Triggers confirm dialog with "Connect Path" option if applicable.|
-|`pob.shell.topbar.drop_ascendancy`|DropDownControl|Cur ascendancy|Selects ascendancy class via `luaEngine.setAscendClass`|Width 120px. Disabled when current class has 0 ascendancies (e.g. Scion initial state).|
-|`pob.shell.topbar.drop_secondary`|DropDownControl|Cur secondary|Selects alternate ascendancy (e.g. Wildwood) via `luaEngine.setSecondaryAscendClass`|Width 150px. Disabled if `classList.secondaryEnabled !== true`.|
-|`pob.shell.topbar.drop_loadouts`|DropDownControl|Cur loadout|Switches loadout or triggers loadout manage dialog|Width 145px. Headers and separators are non-selectable.|
+|`pob.topbar.collapse`|Button|Enabled, label `<<`|Toggles sidebar collapsed state (`!root.collapsed`), persists via `luaEngine.setSideBarCollapsed`|Hidden in `LIST` mode (`visible: root.hasBuild`). Label switches to `>>` when collapsed.|
+|`pob.topbar.back`|Button|Enabled, label `<< Back`|Returns to build list. If unsaved changes exist, opens `savePrompt` ("LIST" mode), else calls `luaEngine.closeBuild()`|Hidden in `LIST` mode. Disabled if `hasBuild` is false.|
+|`pob.topbar.save`|Button|Enabled, label `Save`|Saves build to current `dbFileName`. If unnamed, opens `saveAsPopup`. Signals `onSaveFailed` on error|Disabled if `root.shell.canSave === false`. Shows error popup on save failure.|
+|`pob.topbar.saveAs`|Button|Enabled, label `Save As`|Opens `saveAsPopup` for exporting/saving build under a new filename|Disabled if `hasBuild` is false.|
+|`pob.topbar.namePlate`|Item|Read-only, `displayName`|Displays active build name. Hover triggers `nameTip` displaying full file subpath|Max width 260px; truncates with `Text.ElideRight`. Appends `*` in `theme.warning` color if `unsaved`. Displays "Unnamed build" if empty.|
+|`pob.topbar.points`|Rectangle|Read-only Label|Displays allocated/total passive and ascendancy points. Hover triggers `pointsTip` breakdown|Bounded width. Border highlights on hover (`theme.borderStrong`).|
+|`pob.topbar.levelMode`|Button|"Auto" or "Manual"|Toggles level calculation mode via `luaEngine.setLevelAutoMode`|Reflects `root.shell.levelAutoMode`. Dynamic tooltip explains calculation mode.|
+|`pob.topbar.level`|EditControl|Numeric (1-100)|Commits character level via `luaEngine.setCharacterLevel`. Switches mode to "Manual"|Clamped between 1 and 100. Disallows non-numeric characters. Reverts on Esc or blur.|
+|`pob.topbar.class`|DropDownControl|Cur class selected|Selects character class. If tree requires reset, opens `classConfirm` modal|Width 90px. Shows placeholder if empty. Triggers confirm dialog with "Connect Path" option if applicable.|
+|`pob.topbar.ascend`|DropDownControl|Cur ascendancy|Selects ascendancy class via `luaEngine.setAscendClass`|Width 105px. Disabled when current class has 0 ascendancies (e.g. Scion initial state).|
+|`pob.topbar.secondary`|DropDownControl|Cur secondary|Selects alternate ascendancy (e.g. Wildwood) via `luaEngine.setSecondaryAscendClass`|Width 115px. Disabled if `classList.secondaryEnabled !== true`.|
+|`pob.topbar.loadouts`|DropDownControl|Cur loadout|Switches loadout or triggers loadout manage dialog|Width 115px. Headers and separators are non-selectable.|
 |`pob.shell.sidebar.btn_nav_<id>`|Rectangle (Nav)|Enabled|Switches active view via `luaEngine.setActiveView(id)`. Active tab has 3px left accent bar|Elides long tab text. Background tints to `theme.hover` on mouse enter.|
-|`pob.shell.bottombar.btn_options`|Button|Enabled, "Options"|Emits `optionsRequested()`, opening `optionsDialog`|Fixed 68x20px.|
-|`pob.shell.bottombar.btn_about`|Button|Enabled, "About"|Emits `aboutRequested("")`, opening `aboutPopup`|Fixed 68x20px.|
-|`pob.shell.bottombar.btn_check_update`|Button|Disabled, "Check for Update"|Inert in Qt6 phase|`controlEnabled: false`. Tooltip: "Update checking is not yet implemented in this port (Phase 10/14)."|
+|`pob.bottombar.options`|Button|Enabled, "Options"|Emits `optionsRequested()`, opening `optionsDialog`|Fixed 68x20px.|
+|`pob.bottombar.about`|Button|Enabled, "About"|Emits `aboutRequested("")`, opening `aboutPopup`|Fixed 68x20px.|
+|`pob.bottombar.update`|Button|Enabled, "Check for Update"|Invokes `pob_checkForUpdates`|Triggers non-modal `UpdateBanner` when a release is available.|
 |`pob.shell.dialog.save_prompt`|ConfirmPopup|Closed|Prompts user to Save, Don't Save, or Cancel on exit or closing build|Modal overlay, dims background. Enter triggers Confirm ("Save"), Esc cancels.|
 
 ---

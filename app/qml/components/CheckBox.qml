@@ -22,7 +22,8 @@ Item {
     readonly property bool hovered: ma.containsMouse
     readonly property int boxSize: height
     readonly property real labelWidth: root.label.length > 0
-        ? textMetrics.width(Math.max(1, root.boxSize - 4), "VAR", root.label) + 5 : 0
+        ? Math.max(textMetrics.width(Math.max(1, root.boxSize - 4), "VAR", root.label),
+                   Math.ceil(labelText.implicitWidth)) + 5 : 0
 
     signal toggled(bool newState)
 
@@ -68,7 +69,7 @@ Item {
         // right-align so any overrun grows away from the box (invariant #8).
         horizontalAlignment: Text.AlignRight
         label: root.label
-        size: Math.max(1, root.boxSize - 4)
+        size: Math.min(theme.fontSize, Math.max(1, root.boxSize - 4))
         // This label sits outside the box, on the ordinary page background;
         // theme.muted reads correctly there (and, as of Part 1.4, is also what
         // the box's own CheckMark glyph uses for its disabled state above).

@@ -21,6 +21,6 @@ ColorText {
     sourceText: root.label
     defaultColor: theme.text
     font.pixelSize: root.size
-    width: textMetrics.width(root.size, "VAR", root.label)
-    height: root.size
+    width: Math.max(textMetrics.width(root.size, "VAR", root.label), Math.ceil(implicitWidth))
+    height: Math.max(root.size, Math.ceil(implicitHeight))
 }

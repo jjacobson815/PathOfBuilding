@@ -63,7 +63,7 @@ Item {
         return sceneGraph.centerOnNode(nodeId, zoomFactor === undefined ? 0 : zoomFactor)
     }
     function resetView() { sceneGraph.resetView() }
-    function focusSearch() { treeSearch.forceActiveFocus(); treeSearch.selectAll() }
+    function focusSearch() { treeSearch.forceEditFocus() }
     // PgUp/PgDn (legacy :195-198): zoom about the centre.
     function zoomStep(delta) { sceneGraph.zoomBy(delta, -1, -1) }
 
@@ -122,7 +122,11 @@ Item {
         TreeScene {
             id: sceneGraph
             objectName: "pob.treeviewer.scene"
-            anchors.fill: parent
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: treeSearch.visible ? treeSearch.bottom : parent.top
+            anchors.topMargin: treeSearch.visible ? theme.space1 : 0
+            anchors.bottom: parent.bottom
             controller: treeViewerRoot.controller
             showSearch: treeViewerRoot.showSearch
             focusNodeId: treeViewerRoot.focusNodeId
@@ -132,7 +136,7 @@ Item {
         MouseArea {
             id: mouseArea
             objectName: "pob.treeviewer.ma"
-            anchors.fill: parent
+            anchors.fill: sceneGraph
             z: 2
             enabled: treeViewerRoot.interactive
             acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -246,21 +250,28 @@ Item {
             Component.onCompleted: reposition()
         }
 
-        TextField {
+        EditControl {
             id: treeSearch
+            objectName: "pob.treeviewer.search"
             visible: treeViewerRoot.showSearch
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.margins: theme.space1
+            height: 24
             z: 50
-            placeholderText: "Search nodes (Lua patterns, \"quoted phrase\", (a|b), oil: prefix)…"
-            onTextChanged: {
-                if (controller) controller.setTreeSearch(text)
+            placeholder: "Search nodes (Lua patterns, \"quoted phrase\", (a|b), oil: prefix)…"
+            onEdited: function(t) {
+                if (controller) controller.setTreeSearch(t)
             }
-            Keys.onEscapePressed: { text = ""; treeViewerRoot.activated() }
-            color: theme.text
-            background: Rectangle { color: theme.sideBarBg; border.color: theme.section; radius: theme.radiusControl }
+            onCommitted: function(t) {
+                if (controller) controller.setTreeSearch(t)
+            }
+            onReverted: {
+                text = ""
+                if (controller) controller.setTreeSearch("")
+                treeViewerRoot.activated()
+            }
         }
     }
 

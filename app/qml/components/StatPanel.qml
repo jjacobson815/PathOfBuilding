@@ -47,8 +47,8 @@ Item {
     id: root
 
     // --- Legacy geometry (Build.lua:578 column spec + per-row heights) ------
-    readonly property int colLabelX: 170     // RIGHT_X anchor for the label column
-    readonly property int colValueX: 174     // LEFT anchor for the value column
+    readonly property int colLabelX: Math.max(196, Math.round(root.width - 108)) // RIGHT_X anchor for the label column
+    readonly property int colValueX: colLabelX + 4     // LEFT anchor for the value column
     readonly property int colCenterX: 140    // CENTER_X anchor for centred rows
     readonly property int rowHeightHeader: 18
     readonly property int rowHeightStat: 16
@@ -189,6 +189,7 @@ Item {
         // Scrolling is driven by our own ScrollBar so this matches every other
         // scrollable surface in the app (same pattern as DropDownControl).
         interactive: false
+        cacheBuffer: 0
         contentY: scrollBar.offset
         model: root.rows
 
@@ -202,6 +203,7 @@ Item {
             // "stat" — the two-column legacy row. Left label's RIGHT edge sits
             // on colLabelX (RIGHT_X anchor), value starts at colValueX.
             Label {
+                objectName: "pob.statpanel.label"
                 visible: rowItem.modelData.kind === "stat"
                 label: rowItem.modelData.left
                 size: rowItem.modelData.height
@@ -222,6 +224,7 @@ Item {
                 elide: Text.ElideLeft
             }
             Label {
+                objectName: "pob.statpanel.value"
                 visible: rowItem.modelData.kind === "stat"
                 label: rowItem.modelData.right
                 size: rowItem.modelData.height

@@ -213,7 +213,7 @@ Rectangle {
 
     function _updatePointsTip() {
         pointsTip.clear()
-        if (!pointsMa.containsMouse || root.pointsTooltip.length === 0) {
+        if ((!pointsMa.containsMouse && !pointsPlate.activeFocus) || root.pointsTooltip.length === 0) {
             pointsTip.hide()
             return
         }
@@ -236,7 +236,7 @@ Rectangle {
         anchors.leftMargin: theme.space2
         anchors.rightMargin: theme.space2
         height: theme.controlSize
-        spacing: theme.space2
+        spacing: theme.space1
 
         // ===== left group =====
 
@@ -342,7 +342,7 @@ Rectangle {
                 visible: root.unsaved
                 // Text-derived items have READ-ONLY implicitWidth/implicitHeight;
                 // width is the assignable one (same rule Label.qml documents).
-                width: visible ? textMetrics.width(theme.fontSize, "VAR", " *") : 0
+                width: visible ? textMetrics.width(theme.fontSize, "VAR_BOLD", " *") + 2 : 0
                 text: " *"
                 color: theme.warning
                 font.family: theme.fontVar
@@ -371,13 +371,15 @@ Rectangle {
             visible: root.hasBuild
             id: pointsPlate
             objectName: "pob.topbar.points"
+            activeFocusOnTab: true
+            onActiveFocusChanged: root._updatePointsTip()
 
             Layout.preferredHeight: theme.controlSize
             Layout.preferredWidth: pointsLabel.width + 2 * theme.space2
             radius: theme.radiusControl
             color: "transparent"
             border.width: 1
-            border.color: pointsMa.containsMouse ? theme.borderStrong : theme.border
+            border.color: (pointsMa.containsMouse || activeFocus) ? theme.borderStrong : theme.border
 
             Label {
                 id: pointsLabel
@@ -420,7 +422,7 @@ Rectangle {
             id: levelEdit
             objectName: "pob.topbar.level"
 
-            Layout.preferredWidth: 50
+            Layout.preferredWidth: 40
             Layout.preferredHeight: theme.controlSize
             controlEnabled: root.hasBuild
             isNumeric: true
@@ -445,7 +447,7 @@ Rectangle {
             id: classDrop
             objectName: "pob.topbar.class"
 
-            Layout.preferredWidth: 95
+            Layout.preferredWidth: 76
             Layout.preferredHeight: theme.controlSize
             controlEnabled: root.hasBuild
             placeholder: "Class"
@@ -461,7 +463,7 @@ Rectangle {
             id: ascendDrop
             objectName: "pob.topbar.ascend"
 
-            Layout.preferredWidth: 120
+            Layout.preferredWidth: 88
             Layout.preferredHeight: theme.controlSize
             controlEnabled: root.hasBuild && root.ascendancies.length > 0
             placeholder: "Ascendancy"
@@ -482,7 +484,7 @@ Rectangle {
             id: secondaryDrop
             objectName: "pob.topbar.secondary"
 
-            Layout.preferredWidth: 150
+            Layout.preferredWidth: 96
             Layout.preferredHeight: theme.controlSize
             controlEnabled: root.hasBuild && root.classList.secondaryEnabled === true
             placeholder: "Alt. Ascendancy"
@@ -503,7 +505,7 @@ Rectangle {
             id: loadoutDrop
             objectName: "pob.topbar.loadouts"
 
-            Layout.preferredWidth: 145
+            Layout.preferredWidth: 96
             Layout.preferredHeight: theme.controlSize
             controlEnabled: root.hasBuild
             placeholder: "Loadouts"
@@ -542,6 +544,7 @@ Rectangle {
         }
 
         Text {
+            visible: !root.hasBuild
             text: "Mode: " + luaEngine.currentMode
             color: theme.accent
             verticalAlignment: Text.AlignVCenter

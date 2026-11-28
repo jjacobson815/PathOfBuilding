@@ -38,9 +38,9 @@ Item {
         objectName: "pob.section.plate"
         visible: root.label.length > 0
         x: 6
-        y: -8
-        width: labelText.width + 10
-        height: 18
+        y: -9
+        width: Math.max(labelText.width, Math.ceil(labelText.implicitWidth)) + 12
+        height: 20
         color: theme.background
         border.width: 1
         border.color: theme.border

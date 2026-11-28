@@ -97,3 +97,12 @@ runtime/SimpleGraphic/Screenshots
 
 .emmyrc.json
 .luarc.json
+
+# Local workspace & artifact outputs
+dist-installer/
+__pycache__/
+obsidian-vault/
+sync-vault
+import/
+skill_tree/
+src/test_captures/

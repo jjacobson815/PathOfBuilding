@@ -115,11 +115,12 @@ Item {
     }
 
     // Filters (ItemDBControl.lua:30-56), anchored above the list.
+    readonly property int halfW: Math.max(80, Math.floor((root.width - 2) / 2))
     DropDownControl {
         id: slotDrop
         objectName: "pob.itemDB.slotDrop"
         x: 0; y: root.listTop - (root.isUnique ? 62 : 22) - 18
-        width: 179; height: 18
+        width: root.halfW; height: 18
         onSelected: function (i) { root.setFilter("slot", i + 1) }
     }
     DropDownControl {
@@ -127,7 +128,7 @@ Item {
         objectName: "pob.itemDB.typeDrop"
         anchors.left: slotDrop.right; anchors.leftMargin: 2
         y: slotDrop.y
-        width: 179; height: 18
+        width: root.halfW; height: 18
         onSelected: function (i) { root.setFilter("type", i + 1) }
     }
     DropDownControl {
@@ -135,7 +136,7 @@ Item {
         objectName: "pob.itemDB.sortDrop"
         visible: root.isUnique
         x: 0; y: root.listTop - 42 - 18
-        width: 179; height: 18
+        width: root.halfW; height: 18
         onSelected: function (i) { root.setFilter("sort", i + 1) }
     }
     DropDownControl {
@@ -144,14 +145,14 @@ Item {
         visible: root.isUnique
         anchors.left: sortDrop.right; anchors.leftMargin: 2
         y: sortDrop.y
-        width: 179; height: 18
+        width: root.halfW; height: 18
         onSelected: function (i) { root.setFilter("league", i + 1) }
     }
     DropDownControl {
         id: reqDrop
         visible: root.isUnique
-        x: 0; y: sortDrop.y + 18 + 11 - 9
-        width: 179; height: 18
+        x: 0; y: sortDrop.y + 20
+        width: root.halfW; height: 18
         onSelected: function (i) { root.setFilter("requirement", i + 1) }
     }
     DropDownControl {
@@ -159,7 +160,7 @@ Item {
         visible: root.isUnique
         anchors.left: reqDrop.right; anchors.leftMargin: 2
         y: reqDrop.y
-        width: 179; height: 18
+        width: root.halfW; height: 18
         onSelected: function (i) { root.setFilter("obtainable", i + 1) }
     }
     EditControl {

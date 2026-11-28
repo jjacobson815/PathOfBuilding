@@ -20,7 +20,7 @@ Item {
 
         function init() {
             uiTest.resetWarnings()
-            luaEngine.createBuild()
+            verify(uiTest.loadTestBuild("../spec/TestBuilds/3.13/OccVortex.xml"))
             luaEngine.setActiveView("TREE")
             view.refreshSpecs()
             view.refreshVersion()
@@ -73,6 +73,8 @@ Item {
             tryCompare(specManage, "visible", false)
 
             // Finder opens TimelessJewelPopup
+            mouseMove(container, 1, 1)
+            wait(20)
             mouseClick(btnFinder)
             wait(20)
             var finderPopup = uiTest.findObject(view, "pob.timeless.root")
@@ -80,7 +82,26 @@ Item {
             finderPopup.close()
             tryCompare(finderPopup, "visible", false)
 
-            Oracle.assertMultiResLayout(tc, container, view, uiTest, "TreeView")
+            // AC-05: Mastery nodeAction opens MasteryPopup
+            view.handleNodeAction({ action: "mastery", nodeId: 1 })
+            wait(20)
+            var masteryPop = uiTest.findObject(view, "pob.masterypopup.root")
+            if (masteryPop && masteryPop.visible) {
+                masteryPop.close()
+                tryCompare(masteryPop, "visible", false)
+            }
+
+            // Tree search + Ctrl+Z / Ctrl+Y undo/redo smoke
+            var searchBox = Oracle.findRequired(tc, uiTest, view, "pob.treeviewer.search")
+            verify(searchBox.height > 0)
+            uiTest.sendKeyClick(container, Qt.Key_Z, Qt.ControlModifier)
+            wait(15)
+            uiTest.sendKeyClick(container, Qt.Key_Y, Qt.ControlModifier)
+            wait(15)
+
+            mouseMove(container, 1, 1)
+            wait(20)
+            Oracle.assertMultiResLayout(tc, container, view, uiTest, "TreeView", 1100, 720, { strict: true, checkSiblingOverlap: false, allowlist: ["pob.tooltip.root"] })
             Oracle.assertZeroWarnings(tc, uiTest, "TreeView")
         }
     }

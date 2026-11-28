@@ -15,34 +15,11 @@
 #include <QThread>
 #include <QDateTime>
 #include <QFontDatabase>
+#include "AppBootstrap.h"
 #include "LuaEngine.h"
 #include "SubScriptManager.h"
 #include "selftest_checks.h"
-#include "Theme.h"
-#include "TextMetrics.h"
-#include "ColorText.h"
-#include "BuildModel.h"
-#include "SocketGroupModel.h"
-#include "SaveLoadModel.h"
-#include "BuildListModel.h"
-#include "TreeModel.h"
-#include "TreeGroupModel.h"
-#include "TreeConnectorModel.h"
-#include "TreeViewController.h"
-#include "TreeScene.h"
-#include "ItemModel.h"
-#include "ItemSlotModel.h"
-#include "JewelSocketModel.h"
-#include "SkillModel.h"
-#include "CalcModel.h"
-#include "ConfigModel.h"
-#include "NotesController.h"
-#include "CompareModel.h"
-#include "PartyModel.h"
-
-#ifndef POB_LUA_DIR
-#define POB_LUA_DIR "."
-#endif
+#include <QFileInfo>
 
 // Phase 2: warn if the running binary is stale vs the latest build artifact.
 // The recurring "theme/tree changes not applied" bug was caused by launching
@@ -229,20 +206,11 @@ int main(int argc, char** argv) {
     // Resolve a directory for the deployed app. Prefer an explicit CLI override;
     // otherwise look next to the executable (so an installed copy finds its own
     // src/runtime/lua); fall back to the compile-time POB_LUA_DIR (build tree).
-    auto resolveDir = [&](const QString& cliVal, const QString& subdir) -> QString {
-        if (!cliVal.isEmpty()) return cliVal;
-        QString exeDir = QCoreApplication::applicationDirPath();
-        if (QDir(exeDir + "/" + subdir).exists()) return exeDir + "/" + subdir;
-        QDir d(POB_LUA_DIR);
-        d.cdUp(); d.cdUp(); // app/lua -> repo root
-        return d.absolutePath() + "/" + subdir;
+    auto resolveDir = [](const QString& cliVal, const QString& subdir) -> QString {
+        return AppBootstrap::resolveDir(cliVal, subdir);
     };
-    auto resolveHost = [&](const QString& cliVal) -> QString {
-        if (!cliVal.isEmpty()) return cliVal;
-        QString exeDir = QCoreApplication::applicationDirPath();
-        QString candidate = exeDir + "/lua/pob_host.lua";
-        if (QFile::exists(candidate)) return candidate;
-        return QString(POB_LUA_DIR) + "/pob_host.lua";
+    auto resolveHost = [](const QString& cliVal) -> QString {
+        return AppBootstrap::resolveHost(cliVal);
     };
 
     // Phase 6b: headless mode. No window / display required — run the full
@@ -318,38 +286,27 @@ int main(int argc, char** argv) {
     srcDir = resolveDir(srcDir, "src");
     runtimeDir = resolveDir(runtimeDir, "runtime");
     hostFile = resolveHost(hostFile);
-    QDir::setCurrent(srcDir); // engine opens TreeData/ + manifest.xml relative to cwd
     mainLog("cwd=" + srcDir + " runtime=" + runtimeDir + " host=" + hostFile);
-
-    // Phase 1.2a: register the actual TTFs backing the VAR/FIXED font families
-    // (Liberation Sans [+ Bold] / Bitstream Vera Sans Mono) so QML renders the
-    // SAME families the .tgf atlases in TextMetrics measure against. QFont is
-    // used for RENDERING ONLY here — TextMetrics (never QFontMetrics) still
-    // owns all layout math. Fontin is licensing-deferred (see STATUS.md); those
-    // logical names fall back to the VAR face in Theme::fontFor.
-    {
-        const QString fontDir = runtimeDir + "/SimpleGraphic/Fonts";
-        for (const char* f : {"Liberation Sans.ttf", "Liberation Sans Bold.ttf",
-                               "Bitstream Vera Sans Mono.ttf"}) {
-            const QString path = fontDir + "/" + f;
-            if (QFontDatabase::addApplicationFont(path) < 0)
-                qWarning().noquote() << "[fonts] failed to register" << path;
-        }
-    }
 
     checkBinaryFreshness();
     if (!capture) {
         SubScriptManager::registerUriScheme();
     }
 
-    LuaEngine engine;
-    QObject::connect(&engine, &LuaEngine::logMessage,
-                     [](const QString& m) { qDebug().noquote() << "[lua]" << m; });
-    if (!engine.init(srcDir, runtimeDir, hostFile, launchArgs, devMode)) {
+    AppBootstrap bootstrap;
+    AppBootstrap::Options bootOpts;
+    bootOpts.srcDir = srcDir;
+    bootOpts.runtimeDir = runtimeDir;
+    bootOpts.hostFile = hostFile;
+    bootOpts.launchArgs = launchArgs;
+    bootOpts.devMode = devMode;
+    bootOpts.connectLogToDebug = true;
+    if (!bootstrap.init(bootOpts)) {
         mainLog("engine.init FAILED");
         qCritical() << "Failed to initialise Lua engine";
         return 1;
     }
+    LuaEngine& engine = *bootstrap.engine();
     mainLog("engine.init OK");
 
     // Data-loss fix: run the engine shutdown on quit so main:Shutdown ->
@@ -363,159 +320,7 @@ int main(int argc, char** argv) {
     });
 
     QQmlApplicationEngine qml;
-    qmlRegisterType<TreeScene>("PathOfBuilding", 1, 0, "TreeScene");
-    qml.rootContext()->setContextProperty("luaEngine", &engine);
-    qml.rootContext()->setContextProperty("pobCaptureMode", capture);
-
-    // Phase 1b: expose the engine's UITheme as a QML theme singleton (context
-    // property "theme"). Must be initialised AFTER engine.init() so the Lua
-    // UITheme module (and the LoadModule global) exist. Parented to the app so
-    // it is cleaned up at exit; the QML context property keeps a reference.
-    Theme* theme = new Theme(&app);
-    theme->init(&engine);
-    qml.rootContext()->setContextProperty("theme", theme);
-
-    // Phase 1.2a: expose the SAME .tgf-backed TextMetrics instance the Lua engine
-    // uses (created in engine.init()) to QML, so QML-side layout math (auto-width,
-    // caret, ellipsis) measures identically to the engine. Q_INVOKABLE
-    // textMetrics.width(height, font, text) / cursorIndex(...).
-    qml.rootContext()->setContextProperty("textMetrics", engine.textMetrics());
-
-    // Phase 1.2a: the shared ^0-^9/^xRRGGBB colour-markup parser (see
-    // ColorText.h). Every colour-coded string (item names, gem tooltips,
-    // stat lines, ...) should route through this rather than a bespoke
-    // per-component parser or Theme::parseColor (single-token only).
-    ColorText* colorText = new ColorText(&app);
-    qml.rootContext()->setContextProperty("colorText", colorText);
-
-    // Phase 2a: typed build-state models. They are parented to the app so they
-    // live for the process lifetime; the QML context properties keep references.
-    // refresh() is called once now (after boot) and again every frame so the
-    // models stay in sync with the engine without QML polling raw QVariants.
-    BuildModel* buildModel = new BuildModel(&app);
-    SocketGroupModel* socketGroupModel = new SocketGroupModel(&app);
-    BuildListModel* buildListModel = new BuildListModel(&app);
-    buildModel->refresh(&engine);
-    socketGroupModel->refresh(&engine);
-    buildListModel->refresh(&engine);
-    qml.rootContext()->setContextProperty("buildModel", buildModel);
-    qml.rootContext()->setContextProperty("socketGroupModel", socketGroupModel);
-    qml.rootContext()->setContextProperty("buildListModel", buildListModel);
-
-    // Phase 4a: passive-tree rendering models. TreeModel/TreeGroupModel/
-    // TreeConnectorModel hold the node/group/connector rows; TreeViewController
-    // owns the pan/zoom transform and pulls the data from the engine via
-    // LuaEngine::getTreeData() (which calls the pob_getTreeData Lua global).
-    // The controller is refreshed every frame (throttled internally by an
-    // allocation+node-count signature) so the tree stays in sync with the
-    // engine without QML polling raw QVariants.
-    TreeModel* treeModel = new TreeModel(&app);
-    TreeGroupModel* treeGroupModel = new TreeGroupModel(&app);
-    TreeConnectorModel* treeConnectorModel = new TreeConnectorModel(&app);
-    TreeViewController* treeViewController = new TreeViewController(&app);
-    treeViewController->setModels(treeModel, treeGroupModel, treeConnectorModel);
-    treeViewController->setEngine(&engine); // Phase 4b: enable alloc/search wrappers
-    treeViewController->refresh(&engine); // initial pull after boot
-    qml.rootContext()->setContextProperty("treeModel", treeModel);
-    qml.rootContext()->setContextProperty("treeGroupModel", treeGroupModel);
-    qml.rootContext()->setContextProperty("treeConnectorModel", treeConnectorModel);
-    qml.rootContext()->setContextProperty("treeViewController", treeViewController);
-
-    // Phase 5a: ItemsTab (ITEMS view) models. itemModel holds the build's
-    // item list (name/rarity/mods/equip state); itemSlotModel holds the
-    // equipped slots; jewelSocketModel holds the tree jewel sockets. They are
-    // refreshed every frame (throttled internally by a change signature) so
-    // the ITEMS view stays in sync with the engine without QML polling.
-    // Phase 6 Part 6.2: the Items view reads pob_itemsGetLists (app/lua/
-    // pob_items.lua); ItemModel (the old right-column browser's model) is no
-    // longer instantiated. src/ItemModel.cpp stays in the build.
-    ItemSlotModel* itemSlotModel = new ItemSlotModel(&app);
-    JewelSocketModel* jewelSocketModel = new JewelSocketModel(&app);
-    itemSlotModel->refresh(&engine);
-    jewelSocketModel->refresh(&engine);
-    qml.rootContext()->setContextProperty("itemSlotModel", itemSlotModel);
-    qml.rootContext()->setContextProperty("jewelSocketModel", jewelSocketModel);
-
-    // Phase 5: the SKILLS view reads pob_skillsGetState (app/lua/pob_skills.lua)
-    // directly. The old SkillModel (pob_getActiveSkills: one BuildOutput per
-    // displayed skill, run on every skillsChanged) had no other consumer and
-    // is no longer instantiated.
-
-    // Phase 5c: CalcsTab (CALCS view) model. calcModel holds the build's
-    // calculation output (summary numbers + the rendered CalcSection list with
-    // per-stat values and breakdown keys). It is refreshed every frame
-    // (throttled internally by the engine's build.outputRevision signature) so
-    // the CALCS view stays in sync without QML polling.
-    CalcModel* calcModel = new CalcModel(&app);
-    calcModel->refresh(&engine);
-    qml.rootContext()->setContextProperty("calcModel", calcModel);
-
-    // Phase 5d: configuration-options browser for the CONFIG view. Exposes the
-    // build's config options (src/Modules/ConfigOptions.lua) and lets the UI
-    // write values back via LuaEngine::setConfigOption. Refreshed every frame
-    // (throttled internally by build.outputRevision) so the CONFIG view stays
-    // in sync without QML polling.
-    ConfigModel* configModel = new ConfigModel(&app);
-    configModel->refresh(&engine);
-    qml.rootContext()->setContextProperty("configModel", configModel);
-
-    // Phase 5e: Notes/Import/Compare/Party (utility) tabs bridge. notesController
-    // mirrors the NotesTab edit buffer onto a QML-bindable `notes` QString;
-    // compareModel/partyModel are list models for the COMPARE/PARTY views. They
-    // are refreshed every frame (throttled internally) so the utility views stay
-    // in sync with the engine without QML polling. Import needs no model: the
-    // QML IMPORT view calls LuaEngine::importFromCode directly.
-    NotesController* notesController = new NotesController(&app);
-    CompareModel* compareModel = new CompareModel(&app);
-    PartyModel* partyModel = new PartyModel(&app);
-    notesController->refresh(&engine);
-    compareModel->refresh(&engine);
-    partyModel->refresh(&engine);
-    qml.rootContext()->setContextProperty("notesController", notesController);
-    qml.rootContext()->setContextProperty("compareModel", compareModel);
-    qml.rootContext()->setContextProperty("partyModel", partyModel);
-
-    // Phase 2b: build save/load bridge. The model delegates to the LuaEngine
-    // save/load slots (which call the pob_* Lua globals). On a successful load
-    // it emits buildLoaded(); we refresh the typed models immediately so the UI
-    // reflects the newly loaded build without waiting for the next frame tick.
-    SaveLoadModel* saveLoadModel = new SaveLoadModel(&engine, &app);
-    QObject::connect(saveLoadModel, &SaveLoadModel::buildLoaded, [&]() {
-        buildModel->refresh(&engine);
-        socketGroupModel->refresh(&engine);
-        qDebug().noquote() << "[SaveLoad] build loaded; models refreshed";
-    });
-    qml.rootContext()->setContextProperty("saveLoadModel", saveLoadModel);
-
-    // Phase 6: event-driven model synchronisation. LuaEngine emits a specific
-    // signal the moment a genuine mutation occurs; each model refreshes exactly
-    // once in response. No polling timer, so an idle UI performs zero refreshes
-    // and sits at 0% CPU. (The Lua rebuild already happened synchronously
-    // inside the bridge method that emitted the signal.)
-    QObject::connect(&engine, &LuaEngine::buildDataChanged, [&]() { buildModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::buildDataChanged, [&]() { socketGroupModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::treeChanged, [&]() { treeViewController->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::configChanged, [&]() { configModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::itemsChanged, [&]() { itemSlotModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::itemsChanged, [&]() { jewelSocketModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::calcsChanged, [&]() { calcModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::notesChanged, [&]() { notesController->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::compareChanged, [&]() { compareModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::partyChanged, [&]() { partyModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::buildListChanged, [&]() { buildListModel->refresh(&engine); });
-    // modeChanged covers mode switches and new-build loads: refresh everything.
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { buildModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { socketGroupModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { buildListModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { saveLoadModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { treeViewController->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { itemSlotModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { jewelSocketModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { calcModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { configModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { notesController->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { compareModel->refresh(&engine); });
-    QObject::connect(&engine, &LuaEngine::modeChanged, [&]() { partyModel->refresh(&engine); });
+    bootstrap.attachToQmlEngine(&qml, capture);
 
     // GUI-subsystem binary: QML compile warnings/errors go to the debugger
     // (OutputDebugString), never a visible console. Mirror them into mainLog

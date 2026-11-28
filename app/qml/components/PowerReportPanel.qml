@@ -27,6 +27,7 @@ Rectangle {
     // Column fractions of legacy's 700px list (:11-28).
     readonly property var colFrac: [0.15, 0.45, 0.16, 0.05, 0.16]
     readonly property var sortable: [true, false, true, true, true]
+    readonly property var _headerLabels: ["Type", "Node Name", root.report.statLabel || "Power", "Points", "Per Point"]
 
     function setReport(r) {
         report = r || ({ rows: [], label: "" })
@@ -99,14 +100,14 @@ Rectangle {
         Row {
             spacing: 0
             Repeater {
-                model: ["Type", "Node Name", root.report.statLabel || "Power", "Points", "Per Point"]
+                model: 5
                 delegate: Rectangle {
                     objectName: "pob.powerreport.hdr"
                     width: root.colWidth(index)
                     height: 18
                     color: root.sortCol === index + 1 ? theme.active : theme.titleBar
                     border.color: theme.border
-                    Label { anchors.centerIn: parent; label: modelData; size: 13 }
+                    Label { anchors.centerIn: parent; label: root._headerLabels[index]; size: 13 }
                     MouseArea {
                         anchors.fill: parent
                         enabled: root.sortable[index]

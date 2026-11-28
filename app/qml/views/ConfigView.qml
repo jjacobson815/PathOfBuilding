@@ -33,6 +33,7 @@ Item {
 
     // Compute number of 360px columns that fit in the viewport (legacy: (w - 10) / 370).
     readonly property int colCount: Math.max(1, Math.min(3, Math.floor((flick.width - 10) / 370)))
+    readonly property int colWidth: Math.max(360, Math.floor((flick.width - 20 - (colCount - 1) * 10) / colCount))
 
     // Bucket sections into columns [0..colCount-1] respecting legacy `sec.col`.
     readonly property var columns: {
@@ -133,9 +134,9 @@ Item {
         Widgets.DropDownControl {
             id: setSelect
             objectName: "pob.config.drop_set"
-            x: 82
+            x: 88
             y: 8
-            width: 210
+            width: 186
             height: 20
             size: 14
             controlEnabled: root.sets.length > 1
@@ -148,7 +149,7 @@ Item {
         Widgets.Button {
             id: manageBtn
             objectName: "pob.config.btn_manage_set"
-            x: 296
+            x: 280
             y: 8
             width: 90
             height: 20
@@ -222,7 +223,7 @@ Item {
                     readonly property int colIdx: index
                     readonly property var colSections: (root.columns && root.columns[colIdx] && root.columns[colIdx].length !== undefined)
                         ? root.columns[colIdx] : []
-                    width: 360
+                    width: root.colWidth
                     spacing: 18
 
                     Repeater {

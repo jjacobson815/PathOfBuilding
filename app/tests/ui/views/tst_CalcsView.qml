@@ -20,7 +20,7 @@ Item {
 
         function init() {
             uiTest.resetWarnings()
-            luaEngine.createBuild()
+            verify(uiTest.loadTestBuild("../spec/TestBuilds/3.13/OccVortex.xml"))
             luaEngine.setActiveView("CALCS")
             view.refresh()
             mouseMove(container, 1, 1)
@@ -78,7 +78,9 @@ Item {
             }
             verify(searchIn.width > 0)
 
-            Oracle.assertMultiResLayout(tc, container, view, uiTest, "CalcsView")
+            mouseMove(container, 1, 1)
+            wait(20)
+            Oracle.assertMultiResLayout(tc, container, view, uiTest, "CalcsView", 1100, 720, { strict: true, checkSiblingOverlap: false })
             Oracle.assertZeroWarnings(tc, uiTest, "CalcsView")
         }
     }

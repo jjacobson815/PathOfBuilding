@@ -20,7 +20,7 @@ Item {
 
         function init() {
             uiTest.resetWarnings()
-            luaEngine.createBuild()
+            verify(uiTest.loadTestBuild("../spec/TestBuilds/3.13/OccVortex.xml"))
             luaEngine.setActiveView("NOTES")
             view.refresh()
             mouseMove(container, 1, 1)
@@ -59,14 +59,23 @@ Item {
             view._zoom(-2)
             compare(view.editorFontSize, oldSz)
 
-            // AC-05: Toggle preview pane
+            // AC-05: Toggle preview pane & Show Color Codes
+            var codesBtn = Oracle.findRequired(tc, uiTest, view, "pob.notes.btn_toggle_codes")
+            mouseClick(codesBtn)
+            wait(20)
+            verify(preview.sourceText.indexOf("^_") === -1)
+            mouseClick(codesBtn)
+            wait(20)
+
             verify(view.showPreview)
             mouseClick(toggleBtn)
             compare(view.showPreview, false)
             mouseClick(toggleBtn)
             verify(view.showPreview)
 
-            Oracle.assertMultiResLayout(tc, container, view, uiTest, "NotesView")
+            mouseMove(container, 1, 1)
+            wait(20)
+            Oracle.assertMultiResLayout(tc, container, view, uiTest, "NotesView", 1100, 720, { strict: true, checkSiblingOverlap: false })
             Oracle.assertZeroWarnings(tc, uiTest, "NotesView")
         }
     }

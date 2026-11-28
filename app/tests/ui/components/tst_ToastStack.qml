@@ -24,6 +24,7 @@ Item {
             uiTest.resetWarnings()
             stack.toasts = []
             wait(10)
+            waitForRendering(container)
         }
 
         function test_all_ac() {
@@ -36,7 +37,7 @@ Item {
                 { id: "toast_a", message: "Oldest Toast" },
                 { id: "toast_b", message: "Newest Toast" }
             ])
-            wait(300)
+            waitForRendering(stack)
             compare(stack._stackOrder.length, 2)
             compare(stack._stackOrder[0].id, "toast_b")
             compare(stack._stackOrder[1].id, "toast_a")
@@ -44,7 +45,8 @@ Item {
 
             var cards = uiTest.findObjectsByPrefix(stack, "pob.toaststack.toast")
             compare(cards.length, 2)
-            compare(cards[0].opacity, 1.0)
+            tryCompare(cards[0], "opacity", 1.0)
+            tryCompare(cards[1], "opacity", 1.0)
 
             Oracle.assertMultiResLayout(tc, container, stack, uiTest, "ToastStack")
             Oracle.assertZeroWarnings(tc, uiTest, "ToastStack")

@@ -1,0 +1,95 @@
+# PoB-Qt UI Spec & Test Coverage Matrix
+
+- **Total QML files:** 86
+- **Mapped to specs:** 86/86
+- **Mapped to QuickTest suites:** 86/86
+- **Total Acceptance Criteria (AC-XX):** 418
+
+| QML File | UI Spec | QuickTest Suite | AC Count |
+| --- | --- | --- | ---: |
+| `app/qml/components/AboutPopup.qml` | `docs/ui-specs/components/AboutPopup.md` | `app/tests/ui/components/tst_AboutPopup.qml` | 5 |
+| `app/qml/components/Arrow.qml` | `docs/ui-specs/components/Arrow.md` | `app/tests/ui/components/tst_Arrow.qml` | 3 |
+| `app/qml/components/BottomBar.qml` | `docs/ui-specs/components/BottomBar.md` | `app/tests/ui/components/tst_BottomBar.qml` | 4 |
+| `app/qml/components/Button.qml` | `docs/ui-specs/components/Button.md` | `app/tests/ui/components/tst_Button.qml` | 5 |
+| `app/qml/components/CalcBreakdownPanel.qml` | `docs/ui-specs/components/CalcBreakdownPanel.md` | `app/tests/ui/components/tst_CalcBreakdownPanel.qml` | 5 |
+| `app/qml/components/CalcRadiusVisual.qml` | `docs/ui-specs/components/CalcRadiusVisual.md` | `app/tests/ui/components/tst_CalcRadiusVisual.qml` | 5 |
+| `app/qml/components/CalcSectionCard.qml` | `docs/ui-specs/components/CalcSectionCard.md` | `app/tests/ui/components/tst_CalcSectionCard.qml` | 5 |
+| `app/qml/components/CheckBox.qml` | `docs/ui-specs/components/CheckBox.md` | `app/tests/ui/components/tst_CheckBox.qml` | 5 |
+| `app/qml/components/CheckMark.qml` | `docs/ui-specs/components/CheckMark.md` | `app/tests/ui/components/tst_CheckMark.qml` | 3 |
+| `app/qml/components/Chrome.qml` | `docs/ui-specs/components/Chrome.md` | `app/tests/ui/components/tst_Chrome.qml` | 5 |
+| `app/qml/components/ColorText.qml` | `docs/ui-specs/components/ColorText.md` | `app/tests/ui/components/tst_ColorText.qml` | 4 |
+| `app/qml/components/ConfigOptionRow.qml` | `docs/ui-specs/components/ConfigOptionRow.md` | `app/tests/ui/components/tst_ConfigOptionRow.qml` | 5 |
+| `app/qml/components/ConfirmPopup.qml` | `docs/ui-specs/components/ConfirmPopup.md` | `app/tests/ui/components/tst_ConfirmPopup.qml` | 5 |
+| `app/qml/components/ConversionPopup.qml` | `docs/ui-specs/components/ConversionPopup.md` | `app/tests/ui/components/tst_ConversionPopup.qml` | 5 |
+| `app/qml/components/CraftAnointPopup.qml` | `docs/ui-specs/components/CraftAnointPopup.md` | `app/tests/ui/components/tst_CraftAnointPopup.qml` | 5 |
+| `app/qml/components/CraftButton.qml` | `docs/ui-specs/components/CraftButton.md` | `app/tests/ui/components/tst_CraftButton.qml` | 5 |
+| `app/qml/components/CraftCorruptPopup.qml` | `docs/ui-specs/components/CraftCorruptPopup.md` | `app/tests/ui/components/tst_CraftCorruptPopup.qml` | 5 |
+| `app/qml/components/CraftCruciblePopup.qml` | `docs/ui-specs/components/CraftCruciblePopup.md` | `app/tests/ui/components/tst_CraftCruciblePopup.qml` | 5 |
+| `app/qml/components/CraftCustomPopup.qml` | `docs/ui-specs/components/CraftCustomPopup.md` | `app/tests/ui/components/tst_CraftCustomPopup.qml` | 5 |
+| `app/qml/components/CraftDrop.qml` | `docs/ui-specs/components/CraftDrop.md` | `app/tests/ui/components/tst_CraftDrop.qml` | 5 |
+| `app/qml/components/CraftEdit.qml` | `docs/ui-specs/components/CraftEdit.md` | `app/tests/ui/components/tst_CraftEdit.qml` | 5 |
+| `app/qml/components/CraftEnchantPopup.qml` | `docs/ui-specs/components/CraftEnchantPopup.md` | `app/tests/ui/components/tst_CraftEnchantPopup.qml` | 5 |
+| `app/qml/components/CraftImplicitPopup.qml` | `docs/ui-specs/components/CraftImplicitPopup.md` | `app/tests/ui/components/tst_CraftImplicitPopup.qml` | 5 |
+| `app/qml/components/CraftLabel.qml` | `docs/ui-specs/components/CraftLabel.md` | `app/tests/ui/components/tst_CraftLabel.qml` | 5 |
+| `app/qml/components/CraftNewPopup.qml` | `docs/ui-specs/components/CraftNewPopup.md` | `app/tests/ui/components/tst_CraftNewPopup.qml` | 5 |
+| `app/qml/components/CraftPopupBase.qml` | `docs/ui-specs/components/CraftPopupBase.md` | `app/tests/ui/components/tst_CraftPopupBase.qml` | 5 |
+| `app/qml/components/Dragger.qml` | `docs/ui-specs/components/Dragger.md` | `app/tests/ui/components/tst_Dragger.qml` | 5 |
+| `app/qml/components/DragGhost.qml` | `docs/ui-specs/components/DragGhost.md` | `app/tests/ui/components/tst_DragGhost.qml` | 5 |
+| `app/qml/components/DragSource.qml` | `docs/ui-specs/components/DragSource.md` | `app/tests/ui/components/tst_DragSource.qml` | 5 |
+| `app/qml/components/DropDownControl.qml` | `docs/ui-specs/components/DropDownControl.md` | `app/tests/ui/components/tst_DropDownControl.qml` | 5 |
+| `app/qml/components/DropTarget.qml` | `docs/ui-specs/components/DropTarget.md` | `app/tests/ui/components/tst_DropTarget.qml` | 5 |
+| `app/qml/components/EditControl.qml` | `docs/ui-specs/components/EditControl.md` | `app/tests/ui/components/tst_EditControl.qml` | 5 |
+| `app/qml/components/GemSelect.qml` | `docs/ui-specs/components/GemSelect.md` | `app/tests/ui/components/tst_GemSelect.qml` | 5 |
+| `app/qml/components/HoverKeyArea.qml` | `docs/ui-specs/components/HoverKeyArea.md` | `app/tests/ui/components/tst_HoverKeyArea.qml` | 4 |
+| `app/qml/components/ItemAffixRow.qml` | `docs/ui-specs/components/ItemAffixRow.md` | `app/tests/ui/components/tst_ItemAffixRow.qml` | 5 |
+| `app/qml/components/ItemDBPanel.qml` | `docs/ui-specs/components/ItemDBPanel.md` | `app/tests/ui/components/tst_ItemDBPanel.qml` | 5 |
+| `app/qml/components/ItemListBox.qml` | `docs/ui-specs/components/ItemListBox.md` | `app/tests/ui/components/tst_ItemListBox.qml` | 5 |
+| `app/qml/components/ItemTextPopup.qml` | `docs/ui-specs/components/ItemTextPopup.md` | `app/tests/ui/components/tst_ItemTextPopup.qml` | 5 |
+| `app/qml/components/Label.qml` | `docs/ui-specs/components/Label.md` | `app/tests/ui/components/tst_Label.qml` | 4 |
+| `app/qml/components/LoadoutManagePopup.qml` | `docs/ui-specs/components/LoadoutManagePopup.md` | `app/tests/ui/components/tst_LoadoutManagePopup.qml` | 5 |
+| `app/qml/components/MainSkillPanel.qml` | `docs/ui-specs/components/MainSkillPanel.md` | `app/tests/ui/components/tst_MainSkillPanel.qml` | 5 |
+| `app/qml/components/MasteryPopup.qml` | `docs/ui-specs/components/MasteryPopup.md` | `app/tests/ui/components/tst_MasteryPopup.qml` | 5 |
+| `app/qml/components/MessagePopup.qml` | `docs/ui-specs/components/MessagePopup.md` | `app/tests/ui/components/tst_MessagePopup.qml` | 4 |
+| `app/qml/components/NewFolderPopup.qml` | `docs/ui-specs/components/NewFolderPopup.md` | `app/tests/ui/components/tst_NewFolderPopup.qml` | 5 |
+| `app/qml/components/OptionsDialog.qml` | `docs/ui-specs/components/OptionsDialog.md` | `app/tests/ui/components/tst_OptionsDialog.qml` | 5 |
+| `app/qml/components/PartyBufferBox.qml` | `docs/ui-specs/components/PartyBufferBox.md` | `app/tests/ui/components/tst_PartyBufferBox.qml` | 5 |
+| `app/qml/components/PathControl.qml` | `docs/ui-specs/components/PathControl.md` | `app/tests/ui/components/tst_PathControl.qml` | 4 |
+| `app/qml/components/PopupBase.qml` | `docs/ui-specs/components/PopupBase.md` | `app/tests/ui/components/tst_PopupBase.qml` | 5 |
+| `app/qml/components/PopupButton.qml` | `docs/ui-specs/components/PopupButton.md` | `app/tests/ui/components/tst_PopupButton.qml` | 4 |
+| `app/qml/components/PowerReportPanel.qml` | `docs/ui-specs/components/PowerReportPanel.md` | `app/tests/ui/components/tst_PowerReportPanel.qml` | 5 |
+| `app/qml/components/RectangleOutline.qml` | `docs/ui-specs/components/RectangleOutline.md` | `app/tests/ui/components/tst_RectangleOutline.qml` | 4 |
+| `app/qml/components/SaveAsPopup.qml` | `docs/ui-specs/components/SaveAsPopup.md` | `app/tests/ui/components/tst_SaveAsPopup.qml` | 5 |
+| `app/qml/components/ScrollBar.qml` | `docs/ui-specs/components/ScrollBar.md` | `app/tests/ui/components/tst_ScrollBar.qml` | 5 |
+| `app/qml/components/SearchHost.qml` | `docs/ui-specs/components/SearchHost.md` | `app/tests/ui/components/tst_SearchHost.qml` | 5 |
+| `app/qml/components/Section.qml` | `docs/ui-specs/components/Section.md` | `app/tests/ui/components/tst_Section.qml` | 4 |
+| `app/qml/components/SetManagePopup.qml` | `docs/ui-specs/components/SetManagePopup.md` | `app/tests/ui/components/tst_SetManagePopup.qml` | 5 |
+| `app/qml/components/Slider.qml` | `docs/ui-specs/components/Slider.md` | `app/tests/ui/components/tst_Slider.qml` | 5 |
+| `app/qml/components/SocketGroupList.qml` | `docs/ui-specs/components/SocketGroupList.md` | `app/tests/ui/components/tst_SocketGroupList.qml` | 5 |
+| `app/qml/components/SpecManagePopup.qml` | `docs/ui-specs/components/SpecManagePopup.md` | `app/tests/ui/components/tst_SpecManagePopup.qml` | 5 |
+| `app/qml/components/SpectreLibraryPopup.qml` | `docs/ui-specs/components/SpectreLibraryPopup.md` | `app/tests/ui/components/tst_SpectreLibraryPopup.qml` | 5 |
+| `app/qml/components/StatPanel.qml` | `docs/ui-specs/components/StatPanel.md` | `app/tests/ui/components/tst_StatPanel.qml` | 5 |
+| `app/qml/components/TattooPopup.qml` | `docs/ui-specs/components/TattooPopup.md` | `app/tests/ui/components/tst_TattooPopup.qml` | 5 |
+| `app/qml/components/TextInputPopup.qml` | `docs/ui-specs/components/TextInputPopup.md` | `app/tests/ui/components/tst_TextInputPopup.qml` | 5 |
+| `app/qml/components/TextListControl.qml` | `docs/ui-specs/components/TextListControl.md` | `app/tests/ui/components/tst_TextListControl.qml` | 4 |
+| `app/qml/components/TimelessJewelPopup.qml` | `docs/ui-specs/components/TimelessJewelPopup.md` | `app/tests/ui/components/tst_TimelessJewelPopup.qml` | 5 |
+| `app/qml/components/Toast.qml` | `docs/ui-specs/components/Toast.md` | `app/tests/ui/components/tst_Toast.qml` | 4 |
+| `app/qml/components/ToastStack.qml` | `docs/ui-specs/components/ToastStack.md` | `app/tests/ui/components/tst_ToastStack.qml` | 4 |
+| `app/qml/components/Tooltip.qml` | `docs/ui-specs/components/Tooltip.md` | `app/tests/ui/components/tst_Tooltip.qml` | 5 |
+| `app/qml/components/TopBar.qml` | `docs/ui-specs/components/TopBar.md` | `app/tests/ui/components/tst_TopBar.qml` | 5 |
+| `app/qml/components/TreeExportPopup.qml` | `docs/ui-specs/components/TreeExportPopup.md` | `app/tests/ui/components/tst_TreeExportPopup.qml` | 5 |
+| `app/qml/components/TreeImportPopup.qml` | `docs/ui-specs/components/TreeImportPopup.md` | `app/tests/ui/components/tst_TreeImportPopup.qml` | 5 |
+| `app/qml/components/TreeViewer.qml` | `docs/ui-specs/components/TreeViewer.md` | `app/tests/ui/components/tst_TreeViewer.qml` | 5 |
+| `app/qml/components/UndoHandler.qml` | `docs/ui-specs/components/UndoHandler.md` | `app/tests/ui/components/tst_UndoHandler.qml` | 5 |
+| `app/qml/components/UpdateBanner.qml` | `docs/ui-specs/components/UpdateBanner.md` | `app/tests/ui/components/tst_UpdateBanner.qml` | 4 |
+| `app/qml/components/WarningsBar.qml` | `docs/ui-specs/components/WarningsBar.md` | `app/tests/ui/components/tst_WarningsBar.qml` | 5 |
+| `app/qml/main.qml` | `docs/ui-specs/views/MainShell.md` | `app/tests/ui/views/tst_MainShell.qml` | 6 |
+| `app/qml/views/BuildListPage.qml` | `docs/ui-specs/views/BuildListPage.md` | `app/tests/ui/views/tst_BuildListPage.qml` | 5 |
+| `app/qml/views/CalcsView.qml` | `docs/ui-specs/views/CalcsView.md` | `app/tests/ui/views/tst_CalcsView.qml` | 6 |
+| `app/qml/views/ConfigView.qml` | `docs/ui-specs/views/ConfigView.md` | `app/tests/ui/views/tst_ConfigView.qml` | 6 |
+| `app/qml/views/ImportView.qml` | `docs/ui-specs/views/ImportView.md` | `app/tests/ui/views/tst_ImportView.qml` | 4 |
+| `app/qml/views/ItemsView.qml` | `docs/ui-specs/views/ItemsView.md` | `app/tests/ui/views/tst_ItemsView.qml` | 6 |
+| `app/qml/views/NotesView.qml` | `docs/ui-specs/views/NotesView.md` | `app/tests/ui/views/tst_NotesView.qml` | 6 |
+| `app/qml/views/PartyView.qml` | `docs/ui-specs/views/PartyView.md` | `app/tests/ui/views/tst_PartyView.qml` | 6 |
+| `app/qml/views/PlaceholderView.qml` | `docs/ui-specs/views/PlaceholderView.md` | `app/tests/ui/views/tst_PlaceholderView.qml` | 4 |
+| `app/qml/views/SkillsView.qml` | `docs/ui-specs/views/SkillsView.md` | `app/tests/ui/views/tst_SkillsView.qml` | 6 |
+| `app/qml/views/TreeView.qml` | `docs/ui-specs/views/TreeView.md` | `app/tests/ui/views/tst_TreeView.qml` | 5 |

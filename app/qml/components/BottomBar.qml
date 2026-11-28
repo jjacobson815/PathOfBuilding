@@ -26,12 +26,14 @@ Item {
     readonly property string versionBranch: aboutContent ? aboutContent.versionBranch : ""
     readonly property bool devMode: aboutContent ? !!aboutContent.devMode : false
 
-    implicitHeight: 24
+    implicitHeight: 34
 
     RowLayout {
-        anchors.left: parent.left
-        anchors.bottom: parent.bottom
-        anchors.margins: 4
+        anchors.fill: parent
+        anchors.leftMargin: theme.space1
+        anchors.rightMargin: theme.space1
+        anchors.topMargin: 2
+        anchors.bottomMargin: 2
         spacing: 4
 
         Button {
@@ -39,6 +41,7 @@ Item {
             label: "Options"
             Layout.preferredWidth: 68
             Layout.preferredHeight: 20
+            Layout.alignment: Qt.AlignVCenter
             onClicked: root.optionsRequested()
         }
         Button {
@@ -46,6 +49,7 @@ Item {
             label: "About"
             Layout.preferredWidth: 68
             Layout.preferredHeight: 20
+            Layout.alignment: Qt.AlignVCenter
             onClicked: root.aboutRequested("")
         }
         Button {
@@ -53,10 +57,12 @@ Item {
             label: "Check for Update"
             Layout.preferredWidth: 140
             Layout.preferredHeight: 20
-            controlEnabled: false
-            tooltipText: "Update checking is not yet implemented in this port (Phase 10/14)."
+            Layout.alignment: Qt.AlignVCenter
+            tooltipText: "Check for Path of Building updates"
+            onClicked: luaEngine.invoke("pob_checkForUpdates")
         }
         ColumnLayout {
+            Layout.alignment: Qt.AlignVCenter
             spacing: 0
             ColorText {
                 objectName: "pob.bottombar.fork"
@@ -75,8 +81,9 @@ Item {
         ColorText {
             objectName: "pob.bottombar.devMode"
             visible: root.devMode
-            sourceText: "^1Dev Mode"
-            defaultColor: theme.danger
+            Layout.alignment: Qt.AlignVCenter
+            sourceText: "Dev Mode"
+            defaultColor: "#F87171"
             font.pixelSize: theme.fontSizeSm
         }
     }

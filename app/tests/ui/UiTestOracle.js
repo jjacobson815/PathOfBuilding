@@ -1,10 +1,17 @@
-.pragma library
-
 var RESOLUTIONS = [
     { name: "960x640",   w: 960,  h: 640 },
     { name: "1100x720",  w: 1100, h: 720 },
     { name: "1600x900",  w: 1600, h: 900 }
 ];
+
+function step(tc, label) {
+    var delay = (typeof uiTest !== "undefined" && uiTest && uiTest.stepDelayMs)
+        ? uiTest.stepDelayMs() : 0;
+    if (delay > 0) {
+        console.log("[ui-step] " + (label || ""));
+        tc.wait(delay);
+    }
+}
 
 function assertZeroWarnings(tc, uiTest, label) {
     var warns = uiTest.warnings();
@@ -19,7 +26,7 @@ function findRequired(tc, uiTest, root, objectName) {
     return obj;
 }
 
-function assertMultiResLayout(tc, hostContainer, targetObj, uiTest, label, restoreW, restoreH) {
+function assertMultiResLayout(tc, hostContainer, targetObj, uiTest, label, restoreW, restoreH, options) {
     var origW = restoreW !== undefined ? restoreW : hostContainer.width;
     var origH = restoreH !== undefined ? restoreH : hostContainer.height;
     for (var i = 0; i < RESOLUTIONS.length; i++) {
@@ -27,10 +34,16 @@ function assertMultiResLayout(tc, hostContainer, targetObj, uiTest, label, resto
         hostContainer.width = r.w;
         hostContainer.height = r.h;
         tc.wait(25);
-        var res = uiTest.checkLayoutOracle(targetObj || hostContainer, r.w, r.h);
+        var res = uiTest.checkLayoutOracle(targetObj || hostContainer, r.w, r.h, options || ({}));
         if (!res.ok) {
             var issues = res.issues || [];
-            tc.fail((label || "LayoutOracle") + " failed at " + r.name + ":\n  " + issues.join("\n  "));
+            var artifact = "";
+            if (uiTest.captureAnnotatedFailure) {
+                artifact = uiTest.captureAnnotatedFailure(hostContainer, res.violations || issues, "");
+            }
+            tc.fail((label || "LayoutOracle") + " failed at " + r.name
+                    + (artifact ? (" [artifact: " + artifact + "]") : "")
+                    + ":\n  " + issues.join("\n  "));
         }
     }
     hostContainer.width = origW;

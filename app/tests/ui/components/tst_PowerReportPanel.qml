@@ -32,6 +32,7 @@ Item {
             nodeSpy.clear()
             mouseMove(container, 1, 1)
             wait(10)
+            waitForRendering(panel)
         }
 
         function test_all_ac() {
@@ -67,8 +68,9 @@ Item {
 
             // AC-03: Click Type header sorts alphabetically ascending
             wait(10)
+            waitForRendering(panel)
             hdrs = uiTest.findObjectsByPrefix(panel, "pob.powerreport.hdr")
-            verify(hdrs.length >= 5)
+            verify(hdrs.length === 5)
             var typeHdr = null
             for (var hi = 0; hi < hdrs.length; hi++) {
                 if (hdrs[hi].width > 0 && hdrs[hi].visible && hdrs[hi].children.length > 0 && hdrs[hi].children[0].label === "Type") {
@@ -92,6 +94,7 @@ Item {
             filterDrop.currentIndex = 0
             filterDrop.selected(0)
             wait(50)
+            waitForRendering(panel)
             var allRows = uiTest.findObjectsByPrefix(panel, "pob.powerreport.row")
             var rows = []
             for (var r = 0; r < allRows.length; r++) {

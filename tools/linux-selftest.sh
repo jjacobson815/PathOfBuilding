@@ -59,7 +59,7 @@ luajit -e 'require("utf8")' || { echo "FAIL: luajit cannot require('utf8')"; exi
 # ---- 2. Build --------------------------------------------------------------
 log "Configuring + building (build-linux/)"
 cmake -S "$REPO/app" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release
-ninja -C "$BUILD" pob-selftest pob-qt
+ninja -C "$BUILD" pob-selftest pob-qt pob-ui-test
 
 # ---- 3. Gates --------------------------------------------------------------
 export QT_QPA_PLATFORM=offscreen
@@ -76,8 +76,10 @@ run_gate() {
   [ "$rc" -eq 0 ] || status=1
   return 0
 }
+run_gate lint_qml python3 "$REPO/tools/lint_qml.py"
 run_gate pob-selftest "$BUILD/pob-selftest" "$SRC" "$RT" "$HOST"
 run_gate "pob-qt --headless" "$BUILD/pob-qt" --headless --src "$SRC" --runtime "$RT" --host "$HOST"
+(cd "$SRC" && run_gate pob-ui-test "$BUILD/pob-ui-test" -input "$REPO/app/tests/ui")
 
 if [ "$status" -eq 0 ]; then log "ALL GATES PASSED"; else log "GATE FAILED"; fi
 exit "$status"

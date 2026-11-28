@@ -80,32 +80,43 @@ FocusScope {
 
     Label {
         x: 0
-        y: 2
+        y: 3
         label: "^7Socket Groups:"
-        size: 16
+        size: theme.fontSize
     }
     Row {
         anchors.right: box.right
         y: 0
         spacing: 4
-        Button { objectName: "pob.socketGroups.newBtn"; width: 60; height: 18; label: "New"
+        Button { objectName: "pob.socketGroups.newBtn"; width: 56; height: 20; label: "New"
             onClicked: { root._call("pob_skillsNewGroup"); root.forceActiveFocus() } }
-        Button { objectName: "pob.socketGroups.delAllBtn"; width: 70; height: 18; label: "Delete All"; controlEnabled: root.count > 0
+        Button { objectName: "pob.socketGroups.delAllBtn"; width: 84; height: 20; label: "Delete All"; controlEnabled: root.count > 0
             onClicked: root.deleteAllRequested() }
-        Button { objectName: "pob.socketGroups.delBtn"; width: 60; height: 18; label: "Delete"
+        Button { objectName: "pob.socketGroups.delBtn"; width: 56; height: 20; label: "Delete"
             controlEnabled: root.hasSel && root._groups[root.selIndex] && !root._groups[root.selIndex].source
             onClicked: root.deleteAt(root.selIndex) }
     }
 
     Rectangle {
         id: box
-        y: 20
+        y: 24
         width: root.width
-        height: root.height - 20
+        height: root.height - 24
         color: theme.background
         border.width: 1
         border.color: root.activeFocus ? theme.text : theme.border
         clip: true
+
+        ColorText {
+            visible: root.count === 0
+            anchors.centerIn: parent
+            width: parent.width - 24
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            sourceText: "No socket groups — click New or press Ctrl+V to paste"
+            defaultColor: theme.muted
+            font.pixelSize: theme.fontSize
+        }
 
         ListView {
             id: list

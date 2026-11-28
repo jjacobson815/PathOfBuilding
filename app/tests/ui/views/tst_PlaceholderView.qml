@@ -51,7 +51,7 @@ Item {
 
             // AC-04: Long status text elides cleanly across resolutions
             view.saveLoadStatus = "Saved -> " + "very/long/path/".repeat(12) + "build.xml"
-            Oracle.assertMultiResLayout(tc, container, rootObj, uiTest, "PlaceholderView")
+            Oracle.assertMultiResLayout(tc, container, rootObj, uiTest, "PlaceholderView", 1100, 720, { strict: true, checkSiblingOverlap: false })
             Oracle.assertZeroWarnings(tc, uiTest, "PlaceholderView")
         }
     }

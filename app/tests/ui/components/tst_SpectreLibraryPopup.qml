@@ -63,6 +63,7 @@ Item {
             compare(dlg.gemLevel, 40)
             compare(gemEdit.text, "40")
 
+            waitForRendering(container)
             Oracle.assertMultiResLayout(tc, container, container.Window.window, uiTest, "SpectreLibraryPopup")
 
             keyClick(Qt.Key_Escape)

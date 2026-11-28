@@ -152,23 +152,22 @@ Item {
 
         Item {
             id: content
-            implicitWidth: 400 + 564 + 350      // gem Count column + 350 (legacy maxX)
+            implicitWidth: root.detail ? (groupDetail.x + 620) : (groupList.x + groupList.width + 20)
             implicitHeight: Math.max(620, groupDetail.y + 100 + (root.gems.length + 1) * 44 + 20)
 
             // --- Skill set row (SkillsTab.lua:95-106) ---
             Widgets.Label {
-                anchors.right: setSelect.left
-                anchors.rightMargin: 2
+                id: skillSetLabel
+                x: 20
                 anchors.verticalCenter: setSelect.verticalCenter
-                horizontalAlignment: Text.AlignRight
                 label: "^7Skill set:"
-                size: 16
+                size: theme.fontSize
             }
             Widgets.DropDownControl {
                 id: setSelect
                 objectName: "pob.skills.drop_set"
-                x: 76; y: 8
-                width: 210; height: 20
+                x: skillSetLabel.x + skillSetLabel.width + 6; y: 8
+                width: 380 - x - 94; height: 20
                 controlEnabled: root.sets.length > 1
                 onSelected: function (index) { root.call("pob_skillsSetActiveSet", [index + 1]) }
             }
@@ -204,6 +203,8 @@ Item {
                 id: tips
                 x: 20
                 y: groupList.y + groupList.height + 8
+                width: 360
+                spacing: 2
                 Repeater {
                     model: [
                         "^7Usage Tips:",
@@ -212,7 +213,13 @@ Item {
                         "- Ctrl + Right click to include/exclude in FullDPS calculations.",
                         "- Right click to set as the Main skill group.",
                     ]
-                    delegate: Widgets.Label { label: modelData; size: 14 }
+                    delegate: Widgets.ColorText {
+                        width: 360
+                        wrapMode: Text.WordWrap
+                        sourceText: modelData
+                        defaultColor: theme.text
+                        font.pixelSize: theme.fontSize
+                    }
                 }
             }
 
@@ -245,7 +252,7 @@ Item {
                     anchors.right: defaultLevel.left; anchors.rightMargin: 4
                     anchors.verticalCenter: defaultLevel.verticalCenter
                     horizontalAlignment: Text.AlignRight
-                    label: "^7Default gem level:"; size: 16
+                    label: "^7Default gem level:"; size: theme.fontSize
                 }
                 Widgets.DropDownControl {
                     id: defaultLevel
@@ -265,7 +272,7 @@ Item {
                     anchors.right: defaultQuality.left; anchors.rightMargin: 4
                     anchors.verticalCenter: defaultQuality.verticalCenter
                     horizontalAlignment: Text.AlignRight
-                    label: "^7Default gem quality:"; size: 16
+                    label: "^7Default gem quality:"; size: theme.fontSize
                 }
                 Widgets.EditControl {
                     id: defaultQuality
@@ -278,7 +285,7 @@ Item {
                     anchors.right: supportTypes.left; anchors.rightMargin: 4
                     anchors.verticalCenter: supportTypes.verticalCenter
                     horizontalAlignment: Text.AlignRight
-                    label: "^7Show support gems:"; size: 16
+                    label: "^7Show support gems:"; size: theme.fontSize
                 }
                 Widgets.DropDownControl {
                     id: supportTypes

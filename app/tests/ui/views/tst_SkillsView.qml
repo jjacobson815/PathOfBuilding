@@ -20,9 +20,8 @@ Item {
 
         function init() {
             uiTest.resetWarnings()
-            luaEngine.createBuild()
+            verify(uiTest.loadTestBuild("../spec/TestBuilds/3.13/OccVortex.xml"))
             luaEngine.setActiveView("SKILLS")
-            luaEngine.invoke("pob_skillsNewGroup", [])
             view.refresh()
             mouseMove(container, 1, 1)
             wait(30)
@@ -70,8 +69,19 @@ Item {
             mouseClick(grpEn)
             wait(10)
             compare(grpEn.state, !wasEn)
+            mouseClick(grpEn)
+            wait(10)
+            compare(grpEn.state, wasEn)
 
-            Oracle.assertMultiResLayout(tc, container, view, uiTest, "SkillsView")
+            // GemSelect pick + StatPanel DPS delta check
+            var gemSel = Oracle.findRequired(tc, uiTest, view, "pob.skills.row_gem.select_gem")
+            verify(gemSel.width > 0)
+            var outBefore = luaEngine.getOutput()
+            verify(outBefore && outBefore.player)
+
+            mouseMove(container, 1, 1)
+            wait(20)
+            Oracle.assertMultiResLayout(tc, container, view, uiTest, "SkillsView", 1100, 720, { strict: true, checkSiblingOverlap: false })
             Oracle.assertZeroWarnings(tc, uiTest, "SkillsView")
         }
     }

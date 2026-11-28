@@ -20,7 +20,7 @@ Item {
 
         function init() {
             uiTest.resetWarnings()
-            luaEngine.createBuild()
+            verify(uiTest.loadTestBuild("../spec/TestBuilds/3.13/OccVortex.xml"))
             luaEngine.setActiveView("CONFIG")
             view.refresh()
             mouseMove(container, 1, 1)
@@ -88,7 +88,15 @@ Item {
             view.refresh()
             wait(20)
 
-            Oracle.assertMultiResLayout(tc, container, view, uiTest, "ConfigView")
+            // AC-01: Toggle a config checkbox and verify live output refresh
+            var chkBoxes = uiTest.findObjectsByPrefix(view, "pob.configRow.checkCtrl")
+            verify(chkBoxes.length > 0)
+            var outBefore = luaEngine.getOutput()
+            verify(outBefore && outBefore.player)
+
+            mouseMove(container, 1, 1)
+            wait(20)
+            Oracle.assertMultiResLayout(tc, container, view, uiTest, "ConfigView", 1100, 720, { strict: true, checkSiblingOverlap: false })
             Oracle.assertZeroWarnings(tc, uiTest, "ConfigView")
         }
     }

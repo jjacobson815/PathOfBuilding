@@ -59,7 +59,10 @@ jobs:
       - name: Configure & Build
         run: |
           cmake -S app -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release
-          ninja -C build-win pob-selftest pob-qt
+          ninja -C build-win pob-selftest pob-qt pob-ui-test
+      - name: Run QML lint
+        shell: pwsh
+        run: python tools/lint_qml.py
       - name: Run pob-selftest
         run: |
           cd src
@@ -68,6 +71,10 @@ jobs:
         run: |
           cd src
           QT_FORCE_STDERR_LOGGING=1 ../build-win/pob-qt.exe --headless --src "$PWD" --runtime "$PWD/../runtime" --host "$PWD/../app/lua/pob_host.lua"
+      - name: Run pob-ui-test
+        run: |
+          cd src
+          QT_FORCE_STDERR_LOGGING=1 ../build-win/pob-ui-test.exe -input ../app/tests/ui
       - name: Verify visual/smoke tooling
         shell: pwsh
         run: |

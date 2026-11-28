@@ -18,19 +18,11 @@ import "../components" as Widgets
 // OptionsDialog.qml. Mechanical swap only; the ListView delegate (bound to
 // buildListModel's per-row data) is left as-is — that's real Phase 3+ work,
 // not a widget-kit adoption.
-ColumnLayout {
+Item {
     id: buildListPage
     objectName: "pob.buildlist.root"
     Layout.fillWidth: true
     Layout.fillHeight: true
-    spacing: theme.space2
-    // StackLayout sets child geometry directly and IGNORES `anchors`, so the 12px
-    // inset must be expressed via Layout margins (which StackLayout honours) —
-    // otherwise content touches the window edges.
-    Layout.leftMargin: theme.space3
-    Layout.rightMargin: theme.space3
-    Layout.topMargin: theme.space3
-    Layout.bottomMargin: theme.space3
 
     // LIST-mode selection state (local to this page).
     signal openFailed(string message)
@@ -50,141 +42,159 @@ ColumnLayout {
             buildListPage.openFailed(luaEngine.openBuildError())
     }
 
-    Widgets.Label {
-        label: "Build Library"
-        size: theme.fontSize + 6
-    }
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: theme.space3
+        spacing: theme.space2
 
-    // Toolbar: create / import / delete / rename controls.
-    RowLayout {
-        Layout.fillWidth: true
-        spacing: theme.space1
-        Widgets.Button {
-            objectName: "pob.buildlist.btn_new"
-            label: "New Build"
-            implicitWidth: 82
-            implicitHeight: 20
-            onClicked: luaEngine.createBuild()
+        Widgets.Label {
+            objectName: "pob.buildlist.header"
+            label: "Build Library"
+            size: theme.fontSize + 6
         }
-        Widgets.Button {
-            objectName: "pob.buildlist.btn_open"
-            label: "Open"
-            implicitWidth: 56
-            implicitHeight: 20
-            controlEnabled: buildListPage.listSelectedIndex >= 0 && !buildListPage.listSelectedIsFolder
-            onClicked: buildListPage.openSelected()
-        }
-        Widgets.Button {
-            objectName: "pob.buildlist.btn_del"
-            label: "Delete"
-            implicitWidth: 64
-            implicitHeight: 20
-            controlEnabled: buildListPage.listSelectedIndex >= 0
-            onClicked: {
-                if (buildListPage.listSelectedIsFolder)
-                    luaEngine.deleteFolder(buildListPage.listSelectedName)
-                else
-                    luaEngine.deleteBuild(buildListPage.listSelectedFullFileName)
-                buildListPage.listSelectedIndex = -1
-            }
-        }
-        Item { Layout.fillWidth: true }
-        TextField {
-            id: folderNameField
-            placeholderText: "New folder name"
-            Layout.preferredWidth: 130
-            font.pixelSize: theme.fontSize
-        }
-        Widgets.Button {
-            objectName: "pob.buildlist.btn_mkdir"
-            label: "New Folder"
-            implicitWidth: 110
-            implicitHeight: 20
-            controlEnabled: folderNameField.text !== ""
-            onClicked: {
-                luaEngine.createFolder(folderNameField.text)
-                folderNameField.text = ""
-            }
-        }
-        Item { Layout.preferredWidth: theme.space2 } // trailing margin (StackLayout page inset unreliable at exact width fit)
-    }
 
-    RowLayout {
-        Layout.fillWidth: true
-        spacing: theme.space1
-        TextField {
-            id: importUrlField
-            placeholderText: "Paste build share URL"
+        // Toolbar: create / import / delete / rename controls.
+        RowLayout {
             Layout.fillWidth: true
-            font.pixelSize: theme.fontSize
-        }
-        Widgets.Button {
-            objectName: "pob.buildlist.btn_import"
-            label: "Import URL"
-            implicitWidth: 110
-            implicitHeight: 20
-            controlEnabled: importUrlField.text !== ""
-            onClicked: {
-                luaEngine.importBuildFromURL(importUrlField.text)
-                importUrlField.text = ""
+            spacing: theme.space1
+            Widgets.Button {
+                objectName: "pob.buildlist.btn_new"
+                label: "New Build"
+                implicitWidth: 82
+                implicitHeight: 24
+                onClicked: luaEngine.createBuild()
             }
-        }
-        Item { Layout.preferredWidth: theme.space2 } // trailing margin (StackLayout page inset unreliable at exact width fit)
-    }
-
-    // The build/folder list, bound to the BuildListModel.
-    ListView {
-        id: buildListView
-        objectName: "pob.buildlist.view"
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        model: buildListModel
-        clip: true
-        highlight: Rectangle { color: theme.accent; radius: theme.radiusControl }
-        focus: true
-        delegate: Rectangle {
-            width: ListView.view.width
-            height: 28
-            color: (ListView.isCurrentItem ? theme.accent : (index % 2 ? theme.sideBarBg : "transparent"))
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: theme.space2
-                spacing: theme.space2
-                Text {
-                    text: model.isFolder ? ("📁 " + model.displayName) : (model.displayName || model.fileName)
-                    color: ListView.isCurrentItem ? theme.background : theme.text
-                    font.pixelSize: theme.fontSize
-                    font.bold: model.isFolder
-                    Layout.fillWidth: true
-                elide: Text.ElideRight
-                clip: true
-                }
-                Text {
-                    text: model.isFolder ? "folder"
-                         : ((model.className ? model.className : "") +
-                            (model.level ? ("  Lv" + model.level) : ""))
-                    color: ListView.isCurrentItem ? theme.background : theme.muted
-                    font.pixelSize: theme.fontSize - 1
-                elide: Text.ElideRight
-                clip: true
-                }
+            Widgets.Button {
+                objectName: "pob.buildlist.btn_open"
+                label: "Open"
+                implicitWidth: 56
+                implicitHeight: 24
+                controlEnabled: buildListPage.listSelectedIndex >= 0 && !buildListPage.listSelectedIsFolder
+                onClicked: buildListPage.openSelected()
             }
-            MouseArea {
-                anchors.fill: parent
+            Widgets.Button {
+                objectName: "pob.buildlist.btn_del"
+                label: "Delete"
+                implicitWidth: 64
+                implicitHeight: 24
+                controlEnabled: buildListPage.listSelectedIndex >= 0
                 onClicked: {
-                    buildListPage.listSelectedIndex = index
-                    buildListPage.listSelectedName = model.isFolder ? model.folderName : model.buildName
-                    buildListPage.listSelectedFullFileName = model.fullFileName
-                    buildListPage.listSelectedIsFolder = model.isFolder
-                    buildListView.currentIndex = index
+                    if (buildListPage.listSelectedIsFolder)
+                        luaEngine.deleteFolder(buildListPage.listSelectedName)
+                    else
+                        luaEngine.deleteBuild(buildListPage.listSelectedFullFileName)
+                    buildListPage.listSelectedIndex = -1
                 }
-                onDoubleClicked: buildListPage.openSelected()
+            }
+            Item { Layout.fillWidth: true }
+            Widgets.EditControl {
+                id: folderNameField
+                objectName: "pob.buildlist.input_folder"
+                placeholder: "New folder name"
+                Layout.preferredWidth: 140
+                Layout.preferredHeight: 24
+            }
+            Widgets.Button {
+                objectName: "pob.buildlist.btn_mkdir"
+                label: "New Folder"
+                implicitWidth: 110
+                implicitHeight: 24
+                controlEnabled: folderNameField.text !== ""
+                onClicked: {
+                    luaEngine.createFolder(folderNameField.text)
+                    folderNameField.text = ""
+                }
             }
         }
-    }
 
-    Widgets.Label {
-        label: "Builds/folders: " + buildListModel.count
-        defaultColor: theme.muted
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: theme.space1
+            Widgets.EditControl {
+                id: importUrlField
+                objectName: "pob.buildlist.input_import_url"
+                placeholder: "Paste build share URL"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 24
+            }
+            Widgets.Button {
+                objectName: "pob.buildlist.btn_import"
+                label: "Import URL"
+                implicitWidth: 110
+                implicitHeight: 24
+                controlEnabled: importUrlField.text !== ""
+                onClicked: {
+                    luaEngine.importBuildFromURL(importUrlField.text)
+                    importUrlField.text = ""
+                }
+            }
+        }
+
+        // The build/folder list, bound to the BuildListModel.
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: "transparent"
+            border.width: 1
+            border.color: theme.border
+
+            ListView {
+                id: buildListView
+                objectName: "pob.buildlist.view"
+                anchors.fill: parent
+                anchors.margins: 1
+                model: buildListModel
+                clip: true
+                highlight: Rectangle { color: theme.accent; radius: theme.radiusControl }
+                focus: true
+                delegate: Rectangle {
+                    width: ListView.view.width
+                    height: 28
+                    color: ListView.isCurrentItem ? "transparent" : (index % 2 ? Qt.rgba(1, 1, 1, 0.03) : "transparent")
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: theme.space2
+                        anchors.rightMargin: theme.space2
+                        spacing: theme.space2
+                        Text {
+                            text: model.isFolder ? ("📁 " + model.displayName) : (model.displayName || model.fileName)
+                            color: ListView.isCurrentItem ? theme.background : theme.text
+                            font.pixelSize: theme.fontSize
+                            font.bold: model.isFolder
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            clip: true
+                        }
+                        Text {
+                            objectName: "pob.buildlist.row_meta"
+                            text: model.isFolder ? "folder"
+                                 : ((model.ascendClassName && model.ascendClassName.length > 0 ? model.ascendClassName : (model.className ? model.className : "")) +
+                                    (model.level ? ("  Lv" + model.level) : ""))
+                            color: ListView.isCurrentItem ? theme.background : theme.muted
+                            font.pixelSize: theme.fontSize - 1
+                            elide: Text.ElideRight
+                            clip: true
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            buildListPage.listSelectedIndex = index
+                            buildListPage.listSelectedName = model.isFolder ? model.folderName : model.buildName
+                            buildListPage.listSelectedFullFileName = model.fullFileName
+                            buildListPage.listSelectedIsFolder = model.isFolder
+                            buildListView.currentIndex = index
+                        }
+                        onDoubleClicked: buildListPage.openSelected()
+                    }
+                }
+            }
+        }
+
+        Widgets.Label {
+            objectName: "pob.buildlist.count"
+            label: "Builds/folders: " + buildListModel.count
+            defaultColor: theme.muted
+        }
     }
 }

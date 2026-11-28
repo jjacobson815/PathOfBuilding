@@ -211,16 +211,20 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: bottomBar.top
-        height: visible ? 26 : 0
+        height: visible ? (bannerFlow.implicitHeight + 6) : 0
         color: theme.sideBarBg
-        RowLayout {
-            anchors.fill: parent
+        Flow {
+            id: bannerFlow
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
             anchors.leftMargin: 4
+            anchors.rightMargin: 4
             spacing: 8
-            Widgets.Label { label: treeViewRoot.versionState.bannerText || ""; size: 16 }
+            Widgets.Label { label: treeViewRoot.versionState.bannerText || ""; size: theme.fontSize }
             Widgets.Button {
-                Layout.preferredWidth: textMetrics.width(16, "VAR", label) + 20
-                Layout.preferredHeight: 20
+                width: Math.min(200, textMetrics.width(theme.fontSize, "VAR", label) + 20)
+                height: 20
                 label: treeViewRoot.versionState.convertLabel || ""
                 onClicked: {
                     var r = luaEngine.invoke("pob_convertTree", [treeViewRoot.versionState.convertTarget, false, true])
@@ -228,37 +232,48 @@ Item {
                 }
             }
             Widgets.Button {
-                Layout.preferredWidth: textMetrics.width(16, "VAR", label) + 20
-                Layout.preferredHeight: 20
+                width: Math.min(200, textMetrics.width(theme.fontSize, "VAR", label) + 20)
+                height: 20
                 label: treeViewRoot.versionState.convertAllLabel || ""
                 onClicked: convertAllPopup.open()
             }
-            Item { Layout.fillWidth: true }
         }
     }
 
     Rectangle {
         id: bottomBar
+        objectName: "pob.treeview.bottom_bar"
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         // Wraps onto extra rows when the tab is narrow (legacy TreeTab:Draw
         // moves its controls to a second line the same way).
-        height: barFlow.implicitHeight + 8
+        height: barFlow.implicitHeight + 9
         color: theme.sideBarBg
+
+        Rectangle {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: 1
+            color: theme.border
+        }
 
         Flow {
             id: barFlow
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: 4
-            spacing: 6
+            anchors.topMargin: 5
+            anchors.leftMargin: 4
+            anchors.rightMargin: 4
+            anchors.bottomMargin: 4
+            spacing: 4
 
             Widgets.DropDownControl {
                 id: specSelect
                 objectName: "pob.treeview.spec_drop"
-                width: 190
+                width: 150
                 height: 20
                 popupMinWidth: 260
                 tooltipForItem: treeViewRoot.specTooltip
@@ -278,7 +293,7 @@ Item {
             // The label draws to the LEFT of the box (legacy CheckBoxControl),
             // so the box sits at the right edge of a label-wide cell.
             Item {
-                width: compareCheck.labelWidth + 32
+                width: compareCheck.labelWidth + 20
                 height: 20
                 Widgets.CheckBox {
                     id: compareCheck
@@ -296,7 +311,7 @@ Item {
             Widgets.DropDownControl {
                 id: compareSelect
                 visible: compareCheck.state
-                width: 160
+                width: 140
                 height: 20
                 popupMinWidth: 240
                 onSelected: function (index) {
@@ -306,20 +321,22 @@ Item {
             }
 
             Widgets.Button {
-                width: 145
+                width: 132
                 height: 20
                 label: "Reset Tree/Tattoos"
                 onClicked: resetPopup.open()
             }
             Widgets.Label {
+                objectName: "pob.treeview.version_label"
                 label: "^7Version:"
-                size: 16
+                size: theme.fontSize
                 height: 20
                 verticalAlignment: Text.AlignVCenter
             }
             Widgets.DropDownControl {
                 id: versionSelect
-                width: 100
+                objectName: "pob.treeview.version_drop"
+                width: 78
                 height: 20
                 popupMinWidth: 200
                 onSelected: function (index) {
@@ -335,7 +352,7 @@ Item {
 
             Widgets.Button {
                 objectName: "pob.treeview.btn_finder"
-                width: 150
+                width: 136
                 height: 20
                 label: "Find Timeless Jewel"
                 onClicked: timelessPopup.openFresh()
@@ -344,7 +361,7 @@ Item {
             // The label draws to the LEFT of the box (legacy CheckBoxControl),
             // so the box sits at the right edge of a label-wide cell.
             Item {
-                width: heatCheck.labelWidth + 32
+                width: heatCheck.labelWidth + 20
                 height: 20
                 Widgets.CheckBox {
                     id: heatCheck

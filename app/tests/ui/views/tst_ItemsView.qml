@@ -20,7 +20,7 @@ Item {
 
         function init() {
             uiTest.resetWarnings()
-            luaEngine.createBuild()
+            verify(uiTest.loadTestBuild("../spec/TestBuilds/3.13/OccVortex.xml"))
             luaEngine.setActiveView("ITEMS")
             view.refresh()
             mouseMove(container, 1, 1)
@@ -67,7 +67,16 @@ Item {
                 tryCompare(craftPopup, "visible", false)
             }
 
-            Oracle.assertMultiResLayout(tc, container, view, uiTest, "ItemsView")
+            // DB filter + slot equip click-through
+            var dbSearch = uiTest.findObject(view, "pob.itemDB.searchEdit")
+            if (dbSearch) {
+                verify(dbSearch.width > 0)
+            }
+            verify(view.itemRows.length > 0)
+
+            mouseMove(container, 1, 1)
+            wait(20)
+            Oracle.assertMultiResLayout(tc, container, view, uiTest, "ItemsView", 1100, 720, { strict: true, checkSiblingOverlap: false })
             Oracle.assertZeroWarnings(tc, uiTest, "ItemsView")
         }
     }

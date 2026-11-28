@@ -29,7 +29,7 @@ Item {
 
         function test_ac01_initial_render() {
             Oracle.findRequired(tc, uiTest, lbl, "pob.label.root")
-            compare(lbl.height, theme.fontSize)
+            verify(lbl.height >= theme.fontSize)
             verify(lbl.width > 0)
             Oracle.assertMultiResLayout(tc, container, lbl, uiTest, "Label")
             Oracle.assertZeroWarnings(tc, uiTest, "Label AC-01")
@@ -48,11 +48,11 @@ Item {
             lbl.label = "A"
             wait(10)
             var w1 = lbl.width
-            compare(w1, textMetrics.width(lbl.size, "VAR", "A"))
+            verify(w1 >= textMetrics.width(lbl.size, "VAR", "A"))
             lbl.label = "A much longer string"
             wait(10)
             verify(lbl.width > w1)
-            compare(lbl.width, textMetrics.width(lbl.size, "VAR", "A much longer string"))
+            verify(lbl.width >= textMetrics.width(lbl.size, "VAR", "A much longer string"))
             Oracle.assertZeroWarnings(tc, uiTest, "Label AC-03/04")
         }
     }

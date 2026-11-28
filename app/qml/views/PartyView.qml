@@ -79,160 +79,176 @@ Item {
     readonly property int _leftExpandedH: Math.max(120, root.height - 460)
     readonly property int _rightExpandedH: Math.max(120, root.height - 440)
 
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: 8
-        spacing: 12
+        spacing: 8
 
-        // Left column: instructions, import controls, Auras, Warcries, Links
-        QC.ScrollView {
+        // Full-width top header: instructions + import controls
+        ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredWidth: 1
+            spacing: 6
+
+            Column {
+                Layout.fillWidth: true
+                spacing: 2
+                Repeater {
+                    model: root._descLines
+                    delegate: Widgets.ColorText {
+                        required property string modelData
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        sourceText: modelData
+                        defaultColor: theme.text
+                        font.pixelSize: 14
+                    }
+                }
+            }
+
+            Widgets.Label {
+                label: "^7Enter a build code/URL below:"
+                size: theme.fontSize
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Widgets.EditControl {
+                    id: importCodeIn
+                    objectName: "pob.party.input_import_code"
+                    Layout.preferredWidth: 360
+                    Layout.preferredHeight: 20
+                    placeholder: "Paste PoB export code or URL..."
+                    size: 14
+                    onEdited: function(t) {
+                        if (!root._syncing) {
+                            root._invoke("pob_partySetImportCode", [t])
+                        }
+                    }
+                    onCommitted: function(t) {
+                        if (!root._syncing) {
+                            const s = root._invoke("pob_partySetImportCode", [t])
+                            if (s && s.importValid && !s.importIsUrl) {
+                                root._invoke("pob_partyImport", [])
+                            }
+                        }
+                    }
+                }
+
+                Widgets.ColorText {
+                    objectName: "pob.party.label_import_detail"
+                    Layout.fillWidth: true
+                    visible: sourceText.length > 0
+                    sourceText: (root.st && root.st.importDetail) ? root.st.importDetail : ""
+                    defaultColor: theme.text
+                    font.pixelSize: theme.fontSize
+                    elide: Text.ElideRight
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Widgets.DropDownControl {
+                    id: destSelect
+                    objectName: "pob.party.drop_destination"
+                    width: 160
+                    height: 20
+                    tooltipText: "Destination for Import/clear\nCurrently Links Skills do not export"
+                    onSelected: function(i) {
+                        root._invoke("pob_partySetDestination", [i + 1])
+                    }
+                }
+
+                Widgets.Button {
+                    objectName: "pob.party.btn_import"
+                    implicitWidth: 110
+                    implicitHeight: 20
+                    label: "Import"
+                    controlEnabled: !!(root.st && root.st.importValid && !root.st.importIsUrl)
+                    tooltipText: (root.st && root.st.importIsUrl)
+                        ? "^1URL fetch requires Phase 10 network; paste a build code instead"
+                        : ""
+                    onClicked: root._invoke("pob_partyImport", [])
+                }
+
+                Item {
+                    width: appendCheck.labelWidth + 24
+                    height: 20
+                    Widgets.CheckBox {
+                        id: appendCheck
+                        objectName: "pob.party.check_append"
+                        anchors.right: parent.right
+                        height: 20
+                        label: "Append"
+                        tooltipText: "This sets the import button to append to the current party lists instead of replacing them (curses will still replace)"
+                        onToggled: function(ns) { root._invoke("pob_partySetAppend", [ns]) }
+                    }
+                }
+
+                Widgets.Button {
+                    objectName: "pob.party.btn_clear"
+                    implicitWidth: 100
+                    implicitHeight: 20
+                    label: "Clear"
+                    tooltipText: "^7Clears all the party tab imported data"
+                    onClicked: root._invoke("pob_partyClear", [])
+                }
+
+                Item {
+                    width: advCheck.labelWidth + 24
+                    height: 20
+                    Widgets.CheckBox {
+                        id: advCheck
+                        objectName: "pob.party.check_advanced"
+                        anchors.right: parent.right
+                        height: 20
+                        label: "^7Show Advanced Info"
+                        tooltipText: "This shows the advanced info like what stats each aura/curse etc are adding, as well as enables the ability to edit them without a re-export\nDo not edit any boxes unless you know what you are doing, use copy/paste or import instead"
+                        onToggled: function(ns) { root._invoke("pob_partySetShowAdvanced", [ns]) }
+                    }
+                }
+
+                Widgets.Button {
+                    objectName: "pob.party.btn_disable_effects"
+                    implicitWidth: 150
+                    implicitHeight: 20
+                    label: "Disable Party Effects"
+                    tooltipText: "^7Removes the effects of the supports, without removing the data\nUse \"Rebuild All\" to apply the effects again"
+                    onClicked: root._invoke("pob_partyDisableEffects", [])
+                }
+
+                Widgets.Button {
+                    objectName: "pob.party.btn_rebuild"
+                    implicitWidth: 110
+                    implicitHeight: 20
+                    label: "^7Rebuild All"
+                    tooltipText: "^7Reparse all the inputs in case they have been disabled or they have changed since loading the build or importing"
+                    onClicked: root._invoke("pob_partyRebuildAll", [])
+                }
+            }
+        }
+
+        // Two-column buffer grid
+        RowLayout {
+            Layout.fillWidth: true
             Layout.fillHeight: true
-            clip: true
+            spacing: 12
 
-            ColumnLayout {
-                width: Math.max(300, parent.width - 8)
-                spacing: 6
+            // Left column: Auras, Warcries, Links
+            QC.ScrollView {
+                id: leftScroll
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
 
-                Column {
-                    Layout.fillWidth: true
-                    spacing: 2
-                    Repeater {
-                        model: root._descLines
-                        delegate: Widgets.Label {
-                            required property string modelData
-                            label: modelData
-                            size: 14
-                        }
-                    }
-                }
-
-                Widgets.Label {
-                    label: "^7Enter a build code/URL below:"
-                    size: 16
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    Widgets.EditControl {
-                        id: importCodeIn
-                        objectName: "pob.party.input_import_code"
-                        Layout.preferredWidth: 328
-                        Layout.preferredHeight: 20
-                        size: 14
-                        onEdited: function(t) {
-                            if (!root._syncing) {
-                                root._invoke("pob_partySetImportCode", [t])
-                            }
-                        }
-                        onCommitted: function(t) {
-                            if (!root._syncing) {
-                                const s = root._invoke("pob_partySetImportCode", [t])
-                                if (s && s.importValid && !s.importIsUrl) {
-                                    root._invoke("pob_partyImport", [])
-                                }
-                            }
-                        }
-                    }
-
-                    Widgets.Label {
-                        objectName: "pob.party.label_import_detail"
-                        visible: label.length > 0
-                        label: (root.st && root.st.importDetail) ? root.st.importDetail : ""
-                        size: 16
-                    }
-                }
-
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    Widgets.DropDownControl {
-                        id: destSelect
-                        objectName: "pob.party.drop_destination"
-                        width: 160
-                        height: 20
-                        tooltipText: "Destination for Import/clear\nCurrently Links Skills do not export"
-                        onSelected: function(i) {
-                            root._invoke("pob_partySetDestination", [i + 1])
-                        }
-                    }
-
-                    Widgets.Button {
-                        objectName: "pob.party.btn_import"
-                        implicitWidth: 120
-                        implicitHeight: 20
-                        label: "Import"
-                        controlEnabled: !!(root.st && root.st.importValid && !root.st.importIsUrl)
-                        tooltipText: (root.st && root.st.importIsUrl)
-                            ? "^1URL fetch requires Phase 10 network; paste a build code instead"
-                            : ""
-                        onClicked: root._invoke("pob_partyImport", [])
-                    }
-
-                    Item {
-                        width: appendCheck.labelWidth + 24
-                        height: 20
-                        Widgets.CheckBox {
-                            id: appendCheck
-                            objectName: "pob.party.check_append"
-                            anchors.right: parent.right
-                            height: 20
-                            label: "Append"
-                            tooltipText: "This sets the import button to append to the current party lists instead of replacing them (curses will still replace)"
-                            onToggled: function(ns) { root._invoke("pob_partySetAppend", [ns]) }
-                        }
-                    }
-
-                    Widgets.Button {
-                        objectName: "pob.party.btn_clear"
-                        implicitWidth: 120
-                        implicitHeight: 20
-                        label: "Clear"
-                        tooltipText: "^7Clears all the party tab imported data"
-                        onClicked: root._invoke("pob_partyClear", [])
-                    }
-                }
-
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    Item {
-                        width: advCheck.labelWidth + 24
-                        height: 20
-                        Widgets.CheckBox {
-                            id: advCheck
-                            objectName: "pob.party.check_advanced"
-                            anchors.right: parent.right
-                            height: 20
-                            label: "^7Show Advanced Info"
-                            tooltipText: "This shows the advanced info like what stats each aura/curse etc are adding, as well as enables the ability to edit them without a re-export\nDo not edit any boxes unless you know what you are doing, use copy/paste or import instead"
-                            onToggled: function(ns) { root._invoke("pob_partySetShowAdvanced", [ns]) }
-                        }
-                    }
-
-                    Widgets.Button {
-                        objectName: "pob.party.btn_disable_effects"
-                        implicitWidth: 150
-                        implicitHeight: 20
-                        label: "Disable Party Effects"
-                        tooltipText: "^7Removes the effects of the supports, without removing the data\nUse \"Rebuild All\" to apply the effects again"
-                        onClicked: root._invoke("pob_partyDisableEffects", [])
-                    }
-
-                    Widgets.Button {
-                        objectName: "pob.party.btn_rebuild"
-                        implicitWidth: 120
-                        implicitHeight: 20
-                        label: "^7Rebuild All"
-                        tooltipText: "^7Reparse all the inputs in case they have been disabled or they have changed since loading the build or importing"
-                        onClicked: root._invoke("pob_partyRebuildAll", [])
-                    }
-                }
+                ColumnLayout {
+                    width: leftScroll.availableWidth
+                    spacing: 6
 
                 Widgets.PartyBufferBox {
                     id: aurasBox
@@ -272,16 +288,18 @@ Item {
             }
         }
 
-        // Right column: Party Member Stats, Enemy Conditions, Enemy Modifiers, Curses
-        QC.ScrollView {
-            Layout.fillWidth: true
-            Layout.preferredWidth: 1
-            Layout.fillHeight: true
-            clip: true
+            // Right column: Party Member Stats, Enemy Conditions, Enemy Modifiers, Curses
+            QC.ScrollView {
+                id: rightScroll
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
 
-            ColumnLayout {
-                width: Math.max(300, parent.width - 8)
-                spacing: 6
+                ColumnLayout {
+                    width: rightScroll.availableWidth
+                    spacing: 6
 
                 Widgets.PartyBufferBox {
                     id: partyStatsBox
@@ -333,4 +351,5 @@ Item {
             }
         }
     }
+}
 }
