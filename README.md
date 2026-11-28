@@ -1,14 +1,14 @@
 # Path of Building (Qt6/QML Port)
 
-**Current Release: [`v2.68.1-qt.1`](https://github.com/jjacobson815/PathOfBuilding/releases/tag/v2.68.1-qt.1)** (based on Path of Building Community `v2.68.1` calc engine)
+**Current Release: [`v2.68.1-qt.2`](https://github.com/jjacobson815/PathOfBuilding/releases/tag/v2.68.1-qt.2)** (based on Path of Building Community `v2.68.1` calc engine)
 
 A native **Qt6 / QML** desktop port of [Path of Building Community](https://github.com/PathOfBuildingCommunity/PathOfBuilding), an offline build planner for Path of Exile. It replaces the legacy SimpleGraphic runtime with a C++/Qt6 host and GPU scene-graph passive tree renderer while embedding the unchanged LuaJIT (GC64) calculation engine.
 
-## Download (`v2.68.1-qt.1`)
+## Download (`v2.68.1-qt.2`)
 
 Head over to the [GitHub Releases](https://github.com/jjacobson815/PathOfBuilding/releases) page to download:
-* **Windows Installer:** `PathOfBuilding-Qt-Setup-2.68.1-qt.1.exe` (NSIS installer with Start Menu / Desktop shortcuts and `pob://` URI handler)
-* **Windows Portable ZIP:** `PathOfBuilding-Qt-Portable-2.68.1-qt.1.zip` (self-contained folder; extract and run `pob-qt.exe`)
+* **Windows Installer:** `PathOfBuilding-Qt-Setup-2.68.1-qt.2.exe` (NSIS installer with Start Menu / Desktop shortcuts and `pob://` URI handler)
+* **Windows Portable ZIP:** `PathOfBuilding-Qt-Portable-2.68.1-qt.2.zip` (self-contained folder; extract and run `pob-qt.exe`)
 
 > **Release Notes (v1):**
 > * **Unsigned binaries:** v1 installers and executables are not yet Authenticode-signed. Windows SmartScreen may show a warning on first launch (*More info → Run anyway*).
